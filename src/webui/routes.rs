@@ -163,6 +163,68 @@ pub async fn index() -> HttpResponse {
             background: #5f5f1a;
             color: #ffff55;
         }
+
+        .stats-panel {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .stat-box {
+            background: #111;
+            border: 1px solid #333;
+            padding: 12px;
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 10px;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .stat-value {
+            color: #00ff00;
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        .stat-value.warning {
+            color: #ffff00;
+        }
+
+        .stat-value.critical {
+            color: #ff5555;
+        }
+
+        .stat-detail {
+            color: #555;
+            font-size: 10px;
+            margin-top: 4px;
+        }
+
+        .stat-bar {
+            height: 4px;
+            background: #222;
+            margin-top: 6px;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .stat-bar-fill {
+            height: 100%;
+            background: #00ff00;
+            transition: width 0.3s ease;
+        }
+
+        .stat-bar-fill.warning {
+            background: #ffff00;
+        }
+
+        .stat-bar-fill.critical {
+            background: #ff5555;
+        }
     </style>
 </head>
 <body>
@@ -171,6 +233,41 @@ pub async fn index() -> HttpResponse {
         <div class="status">
             Status: <span class="success">ACTIVE</span> |
             Connection: <span class="connection-status connecting" id="wsStatus">CONNECTING</span>
+        </div>
+    </div>
+
+    <div class="stats-panel" id="statsPanel">
+        <div class="stat-box">
+            <div class="stat-label">CPU Usage</div>
+            <div class="stat-value" id="statCpu">--</div>
+            <div class="stat-bar"><div class="stat-bar-fill" id="statCpuBar" style="width: 0%"></div></div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">Memory</div>
+            <div class="stat-value" id="statMem">--</div>
+            <div class="stat-detail" id="statMemDetail">-- / --</div>
+            <div class="stat-bar"><div class="stat-bar-fill" id="statMemBar" style="width: 0%"></div></div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">Disk</div>
+            <div class="stat-value" id="statDisk">--</div>
+            <div class="stat-detail" id="statDiskDetail">-- / --</div>
+            <div class="stat-bar"><div class="stat-bar-fill" id="statDiskBar" style="width: 0%"></div></div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">Load Average</div>
+            <div class="stat-value" id="statLoad">--</div>
+            <div class="stat-detail" id="statLoadDetail">1m / 5m / 15m</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">Network I/O</div>
+            <div class="stat-value" id="statNet">--</div>
+            <div class="stat-detail" id="statNetDetail">recv / send</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">TCP Connections</div>
+            <div class="stat-value" id="statTcp">--</div>
+            <div class="stat-detail" id="statTcpDetail">-- time_wait</div>
         </div>
     </div>
 
@@ -257,7 +354,77 @@ pub async fn index() -> HttpResponse {
             }
         }
 
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        function getStatusClass(value, warnThreshold, critThreshold) {
+            if (value >= critThreshold) return 'critical';
+            if (value >= warnThreshold) return 'warning';
+            return '';
+        }
+
+        function updateStats(event) {
+            if (event.type !== 'SystemMetrics') return;
+
+            // CPU
+            const cpuEl = document.getElementById('statCpu');
+            const cpuBar = document.getElementById('statCpuBar');
+            const cpuClass = getStatusClass(event.cpu, 70, 90);
+            cpuEl.textContent = event.cpu.toFixed(1) + '%';
+            cpuEl.className = 'stat-value ' + cpuClass;
+            cpuBar.style.width = event.cpu + '%';
+            cpuBar.className = 'stat-bar-fill ' + cpuClass;
+
+            // Memory
+            const memEl = document.getElementById('statMem');
+            const memBar = document.getElementById('statMemBar');
+            const memDetail = document.getElementById('statMemDetail');
+            const memClass = getStatusClass(event.mem, 80, 95);
+            memEl.textContent = event.mem.toFixed(1) + '%';
+            memEl.className = 'stat-value ' + memClass;
+            memBar.style.width = event.mem + '%';
+            memBar.className = 'stat-bar-fill ' + memClass;
+            memDetail.textContent = formatBytes(event.mem_used) + ' / ' + formatBytes(event.mem_total);
+
+            // Disk
+            const diskEl = document.getElementById('statDisk');
+            const diskBar = document.getElementById('statDiskBar');
+            const diskDetail = document.getElementById('statDiskDetail');
+            const diskClass = getStatusClass(event.disk, 80, 95);
+            diskEl.textContent = event.disk + '%';
+            diskEl.className = 'stat-value ' + diskClass;
+            diskBar.style.width = event.disk + '%';
+            diskBar.className = 'stat-bar-fill ' + diskClass;
+            diskDetail.textContent = formatBytes(event.disk_used) + ' / ' + formatBytes(event.disk_total);
+
+            // Load
+            const loadEl = document.getElementById('statLoad');
+            const loadDetail = document.getElementById('statLoadDetail');
+            loadEl.textContent = event.load.toFixed(2);
+            loadDetail.textContent = event.load.toFixed(2) + ' / ' + event.load5.toFixed(2) + ' / ' + event.load15.toFixed(2);
+
+            // Network
+            const netEl = document.getElementById('statNet');
+            const netDetail = document.getElementById('statNetDetail');
+            netEl.textContent = formatBytes(event.net_recv + event.net_send) + '/s';
+            netDetail.textContent = formatBytes(event.net_recv) + '/s in / ' + formatBytes(event.net_send) + '/s out';
+
+            // TCP
+            const tcpEl = document.getElementById('statTcp');
+            const tcpDetail = document.getElementById('statTcpDetail');
+            tcpEl.textContent = event.tcp;
+            tcpDetail.textContent = event.tcp_wait + ' time_wait';
+        }
+
         function addEvent(event) {
+            // Update stats panel for SystemMetrics
+            updateStats(event);
+
             // Apply client-side filter
             const filter = filterInput.value.toLowerCase();
             const eventType = eventTypeSelect.value;
@@ -293,7 +460,7 @@ pub async fn index() -> HttpResponse {
             if (eventType) {
                 const typeMap = {
                     'system': 'SystemMetrics',
-                    'process': ['ProcessLifecycle', 'ProcessSnapshot'],
+                    'process': 'ProcessLifecycle',
                     'security': 'SecurityEvent',
                     'anomaly': 'Anomaly'
                 };
@@ -363,9 +530,6 @@ pub async fn index() -> HttpResponse {
                     line += '<span class="warning">[WARNING]</span> ';
                 }
                 line += event.message;
-            } else if (type === 'ProcessSnapshot') {
-                line += '<span class="event-process">[SNAPSHOT]</span> ';
-                line += 'Top ' + event.count + ' processes recorded';
             }
 
             line += '</div>';
@@ -545,6 +709,15 @@ fn event_to_json(
                 "type": "ProcessSnapshot",
                 "timestamp": p.ts.format(&Rfc3339).ok()?,
                 "count": p.processes.len(),
+                "processes": p.processes.iter().map(|proc| serde_json::json!({
+                    "pid": proc.pid,
+                    "name": proc.name,
+                    "cmdline": proc.cmdline,
+                    "state": proc.state,
+                    "cpu_percent": proc.cpu_percent,
+                    "mem_bytes": proc.mem_bytes,
+                    "num_threads": proc.num_threads,
+                })).collect::<Vec<serde_json::Value>>(),
             }))
         }
     }

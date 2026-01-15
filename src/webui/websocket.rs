@@ -1,13 +1,18 @@
 use actix::{Actor, ActorContext, AsyncContext, StreamHandler};
 use actix_web::{web, Error, HttpRequest, HttpResponse};
 use actix_web_actors::ws;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::broadcast::EventBroadcaster;
+use crate::event::Event;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
+
+// Counter for filtering system metrics (show every 10th)
+static METRICS_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 // WebSocket actor that streams events to connected clients
 pub struct WsSession {
@@ -47,6 +52,19 @@ impl WsSession {
             while count < 10 {
                 match rx.try_recv() {
                     Ok(event) => {
+                        // Skip ProcessSnapshot events (don't show top 10 processes)
+                        if matches!(event, Event::ProcessSnapshot(_)) {
+                            continue;
+                        }
+
+                        // Only show every 10th SystemMetrics event
+                        if matches!(event, Event::SystemMetrics(_)) {
+                            let counter = METRICS_COUNTER.fetch_add(1, Ordering::Relaxed) + 1;
+                            if counter % 10 != 0 {
+                                continue;
+                            }
+                        }
+
                         // Serialize event to JSON and send to client
                         match serde_json::to_string(&event_to_json(&event)) {
                             Ok(json) => ctx.text(json),
@@ -139,14 +157,35 @@ fn event_to_json(event: &crate::event::Event) -> serde_json::Value {
                 0.0
             };
 
+            let swap_pct = if m.swap_total_bytes > 0 {
+                (m.swap_used_bytes as f64 / m.swap_total_bytes as f64) * 100.0
+            } else {
+                0.0
+            };
+
             serde_json::json!({
                 "type": "SystemMetrics",
                 "timestamp": m.ts.format(&Rfc3339).unwrap_or_default(),
                 "cpu": m.cpu_usage_percent,
                 "mem": mem_pct,
+                "mem_used": m.mem_used_bytes,
+                "mem_total": m.mem_total_bytes,
+                "swap": swap_pct,
+                "swap_used": m.swap_used_bytes,
+                "swap_total": m.swap_total_bytes,
                 "load": m.load_avg_1m,
+                "load5": m.load_avg_5m,
+                "load15": m.load_avg_15m,
                 "disk": disk_pct.round(),
+                "disk_used": m.disk_used_bytes,
+                "disk_total": m.disk_total_bytes,
+                "disk_read": m.disk_read_bytes_per_sec,
+                "disk_write": m.disk_write_bytes_per_sec,
+                "net_recv": m.net_recv_bytes_per_sec,
+                "net_send": m.net_send_bytes_per_sec,
                 "tcp": m.tcp_connections,
+                "tcp_wait": m.tcp_time_wait,
+                "ctxt": m.context_switches_per_sec,
             })
         }
         Event::ProcessLifecycle(p) => serde_json::json!({
@@ -175,6 +214,15 @@ fn event_to_json(event: &crate::event::Event) -> serde_json::Value {
             "type": "ProcessSnapshot",
             "timestamp": p.ts.format(&Rfc3339).unwrap_or_default(),
             "count": p.processes.len(),
+            "processes": p.processes.iter().map(|proc| serde_json::json!({
+                "pid": proc.pid,
+                "name": proc.name,
+                "cmdline": proc.cmdline,
+                "state": proc.state,
+                "cpu_percent": proc.cpu_percent,
+                "mem_bytes": proc.mem_bytes,
+                "num_threads": proc.num_threads,
+            })).collect::<Vec<_>>(),
         }),
     }
 }
