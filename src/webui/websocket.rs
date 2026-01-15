@@ -114,9 +114,9 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsSession {
 pub async fn ws_handler(
     req: HttpRequest,
     stream: web::Payload,
-    broadcaster: web::Data<Arc<EventBroadcaster>>,
+    broadcaster: web::Data<EventBroadcaster>,
 ) -> Result<HttpResponse, Error> {
-    let session = WsSession::new(broadcaster.get_ref().clone());
+    let session = WsSession::new(Arc::new(broadcaster.get_ref().clone()));
     ws::start(session, &req, stream)
 }
 

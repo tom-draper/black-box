@@ -16,9 +16,15 @@ pub async fn start_server(
     config: Config,
 ) -> Result<()> {
     let reader = web::Data::new(LogReader::new(data_dir));
+    let broadcaster_clone = (*broadcaster).clone();
     let broadcaster_data = web::Data::from(broadcaster);
     let config_data = web::Data::new(config.clone());
     let start_time = web::Data::new(Instant::now());
+
+    // Spawn the broadcaster bridge (crossbeam -> tokio broadcast)
+    tokio::spawn(async move {
+        broadcaster_clone.run().await;
+    });
 
     println!("Starting web server on 0.0.0.0:{}", port);
 
@@ -36,6 +42,7 @@ pub async fn start_server(
             .route("/health", web::get().to(health::health_check))
     })
     .bind(("0.0.0.0", port))?
+    // .bind(("127.0.0.1", port))?
     .run()
     .await
     .map_err(|e| anyhow::anyhow!("Server error: {}", e))
