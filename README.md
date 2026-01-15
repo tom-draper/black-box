@@ -2,13 +2,17 @@
 
 A lightweight, always-on forensics recorder for Linux servers. Captures system metrics, process events, and security events to help with post-incident analysis.
 
+Platform: Linux only (requires `/proc` filesystem)
+
 ## Features
 
 - Always-on monitoring with minimal overhead
 - Fixed disk usage (100MB ring buffer)
-- No configuration required
+- Configuration via `config.toml`
 - Single static binary
-- Terminal-like web UI for time-rewind analysis
+- Real-time WebSocket streaming with terminal-like web UI
+- HTTP Basic Authentication for security
+- Health monitoring endpoint
 
 ## What It Captures
 
@@ -48,6 +52,16 @@ A lightweight, always-on forensics recorder for Linux servers. Captures system m
 
 ## Usage
 
+### First Run
+
+On first run, Black Box will create a `config.toml` file with default credentials:
+
+```bash
+./black-box
+```
+
+IMPORTANT: Change the default password immediately! See Configuration section below.
+
 ### Start Black Box (Recorder + Web UI)
 ```bash
 ./black-box
@@ -55,7 +69,8 @@ A lightweight, always-on forensics recorder for Linux servers. Captures system m
 
 This starts:
 - Data recording to `./data/` directory
-- Web UI at `http://localhost:8080` (after 2 second startup delay)
+- Web UI at `http://localhost:8080` with authentication (default: admin/admin)
+- Health endpoint at `http://localhost:8080/health`
 
 ### Command Line Options
 ```bash
@@ -71,10 +86,50 @@ This starts:
 ```
 
 ### Web UI Features
-- Real-time event stream with auto-refresh
+- **Real-time WebSocket streaming** - Events pushed to browser instantly
+- **HTTP Basic Authentication** - Secure access with username/password
 - Search/filter events
 - Filter by event type (System/Process/Security/Anomalies)
 - Terminal-like aesthetic with color coding
+- Auto-reconnect on disconnect
+
+## Configuration
+
+Black Box uses a `config.toml` file for settings. On first run, it creates a default config:
+
+```toml
+[auth]
+enabled = true
+username = "admin"
+password_hash = "$2b$12$..."  # bcrypt hash of "admin"
+
+[server]
+port = 8080
+data_dir = "./data"
+```
+
+### Changing the Password
+
+**Option 1: Generate hash manually**
+```bash
+# Use Python with bcrypt
+python3 -c "import bcrypt; print(bcrypt.hashpw(b'your-password', bcrypt.gensalt()).decode())"
+```
+
+Then update the `password_hash` in `config.toml`.
+
+**Option 2: Edit config and let bcrypt do it**
+
+The password is hashed using bcrypt with cost factor 12 for security. Never store plaintext passwords in the config file.
+
+### Disabling Authentication
+
+To disable authentication (not recommended for production):
+
+```toml
+[auth]
+enabled = false
+```
 
 ## Building
 
@@ -82,7 +137,17 @@ This starts:
 cargo build --release
 ```
 
-Binary will be at `target/release/black-box` (single file, ~1.4MB).
+Binary will be at `target/release/black-box` (single file, ~3.5MB).
+
+## Testing
+
+```bash
+# Run all tests
+cargo test
+
+# Run tests with output
+cargo test -- --nocapture
+```
 
 ## Permissions
 
@@ -90,12 +155,60 @@ Most features work as regular user. For full security monitoring:
 - Add user to `adm` group for auth log access: `sudo usermod -aG adm username`
 - Or run with sudo (not recommended for continuous operation)
 
+## API Endpoints
+
+### `/health` - Health Check
+Returns JSON with system status, uptime, event count, and storage usage.
+
+```bash
+curl -u admin:admin http://localhost:8080/health
+```
+
+Response:
+```json
+{
+  "status": "healthy",
+  "uptime_seconds": 3600,
+  "event_count": 15000,
+  "storage_bytes_used": 52428800,
+  "storage_bytes_max": 104857600,
+  "storage_percent": "50.00",
+  "timestamp": "2026-01-15T10:30:00Z"
+}
+```
+
+### `/api/events` - REST API
+Get recent events (last 1000) with optional filtering.
+
+```bash
+# All events
+curl -u admin:admin http://localhost:8080/api/events
+
+# Filter by type
+curl -u admin:admin "http://localhost:8080/api/events?type=anomaly"
+
+# Search events
+curl -u admin:admin "http://localhost:8080/api/events?filter=ssh"
+```
+
+### `/ws` - WebSocket Stream
+Real-time event streaming via WebSocket. Requires Basic Auth in the connection request.
+
+```javascript
+const ws = new WebSocket('ws://localhost:8080/ws');
+ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    console.log('Event:', data);
+};
+```
+
 ## Architecture
 
-- **Recorder**: Collects events and writes to binary log files
+- **Recorder**: Collects events and writes to binary log files (synchronous loop)
 - **Storage**: Segmented ring buffer (8MB segments, max 12 segments = ~100MB)
 - **Reader**: Deserializes binary log files
-- **Web UI**: HTTP server with JSON API and terminal UI
+- **Broadcaster**: Bridges sync collector to async WebSocket clients
+- **Web Server**: Actix-web async HTTP server with WebSocket support and Basic Auth
 
 ## Binary Format
 
@@ -119,17 +232,23 @@ Segment file:
 
 ## Example Incident Response
 
-Server crashed at 3am. You have the black box running.
+Server crashed at 3am. You have Black Box running.
 
-1. Open web UI: `./black-box ui`
-2. Search for time range around incident
-3. Look for anomalies flagged automatically
-4. Check what processes were running
-5. Review security events (SSH logins, sudo usage)
-6. See exact resource usage before crash
+1. Open web UI: `http://localhost:8080` (login with your credentials)
+2. WebSocket streams events in real-time
+3. Use filters to search time range around incident
+4. Look for anomalies flagged automatically (red highlights)
+5. Check what processes were running (Process events)
+6. Review security events (SSH logins, sudo usage)
+7. See exact resource usage before crash (System metrics)
+8. Export data via `/api/events` endpoint for external analysis
 
 All data is timestamped and correlated - you can "rewind" to any point in time.
 
-## License
+## Security Considerations
 
-MIT
+- **Authentication**: HTTP Basic Auth protects all endpoints including WebSocket
+- **Passwords**: Stored as bcrypt hashes (cost factor 12)
+- **Production**: Use HTTPS via reverse proxy (nginx, Caddy) for TLS encryption
+- **Network**: Bind to localhost only if running on same machine
+- **Credentials**: Never commit `config.toml` with real passwords to version control

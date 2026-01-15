@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Event {
     SystemMetrics(SystemMetrics),
     ProcessLifecycle(ProcessLifecycle),
@@ -11,7 +11,7 @@ pub enum Event {
 }
 
 // System-wide metrics collected each interval
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemMetrics {
     pub ts: OffsetDateTime,
     pub cpu_usage_percent: f32,
@@ -34,7 +34,7 @@ pub struct SystemMetrics {
 }
 
 // Process lifecycle events (start/exit)
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessLifecycle {
     pub ts: OffsetDateTime,
     pub pid: u32,
@@ -42,7 +42,7 @@ pub struct ProcessLifecycle {
     pub kind: ProcessLifecycleKind,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProcessLifecycleKind {
     Started,
     Exited,
@@ -51,13 +51,13 @@ pub enum ProcessLifecycleKind {
 }
 
 // Snapshot of interesting processes (top CPU/memory consumers)
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessSnapshot {
     pub ts: OffsetDateTime,
     pub processes: Vec<ProcessInfo>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessInfo {
     pub pid: u32,
     pub name: String,
@@ -72,7 +72,7 @@ pub struct ProcessInfo {
 }
 
 // Security events
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityEvent {
     pub ts: OffsetDateTime,
     pub kind: SecurityEventKind,
@@ -81,7 +81,7 @@ pub struct SecurityEvent {
     pub message: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SecurityEventKind {
     SshLoginSuccess,
     SshLoginFailure,
@@ -92,7 +92,7 @@ pub enum SecurityEventKind {
     PortScanDetected,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Anomaly {
     pub ts: OffsetDateTime,
     pub severity: AnomalySeverity,
@@ -100,14 +100,14 @@ pub struct Anomaly {
     pub message: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum AnomalySeverity {
     Info,
     Warning,
     Critical,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AnomalyKind {
     CpuSpike,
     MemorySpike,

@@ -1,0 +1,8 @@
+[auth]
+enabled = true
+username = "admin"
+password_hash = "$2b$12$ko2zId2egP3RyuDMXrq0CudI0hdJTwOHMJEii9g7umL2htdL3lecS"
+
+[server]
+port = 8080
+data_dir = "./data"

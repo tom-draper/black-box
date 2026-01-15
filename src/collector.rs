@@ -869,3 +869,231 @@ pub fn get_top_processes(n: usize) -> Result<Vec<ProcessDetail>> {
 
     Ok(processes)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_auth_log_line_ssh_success_password() {
+        let line = "Jan 15 10:23:45 server sshd[1234]: Accepted password for ubuntu from 192.168.1.100 port 54321 ssh2";
+        let entry = parse_auth_log_line(line).unwrap();
+
+        assert_eq!(entry.event_type, AuthEventType::SshSuccess);
+        assert_eq!(entry.user, "ubuntu");
+        assert_eq!(entry.source_ip, Some("192.168.1.100".to_string()));
+        assert!(entry.message.contains("Accepted password"));
+    }
+
+    #[test]
+    fn test_parse_auth_log_line_ssh_success_publickey() {
+        let line = "Jan 15 10:23:45 server sshd[1234]: Accepted publickey for admin from 10.0.0.5 port 22222 ssh2";
+        let entry = parse_auth_log_line(line).unwrap();
+
+        assert_eq!(entry.event_type, AuthEventType::SshSuccess);
+        assert_eq!(entry.user, "admin");
+        assert_eq!(entry.source_ip, Some("10.0.0.5".to_string()));
+    }
+
+    #[test]
+    fn test_parse_auth_log_line_ssh_failure() {
+        let line = "Jan 15 10:23:45 server sshd[1234]: Failed password for testuser from 1.2.3.4 port 12345 ssh2";
+        let entry = parse_auth_log_line(line).unwrap();
+
+        assert_eq!(entry.event_type, AuthEventType::SshFailure);
+        assert_eq!(entry.user, "testuser");
+        assert_eq!(entry.source_ip, Some("1.2.3.4".to_string()));
+    }
+
+    #[test]
+    fn test_parse_auth_log_line_invalid_user() {
+        let line = "Jan 15 10:23:45 server sshd[1234]: Invalid user testuser from 5.6.7.8";
+        let entry = parse_auth_log_line(line).unwrap();
+
+        assert_eq!(entry.event_type, AuthEventType::InvalidUser);
+        assert_eq!(entry.user, "testuser");
+        assert_eq!(entry.source_ip, Some("5.6.7.8".to_string()));
+    }
+
+    #[test]
+    fn test_parse_auth_log_line_sudo_command() {
+        let line = "Jan 15 10:23:45 server sudo: ubuntu : COMMAND=/usr/bin/apt update";
+        let entry = parse_auth_log_line(line).unwrap();
+
+        assert_eq!(entry.event_type, AuthEventType::SudoCommand);
+        assert_eq!(entry.user, "ubuntu");
+        assert_eq!(entry.source_ip, None);
+    }
+
+    #[test]
+    fn test_parse_auth_log_line_sudo_session() {
+        let line = "Jan 15 10:23:45 server sudo: ubuntu : session opened for user root";
+        let entry = parse_auth_log_line(line).unwrap();
+
+        assert_eq!(entry.event_type, AuthEventType::SudoCommand);
+        assert_eq!(entry.user, "ubuntu");
+    }
+
+    #[test]
+    fn test_parse_auth_log_line_invalid() {
+        let line = "Jan 15 10:23:45 server kernel: some random message";
+        let entry = parse_auth_log_line(line);
+
+        assert!(entry.is_none());
+    }
+
+    #[test]
+    fn test_parse_auth_log_line_malformed() {
+        let line = "invalid log line";
+        let entry = parse_auth_log_line(line);
+
+        assert!(entry.is_none());
+    }
+
+    #[test]
+    fn test_parse_tcp_line_valid() {
+        // Format: local_address:port remote_address:port state...
+        // 0100007F = 127.0.0.1 in hex (reversed bytes)
+        // 1F90 = 8080 in hex
+        let line = "   1: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 12345 1 0000000000000000 100 0 0 10 0";
+        let result = parse_tcp_line(line);
+
+        assert!(result.is_some());
+        let (ip, port) = result.unwrap();
+        assert_eq!(ip, "0.0.0.0");
+        assert_eq!(port, 0);
+    }
+
+    #[test]
+    fn test_parse_tcp_line_specific_ip() {
+        // C0A80164 = 192.168.1.100 in hex (reversed bytes: 100.1.168.192 -> reverse each byte)
+        let line = "   1: 0100007F:1F90 C0A80164:01BB 01 00000000:00000000 00:00000000 00000000     0        0 12345 1 0000000000000000 100 0 0 10 0";
+        let result = parse_tcp_line(line);
+
+        assert!(result.is_some());
+        let (ip, port) = result.unwrap();
+        // The function parses in reverse byte order
+        assert_eq!(ip, "100.1.168.192");
+        assert_eq!(port, 443); // 01BB = 443
+    }
+
+    #[test]
+    fn test_parse_tcp_line_invalid() {
+        let line = "invalid tcp line";
+        let result = parse_tcp_line(line);
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_tcp_line_insufficient_fields() {
+        let line = "   1: 0100007F:1F90";
+        let result = parse_tcp_line(line);
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_after_found() {
+        let text = "foo bar baz qux";
+        let result = extract_after(text, "bar ");
+
+        assert_eq!(result, Some("baz".to_string()));
+    }
+
+    #[test]
+    fn test_extract_after_not_found() {
+        let text = "foo bar baz";
+        let result = extract_after(text, "missing ");
+
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_extract_after_at_end() {
+        let text = "foo bar";
+        let result = extract_after(text, "bar");
+
+        assert_eq!(result, Some("".to_string()));
+    }
+
+    #[test]
+    fn test_cpu_usage_calculation() {
+        let prev = CpuStats {
+            user: 1000,
+            nice: 0,
+            system: 500,
+            idle: 8500,
+            iowait: 0,
+            irq: 0,
+            softirq: 0,
+            steal: 0,
+        };
+
+        let current = CpuStats {
+            user: 1500,
+            nice: 0,
+            system: 600,
+            idle: 8900,
+            iowait: 0,
+            irq: 0,
+            softirq: 0,
+            steal: 0,
+        };
+
+        let usage = current.usage_percent(&prev);
+        // Total delta: 11000 - 10000 = 1000
+        // Idle delta: 8900 - 8500 = 400
+        // Busy delta: 1000 - 400 = 600
+        // Usage: 600 / 1000 * 100 = 60%
+        assert!((usage - 60.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_disk_stats_bytes_per_sec() {
+        let prev = DiskStats {
+            read_bytes: 1000000,
+            write_bytes: 2000000,
+        };
+
+        let current = DiskStats {
+            read_bytes: 1500000,
+            write_bytes: 2800000,
+        };
+
+        let (read_per_sec, write_per_sec) = current.bytes_per_sec(&prev, 1.0);
+        assert_eq!(read_per_sec, 500000);
+        assert_eq!(write_per_sec, 800000);
+    }
+
+    #[test]
+    fn test_memory_stats_used_calculation() {
+        let stats = MemoryStats {
+            total_kb: 16000000,
+            free_kb: 2000000,
+            available_kb: 10000000,
+            buffers_kb: 1000000,
+            cached_kb: 3000000,
+        };
+
+        // Used = total - (free + buffers + cached)
+        // = 16000000 - (2000000 + 1000000 + 3000000) = 10000000
+        assert_eq!(stats.used_kb(), 10000000);
+    }
+
+    #[test]
+    fn test_memory_stats_usage_percent() {
+        let stats = MemoryStats {
+            total_kb: 10000,
+            free_kb: 2000,
+            available_kb: 5000,
+            buffers_kb: 1000,
+            cached_kb: 2000,
+        };
+
+        // Used = 10000 - (2000 + 1000 + 2000) = 5000
+        // Usage = 5000 / 10000 * 100 = 50%
+        let usage = stats.usage_percent();
+        assert!((usage - 50.0).abs() < 0.01);
+    }
+}

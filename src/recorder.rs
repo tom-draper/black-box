@@ -7,6 +7,7 @@ use std::{
 use anyhow::Result;
 use time::OffsetDateTime;
 
+use crate::broadcast::SyncSender;
 use crate::event::Event;
 use crate::storage::{RecordHeader, MAGIC};
 
@@ -20,14 +21,23 @@ pub struct Recorder {
     max_segments: usize,
     file: File,
     offset: u64,
+    broadcast_tx: Option<SyncSender>,
 }
 
 impl Recorder {
     pub fn open(dir: impl AsRef<Path>) -> Result<Self> {
-        Self::open_with_config(dir, DEFAULT_MAX_SEGMENTS)
+        Self::open_with_config(dir, DEFAULT_MAX_SEGMENTS, None)
     }
 
-    pub fn open_with_config(dir: impl AsRef<Path>, max_segments: usize) -> Result<Self> {
+    pub fn open_with_broadcast(dir: impl AsRef<Path>, broadcast_tx: SyncSender) -> Result<Self> {
+        Self::open_with_config(dir, DEFAULT_MAX_SEGMENTS, Some(broadcast_tx))
+    }
+
+    pub fn open_with_config(
+        dir: impl AsRef<Path>,
+        max_segments: usize,
+        broadcast_tx: Option<SyncSender>,
+    ) -> Result<Self> {
         let dir = dir.as_ref();
         std::fs::create_dir_all(dir)?;
 
@@ -55,6 +65,7 @@ impl Recorder {
             max_segments,
             file,
             offset,
+            broadcast_tx,
         })
     }
 
@@ -103,6 +114,11 @@ impl Recorder {
         self.file.flush()?;
 
         self.offset += record_len as u64;
+
+        // Broadcast event to WebSocket clients (non-blocking)
+        if let Some(tx) = &self.broadcast_tx {
+            let _ = tx.try_send(event.clone());
+        }
 
         Ok(())
     }

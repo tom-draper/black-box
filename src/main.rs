@@ -1,4 +1,6 @@
+mod broadcast;
 mod collector;
+mod config;
 mod event;
 mod reader;
 mod recorder;
@@ -7,11 +9,17 @@ mod webui;
 
 use anyhow::Result;
 use std::{
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     thread,
     time::Duration,
 };
 use time::OffsetDateTime;
+
+use broadcast::EventBroadcaster;
+use config::Config;
 
 use collector::{
     diff_processes, get_top_processes, read_context_switches, read_cpu_stats, read_disk_space,
@@ -37,39 +45,69 @@ fn main() -> Result<()> {
     // Check for --no-ui or --headless flag
     let disable_ui = args.iter().any(|arg| arg == "--no-ui" || arg == "--headless");
 
-    // Parse port (default 8080)
-    let port = args.iter()
+    // Load configuration
+    let config = Config::load()?;
+
+    // Parse port (command line overrides config)
+    let port = args
+        .iter()
         .position(|arg| arg == "--port")
         .and_then(|idx| args.get(idx + 1))
         .and_then(|p| p.parse().ok())
-        .unwrap_or(8080);
+        .unwrap_or(config.server.port);
 
-    // Start web UI in background thread (unless disabled)
+    let data_dir = config.server.data_dir.clone();
+
+    // Create broadcast channel for event streaming
+    let (broadcast_tx, broadcaster) = EventBroadcaster::new();
+
+    // Start async web server (unless disabled)
     if !disable_ui {
-        let data_dir = "./data".to_string();
+        let data_dir_clone = data_dir.clone();
+        let config_clone = config.clone();
+        let broadcaster = Arc::new(broadcaster);
+
+        // Spawn Tokio runtime in background thread
         std::thread::spawn(move || {
             // Give recorder a moment to start
             std::thread::sleep(std::time::Duration::from_secs(2));
 
-            if let Err(e) = webui::start_server(data_dir, port) {
-                eprintln!("Web UI failed to start: {}", e);
-            }
+            // Create Tokio runtime
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt,
+                Err(e) => {
+                    eprintln!("Failed to create Tokio runtime: {}", e);
+                    return;
+                }
+            };
+
+            // Run async web server
+            rt.block_on(async {
+                if let Err(e) =
+                    webui::start_server(data_dir_clone, port, broadcaster, config_clone).await
+                {
+                    eprintln!("Web UI failed to start: {}", e);
+                }
+            });
         });
     }
 
-    // Run recorder in main thread
-    let mut recorder = Recorder::open("./data")?;
+    // Run recorder in main thread with broadcasting
+    let mut recorder = Recorder::open_with_broadcast(&data_dir, broadcast_tx)?;
 
-    println!("===============================================================");
-    println!("       Black Box - Server Forensics Recorder                  ");
-    println!("===============================================================");
+    println!("Black Box");
     println!();
-    println!("Data directory: ./data");
+    println!("Data directory: {}", data_dir);
     println!("Max storage: ~100MB (ring buffer)");
     println!("Collection interval: {}s", COLLECTION_INTERVAL_SECS);
     println!("Tracking: CPU, Memory, Swap, Disk, Network, TCP, Load, Processes");
     if !disable_ui {
         println!("Web UI: http://localhost:{}", port);
+        if config.auth.enabled {
+            println!("Auth: Enabled (username: {})", config.auth.username);
+        } else {
+            println!("Auth: Disabled");
+        }
     } else {
         println!("Web UI: Disabled");
     }
