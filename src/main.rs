@@ -1,7 +1,9 @@
 mod collector;
 mod event;
+mod reader;
 mod recorder;
 mod storage;
+mod webui;
 
 use anyhow::Result;
 use std::{
@@ -30,6 +32,32 @@ const PROCESS_SNAPSHOT_INTERVAL: u64 = 5; // Snapshot top processes every 5 seco
 const SECURITY_CHECK_INTERVAL: u64 = 5; // Check security events every 5 seconds
 
 fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+
+    // Check for --no-ui or --headless flag
+    let disable_ui = args.iter().any(|arg| arg == "--no-ui" || arg == "--headless");
+
+    // Parse port (default 8080)
+    let port = args.iter()
+        .position(|arg| arg == "--port")
+        .and_then(|idx| args.get(idx + 1))
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(8080);
+
+    // Start web UI in background thread (unless disabled)
+    if !disable_ui {
+        let data_dir = "./data".to_string();
+        std::thread::spawn(move || {
+            // Give recorder a moment to start
+            std::thread::sleep(std::time::Duration::from_secs(2));
+
+            if let Err(e) = webui::start_server(data_dir, port) {
+                eprintln!("Web UI failed to start: {}", e);
+            }
+        });
+    }
+
+    // Run recorder in main thread
     let mut recorder = Recorder::open("./data")?;
 
     println!("===============================================================");
@@ -40,6 +68,11 @@ fn main() -> Result<()> {
     println!("Max storage: ~100MB (ring buffer)");
     println!("Collection interval: {}s", COLLECTION_INTERVAL_SECS);
     println!("Tracking: CPU, Memory, Swap, Disk, Network, TCP, Load, Processes");
+    if !disable_ui {
+        println!("Web UI: http://localhost:{}", port);
+    } else {
+        println!("Web UI: Disabled");
+    }
     println!();
     println!("Press Ctrl+C to stop\n");
 
