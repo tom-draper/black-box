@@ -6,6 +6,7 @@ pub enum Event {
     SystemMetrics(SystemMetrics),
     ProcessLifecycle(ProcessLifecycle),
     ProcessSnapshot(ProcessSnapshot),
+    SecurityEvent(SecurityEvent),
     Anomaly(Anomaly),
 }
 
@@ -70,6 +71,27 @@ pub struct ProcessInfo {
     pub num_threads: u32,
 }
 
+// Security events
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SecurityEvent {
+    pub ts: OffsetDateTime,
+    pub kind: SecurityEventKind,
+    pub user: String,
+    pub source_ip: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum SecurityEventKind {
+    SshLoginSuccess,
+    SshLoginFailure,
+    UserLogin,
+    UserLogout,
+    SudoCommand,
+    FailedAuth,
+    PortScanDetected,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Anomaly {
     pub ts: OffsetDateTime,
@@ -78,7 +100,7 @@ pub struct Anomaly {
     pub message: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub enum AnomalySeverity {
     Info,
     Warning,
@@ -98,5 +120,8 @@ pub enum AnomalyKind {
     ConnectionExhaustion,
     FdExhaustion,
     ThreadLeak,
+    BruteForceAttempt,
+    PortScanActivity,
+    UnauthorizedAccess,
 }
 

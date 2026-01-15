@@ -13,18 +13,21 @@ use time::OffsetDateTime;
 
 use collector::{
     diff_processes, get_top_processes, read_context_switches, read_cpu_stats, read_disk_space,
-    read_disk_stats, read_load_avg, read_memory_stats, read_network_stats, read_processes,
-    read_swap_stats, read_tcp_stats,
+    read_disk_stats, read_load_avg, read_logged_in_users, read_memory_stats, read_network_stats,
+    read_processes, read_swap_stats, read_tcp_stats, tail_auth_log, AuthEventType,
+    ConnectionTracker,
 };
 use event::{
     Anomaly, AnomalyKind, AnomalySeverity, Event, ProcessInfo, ProcessLifecycle,
-    ProcessLifecycleKind, ProcessSnapshot as EventProcessSnapshot, SystemMetrics,
+    ProcessLifecycleKind, ProcessSnapshot as EventProcessSnapshot, SecurityEvent,
+    SecurityEventKind, SystemMetrics,
 };
 use recorder::Recorder;
 
 const COLLECTION_INTERVAL_SECS: u64 = 1;
 const TOP_PROCESSES_COUNT: usize = 10;
 const PROCESS_SNAPSHOT_INTERVAL: u64 = 5; // Snapshot top processes every 5 seconds
+const SECURITY_CHECK_INTERVAL: u64 = 5; // Check security events every 5 seconds
 
 fn main() -> Result<()> {
     let mut recorder = Recorder::open("./data")?;
@@ -46,6 +49,16 @@ fn main() -> Result<()> {
     let mut prev_network = read_network_stats()?;
     let mut prev_ctxt = read_context_switches()?;
     let mut prev_processes = read_processes()?;
+
+    // Initialize security monitoring
+    let mut auth_log_position = 0u64;
+    let mut connection_tracker = ConnectionTracker::new();
+    let mut prev_logged_in_users: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+
+    // Track failed login attempts for brute force detection
+    let mut failed_logins: std::collections::HashMap<String, Vec<std::time::Instant>> =
+        std::collections::HashMap::new();
 
     // Thresholds for anomaly detection
     let cpu_spike_threshold = 80.0;
@@ -237,6 +250,166 @@ fn main() -> Result<()> {
         prev_network = network_stats;
         prev_ctxt = ctxt_stats;
         prev_processes = current_processes;
+
+        // Security monitoring (every N seconds to reduce overhead)
+        static SECURITY_COUNTER: AtomicU64 = AtomicU64::new(0);
+        let security_count = SECURITY_COUNTER.fetch_add(1, Ordering::Relaxed) + 1;
+
+        if security_count % SECURITY_CHECK_INTERVAL == 0 {
+            // Check logged-in users
+            if let Ok(current_users) = read_logged_in_users() {
+                let mut current_user_map = std::collections::HashMap::new();
+                for user in &current_users {
+                    let key = format!("{}@{}", user.username, user.terminal);
+                    let value = user
+                        .remote_host
+                        .clone()
+                        .unwrap_or_else(|| "local".to_string());
+                    current_user_map.insert(key.clone(), value.clone());
+
+                    // Check for new logins
+                    if !prev_logged_in_users.contains_key(&key) {
+                        let event = SecurityEvent {
+                            ts: OffsetDateTime::now_utc(),
+                            kind: SecurityEventKind::UserLogin,
+                            user: user.username.clone(),
+                            source_ip: user.remote_host.clone(),
+                            message: format!(
+                                "User {} logged in on {} from {}",
+                                user.username,
+                                user.terminal,
+                                user.remote_host.as_deref().unwrap_or("local")
+                            ),
+                        };
+                        recorder.append(&Event::SecurityEvent(event))?;
+                        println!(
+                            "  [SEC] User login: {} on {} from {}",
+                            user.username,
+                            user.terminal,
+                            user.remote_host.as_deref().unwrap_or("local")
+                        );
+                    }
+                }
+
+                // Check for logouts
+                for (key, host) in &prev_logged_in_users {
+                    if !current_user_map.contains_key(key) {
+                        let username = key.split('@').next().unwrap_or("unknown");
+                        let event = SecurityEvent {
+                            ts: OffsetDateTime::now_utc(),
+                            kind: SecurityEventKind::UserLogout,
+                            user: username.to_string(),
+                            source_ip: Some(host.clone()),
+                            message: format!("User {} logged out from {}", username, host),
+                        };
+                        recorder.append(&Event::SecurityEvent(event))?;
+                    }
+                }
+
+                prev_logged_in_users = current_user_map;
+            }
+
+            // Check auth log for SSH/sudo events
+            if let Ok(auth_entries) = tail_auth_log(&mut auth_log_position) {
+                for entry in auth_entries {
+                    let (kind, severity) = match entry.event_type {
+                        AuthEventType::SshSuccess => {
+                            (SecurityEventKind::SshLoginSuccess, AnomalySeverity::Info)
+                        }
+                        AuthEventType::SshFailure | AuthEventType::InvalidUser => {
+                            // Track failed attempts for brute force detection
+                            if let Some(ip) = &entry.source_ip {
+                                failed_logins
+                                    .entry(ip.clone())
+                                    .or_insert_with(Vec::new)
+                                    .push(std::time::Instant::now());
+
+                                // Clean old entries (>5 minutes)
+                                if let Some(attempts) = failed_logins.get_mut(ip) {
+                                    attempts.retain(|t| t.elapsed().as_secs() < 300);
+
+                                    // Alert if 5+ failures in 5 minutes
+                                    if attempts.len() >= 5 {
+                                        let anomaly = Anomaly {
+                                            ts: OffsetDateTime::now_utc(),
+                                            severity: AnomalySeverity::Warning,
+                                            kind: AnomalyKind::BruteForceAttempt,
+                                            message: format!(
+                                                "Brute force attempt from {}: {} failures",
+                                                ip,
+                                                attempts.len()
+                                            ),
+                                        };
+                                        recorder.append(&Event::Anomaly(anomaly))?;
+                                        println!(
+                                            "  [!] Brute force detected from {}: {} attempts",
+                                            ip,
+                                            attempts.len()
+                                        );
+                                    }
+                                }
+                            }
+
+                            (
+                                SecurityEventKind::SshLoginFailure,
+                                AnomalySeverity::Warning,
+                            )
+                        }
+                        AuthEventType::SudoCommand => {
+                            (SecurityEventKind::SudoCommand, AnomalySeverity::Info)
+                        }
+                        _ => (SecurityEventKind::FailedAuth, AnomalySeverity::Warning),
+                    };
+
+                    let event = SecurityEvent {
+                        ts: OffsetDateTime::now_utc(),
+                        kind,
+                        user: entry.user.clone(),
+                        source_ip: entry.source_ip.clone(),
+                        message: entry.message.clone(),
+                    };
+                    recorder.append(&Event::SecurityEvent(event))?;
+
+                    // Print interesting security events
+                    match entry.event_type {
+                        AuthEventType::SshSuccess => {
+                            println!(
+                                "  [SEC] SSH login: {} from {}",
+                                entry.user,
+                                entry.source_ip.as_deref().unwrap_or("unknown")
+                            );
+                        }
+                        AuthEventType::SshFailure | AuthEventType::InvalidUser => {
+                            if severity == AnomalySeverity::Warning {
+                                println!(
+                                    "  [SEC] SSH failure: {} from {}",
+                                    entry.user,
+                                    entry.source_ip.as_deref().unwrap_or("unknown")
+                                );
+                            }
+                        }
+                        AuthEventType::SudoCommand => {
+                            println!("  [SEC] Sudo: {}", entry.user);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            // Check for port scans
+            if let Ok(scan_alerts) = connection_tracker.update() {
+                for alert in scan_alerts {
+                    let anomaly = Anomaly {
+                        ts: OffsetDateTime::now_utc(),
+                        severity: AnomalySeverity::Warning,
+                        kind: AnomalyKind::PortScanActivity,
+                        message: alert.clone(),
+                    };
+                    recorder.append(&Event::Anomaly(anomaly))?;
+                    println!("  [!] Port scan: {}", alert);
+                }
+            }
+        }
 
         // Periodically snapshot top processes
         static SNAPSHOT_COUNTER: AtomicU64 = AtomicU64::new(0);

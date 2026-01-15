@@ -246,9 +246,6 @@ pub struct DiskSpaceStats {
 }
 
 pub fn read_disk_space() -> Result<DiskSpaceStats> {
-    // Read from statvfs for root filesystem
-    use std::os::unix::fs::MetadataExt;
-
     // Simple approach: use df for root
     let output = std::process::Command::new("df")
         .arg("-B1") // 1-byte blocks
@@ -602,6 +599,251 @@ pub fn diff_processes(prev: &ProcessSnapshot, current: &ProcessSnapshot) -> Proc
         stuck,
         zombie,
     }
+}
+
+// ===== Security Monitoring =====
+
+#[derive(Debug, Clone)]
+pub struct LoggedInUser {
+    pub username: String,
+    pub terminal: String,
+    pub login_time: String,
+    pub remote_host: Option<String>,
+}
+
+pub fn read_logged_in_users() -> Result<Vec<LoggedInUser>> {
+    let output = std::process::Command::new("who")
+        .output()
+        .context("Failed to run who")?;
+
+    let content = String::from_utf8_lossy(&output.stdout);
+    let mut users = Vec::new();
+
+    for line in content.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 3 {
+            let username = parts[0].to_string();
+            let terminal = parts[1].to_string();
+            let login_time = parts[2..].iter()
+                .take_while(|p| !p.starts_with('('))
+                .cloned()
+                .collect::<Vec<&str>>()
+                .join(" ");
+
+            let remote_host = line.find('(').and_then(|start| {
+                line[start+1..].find(')').map(|end| {
+                    line[start+1..start+1+end].to_string()
+                })
+            });
+
+            users.push(LoggedInUser {
+                username,
+                terminal,
+                login_time,
+                remote_host,
+            });
+        }
+    }
+
+    Ok(users)
+}
+
+#[derive(Debug, Clone)]
+pub struct AuthLogEntry {
+    pub timestamp: String,
+    pub event_type: AuthEventType,
+    pub user: String,
+    pub source_ip: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AuthEventType {
+    SshSuccess,
+    SshFailure,
+    SudoCommand,
+    FailedPassword,
+    InvalidUser,
+    Other,
+}
+
+pub fn tail_auth_log(last_position: &mut u64) -> Result<Vec<AuthLogEntry>> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let auth_log_paths = [
+        "/var/log/auth.log",      // Debian/Ubuntu
+        "/var/log/secure",        // RHEL/CentOS
+    ];
+
+    let auth_log = auth_log_paths.iter()
+        .find(|path| std::path::Path::new(path).exists())
+        .context("No auth log found")?;
+
+    let mut file = std::fs::File::open(auth_log)
+        .context("Failed to open auth log")?;
+
+    let file_len = file.metadata()?.len();
+
+    // If file was rotated, start from beginning
+    if *last_position > file_len {
+        *last_position = 0;
+    }
+
+    file.seek(SeekFrom::Start(*last_position))?;
+
+    let mut buffer = String::new();
+    file.read_to_string(&mut buffer)?;
+
+    *last_position = file_len;
+
+    let mut entries = Vec::new();
+
+    for line in buffer.lines() {
+        if let Some(entry) = parse_auth_log_line(line) {
+            entries.push(entry);
+        }
+    }
+
+    Ok(entries)
+}
+
+fn parse_auth_log_line(line: &str) -> Option<AuthLogEntry> {
+    // Parse common auth log formats
+    let parts: Vec<&str> = line.splitn(4, ' ').collect();
+    if parts.len() < 4 {
+        return None;
+    }
+
+    let timestamp = format!("{} {} {}", parts[0], parts[1], parts[2]);
+    let rest = parts[3];
+
+    let (event_type, user, source_ip) = if rest.contains("sshd") {
+        if rest.contains("Accepted password") || rest.contains("Accepted publickey") {
+            let user = extract_after(rest, "for ")?;
+            let ip = extract_after(rest, "from ");
+            (AuthEventType::SshSuccess, user, ip)
+        } else if rest.contains("Failed password") {
+            let user = extract_after(rest, "for ").or_else(|| Some("unknown".to_string()))?;
+            let ip = extract_after(rest, "from ");
+            (AuthEventType::SshFailure, user, ip)
+        } else if rest.contains("Invalid user") {
+            let user = extract_after(rest, "Invalid user ").or_else(|| Some("unknown".to_string()))?;
+            let ip = extract_after(rest, "from ");
+            (AuthEventType::InvalidUser, user, ip)
+        } else {
+            return None;
+        }
+    } else if rest.contains("sudo:") && (rest.contains("COMMAND=") || rest.contains("session opened")) {
+        // Extract username - format is usually "hostname sudo: username : ..."
+        let user = if let Some(pos) = rest.find("sudo:") {
+            let after_sudo = &rest[pos + 5..].trim_start();
+            after_sudo.split_whitespace()
+                .next()
+                .unwrap_or("unknown")
+                .trim_end_matches(':')
+                .to_string()
+        } else {
+            "unknown".to_string()
+        };
+        (AuthEventType::SudoCommand, user, None)
+    } else {
+        return None;
+    };
+
+    Some(AuthLogEntry {
+        timestamp,
+        event_type,
+        user,
+        source_ip,
+        message: rest.to_string(),
+    })
+}
+
+fn extract_after(text: &str, marker: &str) -> Option<String> {
+    text.find(marker).map(|pos| {
+        let after = &text[pos + marker.len()..];
+        after.split_whitespace()
+            .next()
+            .unwrap_or("")
+            .to_string()
+    })
+}
+
+// ===== Port Scan Detection =====
+
+#[derive(Debug)]
+pub struct ConnectionTracker {
+    // Track connections per source IP to detect scanning
+    connections_per_ip: HashMap<String, Vec<u16>>, // IP -> ports attempted
+}
+
+impl ConnectionTracker {
+    pub fn new() -> Self {
+        Self {
+            connections_per_ip: HashMap::new(),
+        }
+    }
+
+    pub fn update(&mut self) -> Result<Vec<String>> {
+        // Read current TCP connections
+        let mut new_connections: HashMap<String, Vec<u16>> = HashMap::new();
+
+        if let Ok(content) = fs::read_to_string("/proc/net/tcp") {
+            for line in content.lines().skip(1) {
+                if let Some((src_ip, src_port)) = parse_tcp_line(line) {
+                    new_connections.entry(src_ip.clone())
+                        .or_insert_with(Vec::new)
+                        .push(src_port);
+                }
+            }
+        }
+
+        // Detect potential port scans (many ports from same IP)
+        let mut alerts = Vec::new();
+        for (ip, ports) in &new_connections {
+            if ports.len() > 20 {
+                // Same IP connecting to 20+ different ports
+                alerts.push(format!("Potential port scan from {}: {} ports", ip, ports.len()));
+            }
+        }
+
+        self.connections_per_ip = new_connections;
+        Ok(alerts)
+    }
+}
+
+fn parse_tcp_line(line: &str) -> Option<(String, u16)> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() < 3 {
+        return None;
+    }
+
+    // Remote address is in format: hex_ip:hex_port
+    let remote_addr = parts[2];
+    let addr_parts: Vec<&str> = remote_addr.split(':').collect();
+    if addr_parts.len() != 2 {
+        return None;
+    }
+
+    // Parse hex IP (stored in reverse byte order for IPv4)
+    let ip_hex = addr_parts[0];
+    if ip_hex.len() == 8 {
+        // IPv4
+        if let Ok(ip_num) = u32::from_str_radix(ip_hex, 16) {
+            let ip = format!(
+                "{}.{}.{}.{}",
+                ip_num & 0xFF,
+                (ip_num >> 8) & 0xFF,
+                (ip_num >> 16) & 0xFF,
+                (ip_num >> 24) & 0xFF
+            );
+
+            let port = u16::from_str_radix(addr_parts[1], 16).ok()?;
+            return Some((ip, port));
+        }
+    }
+
+    None
 }
 
 // ===== Top Processes =====
