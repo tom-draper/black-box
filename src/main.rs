@@ -189,7 +189,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
                 }
             };
 
-            // Run async services
+            // Start async services in background
             rt.block_on(async {
                 // Start remote streaming if configured
                 if let Some(ref syslog_config) = protection_config.remote_syslog {
@@ -229,12 +229,19 @@ fn run_recorder(cli: Cli) -> Result<()> {
         }
     }
 
-    println!("Black Box");
+    println!("┌─────────────┐");
+    println!("│  Black Box  │");
+    println!("└─────────────┘");
     println!();
+    println!("Mode: {}", match protection_mode {
+        ProtectionMode::Default => "DEFAULT",
+        ProtectionMode::Protected => "PROTECTED",
+        ProtectionMode::Hardened => "HARDENED",
+    });
     println!("Data directory: {}", data_dir);
     println!("Max storage: ~100MB (ring buffer)");
     println!("Collection interval: {}s", COLLECTION_INTERVAL_SECS);
-    println!("Tracking: CPU, Memory, Swap, Disk, Network, TCP, Load, Processes");
+    println!("Tracking: CPU, Memory, Swap, Disk, Network, TCP, Load, Temperature, Processes");
     if !disable_ui {
         println!("Web UI: http://localhost:{}", port);
         if config.auth.enabled {
@@ -784,8 +791,16 @@ fn run_recorder(cli: Cli) -> Result<()> {
 
         if count % 10 == 0 {
             let disk_usage_percent = (disk_space.used_bytes as f32 / disk_space.total_bytes as f32) * 100.0;
+
+            // Format temperature string if available
+            let temp_str = if let Some(cpu_temp) = temps.cpu_temp_celsius {
+                format!("  Temp:{:.0}°C", cpu_temp)
+            } else {
+                String::new()
+            };
+
             println!(
-                "[{}] CPU:{:.1}%  Mem:{:.1}%  Disk:{:.0}%  Load:{:.2}  Net:R={}/s,T={}/s  TCP:{}  Ctxt:{}/s",
+                "[{}] CPU:{:.1}%  Mem:{:.1}%  Disk:{:.0}%  Load:{:.2}  Net:R={}/s,T={}/s  TCP:{}  Ctxt:{}/s{}",
                 count,
                 cpu_usage,
                 mem_usage_percent,
@@ -794,7 +809,8 @@ fn run_recorder(cli: Cli) -> Result<()> {
                 format_bytes(net_recv_per_sec),
                 format_bytes(net_send_per_sec),
                 tcp_stats.total_connections,
-                ctxt_per_sec
+                ctxt_per_sec,
+                temp_str
             );
         }
 

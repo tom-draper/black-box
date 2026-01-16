@@ -274,6 +274,11 @@ pub async fn index() -> HttpResponse {
             <div class="stat-value" id="statTcp">--</div>
             <div class="stat-detail" id="statTcpDetail">-- time_wait</div>
         </div>
+        <div class="stat-box">
+            <div class="stat-label">CPU Temperature</div>
+            <div class="stat-value" id="statTemp">--</div>
+            <div class="stat-detail" id="statTempDetail">sensors</div>
+        </div>
     </div>
 
     <div class="graph-container">
@@ -540,6 +545,26 @@ pub async fn index() -> HttpResponse {
             const tcpDetail = document.getElementById('statTcpDetail');
             tcpEl.textContent = event.tcp;
             tcpDetail.textContent = event.tcp_wait + ' time_wait';
+
+            // Temperature
+            const tempEl = document.getElementById('statTemp');
+            const tempDetail = document.getElementById('statTempDetail');
+            if (event.cpu_temp !== null && event.cpu_temp !== undefined) {
+                const temp = event.cpu_temp;
+                tempEl.textContent = temp.toFixed(1) + '°C';
+                const tempClass = getStatusClass(temp, 70, 85);
+                tempEl.className = 'stat-value ' + tempClass;
+
+                // Build detail string with available temps
+                let details = [];
+                if (event.cpu_temp) details.push('CPU:' + event.cpu_temp.toFixed(0) + '°C');
+                if (event.gpu_temp) details.push('GPU:' + event.gpu_temp.toFixed(0) + '°C');
+                tempDetail.textContent = details.length > 0 ? details.join(' / ') : 'no sensors';
+            } else {
+                tempEl.textContent = '--';
+                tempEl.className = 'stat-value';
+                tempDetail.textContent = 'no sensors';
+            }
         }
 
         function addEvent(event) {

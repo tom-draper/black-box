@@ -117,55 +117,8 @@ impl ProtectionManager {
 
     /// Print protection mode information
     pub fn print_info(&self) {
-        println!("\n╔════════════════════════════════════════════════════════════╗");
-        println!("║            BLACK BOX PROTECTION MODE                       ║");
-        println!("╚════════════════════════════════════════════════════════════╝");
-
-        match self.mode {
-            ProtectionMode::Default => {
-                println!("\nMode: DEFAULT");
-                println!("  • Normal operation");
-                println!("  • Standard file permissions");
-                println!("  • Easy to stop/modify");
-                println!("  • Best for development and testing");
-            }
-            ProtectionMode::Protected => {
-                println!("\nMode: PROTECTED");
-                println!("  • Append-only log files (chattr +a)");
-                if self.config.remote_syslog.as_ref().map(|c| c.enabled).unwrap_or(false) {
-                    println!("  • Remote log streaming enabled");
-                }
-                if self.config.sign_events {
-                    println!("  • Cryptographic event signing");
-                }
-                println!("  • Systemd auto-restart (use 'systemctl stop' to stop)");
-                println!("  • Good for production use");
-            }
-            ProtectionMode::Hardened => {
-                println!("\nMode: HARDENED (Maximum Tamper Resistance)");
-                println!("  • Append-only log files (chattr +a)");
-                println!("  • Aggressive process protection");
-                if self.config.remote_syslog.as_ref().map(|c| c.enabled).unwrap_or(false) {
-                    println!("  • Remote log streaming enabled");
-                }
-                if self.config.sign_events {
-                    println!("  • Cryptographic event signing");
-                }
-                println!("  • Difficult to stop without proper authorization");
-                println!("  • Best for forensic/compliance scenarios");
-                println!("\n  ⚠️  To stop: Run with --force-stop flag");
-            }
-        }
-
-        if self.mode != ProtectionMode::Default {
-            println!("\n💡 Tips:");
-            if self.config.append_only {
-                println!("  • To clear logs: sudo chattr -a <logfile> && rm <logfile>");
-            }
-            if self.config.remote_syslog.is_none() {
-                println!("  • Consider configuring remote_syslog in config.toml for off-server backup");
-            }
-        }
+        // Print will be handled in main.rs - this is now a no-op
+        // Kept for backwards compatibility
 
         println!();
     }
