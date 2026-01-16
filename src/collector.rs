@@ -1390,6 +1390,287 @@ pub fn read_fan_speeds() -> Vec<crate::event::FanReading> {
     fans
 }
 
+// ===== User Account Monitoring =====
+
+use std::sync::Mutex;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
+static PASSWD_HASH: OnceLock<Mutex<u64>> = OnceLock::new();
+static GROUP_HASH: OnceLock<Mutex<u64>> = OnceLock::new();
+static SUDOERS_HASH: OnceLock<Mutex<u64>> = OnceLock::new();
+
+fn hash_file(path: &str) -> Result<u64> {
+    let content = fs::read_to_string(path)?;
+    let mut hasher = DefaultHasher::new();
+    content.hash(&mut hasher);
+    Ok(hasher.finish())
+}
+
+pub fn check_passwd_changes() -> Result<Option<String>> {
+    let current_hash = match hash_file("/etc/passwd") {
+        Ok(h) => h,
+        Err(_) => return Ok(None), // File not readable, skip check
+    };
+
+    let mutex = PASSWD_HASH.get_or_init(|| Mutex::new(current_hash));
+    let mut last_hash = mutex.lock().unwrap();
+
+    if *last_hash != current_hash {
+        *last_hash = current_hash;
+        return Ok(Some("User account file /etc/passwd modified".to_string()));
+    }
+
+    Ok(None)
+}
+
+pub fn check_group_changes() -> Result<Option<String>> {
+    let current_hash = match hash_file("/etc/group") {
+        Ok(h) => h,
+        Err(_) => return Ok(None), // File not readable, skip check
+    };
+
+    let mutex = GROUP_HASH.get_or_init(|| Mutex::new(current_hash));
+    let mut last_hash = mutex.lock().unwrap();
+
+    if *last_hash != current_hash {
+        *last_hash = current_hash;
+        return Ok(Some("Group file /etc/group modified".to_string()));
+    }
+
+    Ok(None)
+}
+
+pub fn check_sudoers_changes() -> Result<Option<String>> {
+    // Check main sudoers file (may not be readable without root)
+    let current_hash = hash_file("/etc/sudoers").unwrap_or(0);
+
+    // Also check sudoers.d directory if it exists
+    let mut sudoers_d_hash = 0u64;
+    if let Ok(entries) = fs::read_dir("/etc/sudoers.d") {
+        for entry in entries.flatten() {
+            if let Ok(content) = fs::read_to_string(entry.path()) {
+                let mut hasher = DefaultHasher::new();
+                content.hash(&mut hasher);
+                sudoers_d_hash ^= hasher.finish();
+            }
+        }
+    }
+
+    let combined_hash = current_hash ^ sudoers_d_hash;
+
+    // If we couldn't read anything (no permissions), skip this check
+    if combined_hash == 0 {
+        return Ok(None);
+    }
+
+    let mutex = SUDOERS_HASH.get_or_init(|| Mutex::new(combined_hash));
+    let mut last_hash = mutex.lock().unwrap();
+
+    if *last_hash != combined_hash && *last_hash != 0 {
+        *last_hash = combined_hash;
+        return Ok(Some("Sudoers configuration modified".to_string()));
+    }
+
+    // Update the hash on first run
+    if *last_hash == 0 {
+        *last_hash = combined_hash;
+    }
+
+    Ok(None)
+}
+
+// ===== Listening Port Monitoring =====
+
+static LISTENING_PORTS: OnceLock<Mutex<std::collections::HashSet<(String, u16)>>> = OnceLock::new();
+
+pub fn check_listening_port_changes() -> Result<(Vec<(String, u16)>, Vec<(String, u16)>)> {
+    let current_ports = match get_listening_ports() {
+        Ok(p) => p,
+        Err(_) => return Ok((vec![], vec![])), // Skip if we can't read ports
+    };
+
+    let mutex = LISTENING_PORTS.get_or_init(|| Mutex::new(current_ports.clone()));
+    let mut last_ports = mutex.lock().unwrap();
+
+    // Find new and closed ports
+    let new_ports: Vec<_> = current_ports.difference(&*last_ports).cloned().collect();
+    let closed_ports: Vec<_> = last_ports.difference(&current_ports).cloned().collect();
+
+    *last_ports = current_ports;
+
+    Ok((new_ports, closed_ports))
+}
+
+fn get_listening_ports() -> Result<std::collections::HashSet<(String, u16)>> {
+    let mut ports = std::collections::HashSet::new();
+
+    // Read TCP listening ports
+    if let Ok(content) = fs::read_to_string("/proc/net/tcp") {
+        for line in content.lines().skip(1) {
+            if let Some((addr, port, state)) = parse_tcp_line_with_state(line) {
+                // State 0A = TCP_LISTEN
+                if state == "0A" {
+                    ports.insert((format!("tcp:{}", addr), port));
+                }
+            }
+        }
+    }
+
+    // Read TCP6 listening ports
+    if let Ok(content) = fs::read_to_string("/proc/net/tcp6") {
+        for line in content.lines().skip(1) {
+            if let Some((addr, port, state)) = parse_tcp_line_with_state(line) {
+                if state == "0A" {
+                    ports.insert((format!("tcp6:{}", addr), port));
+                }
+            }
+        }
+    }
+
+    // Read UDP listening ports
+    if let Ok(content) = fs::read_to_string("/proc/net/udp") {
+        for line in content.lines().skip(1) {
+            if let Some((addr, port, _)) = parse_tcp_line_with_state(line) {
+                ports.insert((format!("udp:{}", addr), port));
+            }
+        }
+    }
+
+    Ok(ports)
+}
+
+fn parse_tcp_line_with_state(line: &str) -> Option<(String, u16, String)> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() < 4 {
+        return None;
+    }
+
+    // Parse local address
+    let local_addr = parts[1];
+    let addr_parts: Vec<&str> = local_addr.split(':').collect();
+    if addr_parts.len() != 2 {
+        return None;
+    }
+
+    let ip_hex = addr_parts[0];
+    let port_hex = addr_parts[1];
+
+    // Parse IP address (reversed byte order)
+    let ip = if ip_hex.len() == 8 {
+        let bytes = (0..4)
+            .map(|i| u8::from_str_radix(&ip_hex[i*2..(i+1)*2], 16).unwrap_or(0))
+            .collect::<Vec<_>>();
+        format!("{}.{}.{}.{}", bytes[3], bytes[2], bytes[1], bytes[0])
+    } else {
+        "::".to_string()
+    };
+
+    // Parse port
+    let port = u16::from_str_radix(port_hex, 16).ok()?;
+
+    // Get state
+    let state = parts.get(3)?.to_string();
+
+    Some((ip, port, state))
+}
+
+// ===== Kernel Module Monitoring =====
+
+static KERNEL_MODULES: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+
+pub fn check_kernel_module_changes() -> Result<(Vec<String>, Vec<String>)> {
+    let current_modules = match get_loaded_modules() {
+        Ok(m) => m,
+        Err(_) => return Ok((vec![], vec![])), // Skip if we can't read modules
+    };
+
+    let mutex = KERNEL_MODULES.get_or_init(|| Mutex::new(current_modules.clone()));
+    let mut last_modules = mutex.lock().unwrap();
+
+    // Find loaded and unloaded modules
+    let loaded: Vec<_> = current_modules.difference(&*last_modules).cloned().collect();
+    let unloaded: Vec<_> = last_modules.difference(&current_modules).cloned().collect();
+
+    *last_modules = current_modules;
+
+    Ok((loaded, unloaded))
+}
+
+fn get_loaded_modules() -> Result<std::collections::HashSet<String>> {
+    let mut modules = std::collections::HashSet::new();
+
+    let content = fs::read_to_string("/proc/modules")?;
+    for line in content.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if let Some(module_name) = parts.first() {
+            modules.insert(module_name.to_string());
+        }
+    }
+
+    Ok(modules)
+}
+
+// ===== Enhanced Auth Log Parser for su attempts =====
+
+// Update AuthEventType to include Su events
+impl AuthEventType {
+    pub fn from_su_line(success: bool) -> Self {
+        if success {
+            AuthEventType::SudoCommand  // Reuse for successful su
+        } else {
+            AuthEventType::FailedPassword
+        }
+    }
+}
+
+// Enhanced parser that also detects su attempts
+pub fn parse_auth_log_line_enhanced(line: &str) -> Option<AuthLogEntry> {
+    // First try the existing parser
+    if let Some(entry) = parse_auth_log_line(line) {
+        return Some(entry);
+    }
+
+    // Now check for su attempts
+    let parts: Vec<&str> = line.splitn(4, ' ').collect();
+    if parts.len() < 4 {
+        return None;
+    }
+
+    let timestamp = format!("{} {} {}", parts[0], parts[1], parts[2]);
+    let rest = parts[3];
+
+    // Check for failed su attempts
+    if rest.contains("su:") && (rest.contains("FAILED su") || rest.contains("authentication failure")) {
+        let user = extract_after(rest, "for ").or_else(|| Some("unknown".to_string()))?;
+
+        return Some(AuthLogEntry {
+            timestamp,
+            event_type: AuthEventType::FailedPassword,
+            user,
+            source_ip: None,
+            message: rest.to_string(),
+        });
+    }
+
+    // Check for successful su
+    if rest.contains("su:") && (rest.contains("session opened") || rest.contains("Successful su")) {
+        let user = extract_after(rest, "for user ")
+            .or_else(|| extract_after(rest, "to "))
+            .or_else(|| Some("root".to_string()))?;
+
+        return Some(AuthLogEntry {
+            timestamp,
+            event_type: AuthEventType::SudoCommand,
+            user: user.clone(),
+            source_ip: None,
+            message: format!("su to {}", user),
+        });
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

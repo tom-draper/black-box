@@ -1,18 +1,13 @@
 use actix::{Actor, ActorContext, AsyncContext, StreamHandler};
 use actix_web::{web, Error, HttpRequest, HttpResponse};
 use actix_web_actors::ws;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::broadcast::EventBroadcaster;
-use crate::event::Event;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
-
-// Counter for filtering system metrics (show every 10th)
-static METRICS_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 // WebSocket actor that streams events to connected clients
 pub struct WsSession {
@@ -52,14 +47,7 @@ impl WsSession {
             while count < 10 {
                 match rx.try_recv() {
                     Ok(event) => {
-                        // Only show every 10th SystemMetrics event
-                        if matches!(event, Event::SystemMetrics(_)) {
-                            let counter = METRICS_COUNTER.fetch_add(1, Ordering::Relaxed) + 1;
-                            if counter % 10 != 0 {
-                                continue;
-                            }
-                        }
-
+                        // Send all events to client - client-side handles filtering for display
                         // Serialize event to JSON and send to client
                         match serde_json::to_string(&event_to_json(&event)) {
                             Ok(json) => ctx.text(json),

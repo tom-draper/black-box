@@ -1,5 +1,7 @@
 mod broadcast;
+mod cli;
 mod collector;
+mod commands;
 mod config;
 mod event;
 mod protection;
@@ -20,15 +22,18 @@ use std::{
 use time::OffsetDateTime;
 
 use broadcast::EventBroadcaster;
+use cli::Cli;
 use config::{Config, ProtectionMode, RemoteSyslogConfig};
 use protection::ProtectionManager;
 
 use collector::{
-    diff_processes, get_top_processes, read_all_cpu_stats, read_context_switches, read_disk_space,
-    read_disk_stats_per_device, read_disk_temperatures, read_fan_speeds, read_load_avg,
-    read_logged_in_users, read_memory_stats, read_network_stats, read_per_core_temperatures,
-    read_processes, read_swap_stats, read_tcp_stats, read_temperatures, tail_auth_log,
-    AuthEventType, ConnectionTracker,
+    check_group_changes, check_kernel_module_changes, check_listening_port_changes,
+    check_passwd_changes, check_sudoers_changes, diff_processes, get_top_processes,
+    read_all_cpu_stats, read_context_switches, read_disk_space, read_disk_stats_per_device,
+    read_disk_temperatures, read_fan_speeds, read_load_avg, read_logged_in_users,
+    read_memory_stats, read_network_stats, read_per_core_temperatures, read_processes,
+    read_swap_stats, read_tcp_stats, read_temperatures, tail_auth_log, AuthEventType,
+    ConnectionTracker,
 };
 use event::{
     Anomaly, AnomalyKind, AnomalySeverity, Event, PerDiskMetrics, ProcessInfo, ProcessLifecycle,
@@ -43,13 +48,110 @@ const PROCESS_SNAPSHOT_INTERVAL: u64 = 5; // Snapshot top processes every 5 seco
 const SECURITY_CHECK_INTERVAL: u64 = 5; // Check security events every 5 seconds
 
 fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().collect();
+    use cli::{Cli, Commands, ConfigCommands, SystemdCommands};
 
-    // Parse protection mode from command line
-    let protection_mode = ProtectionMode::from_args(&args);
+    let cli = Cli::parse_args();
 
-    // Check for --no-ui or --headless flag
-    let disable_ui = args.iter().any(|arg| arg == "--no-ui" || arg == "--headless");
+    // Handle subcommands
+    match cli.command {
+        Some(Commands::Export {
+            output,
+            format,
+            compress,
+            event_type,
+            start,
+            end,
+            data_dir,
+        }) => {
+            return commands::export::run_export(
+                output, format, compress, event_type, start, end, data_dir,
+            );
+        }
+        Some(Commands::Monitor {
+            url,
+            username,
+            password,
+            interval,
+            export_dir,
+            continuous,
+        }) => {
+            return commands::monitor::run_monitor(
+                url, username, password, interval, export_dir, continuous,
+            );
+        }
+        Some(Commands::Status {
+            url,
+            username,
+            password,
+            format,
+        }) => {
+            return commands::status::run_status(url, username, password, format);
+        }
+        Some(Commands::Systemd { command }) => match command {
+            SystemdCommands::Generate {
+                binary_path,
+                working_dir,
+                data_dir,
+                export_on_stop,
+                export_dir,
+                output,
+            } => {
+                return commands::systemd::generate_service(
+                    binary_path,
+                    working_dir,
+                    data_dir,
+                    export_on_stop,
+                    export_dir,
+                    output,
+                );
+            }
+            SystemdCommands::Install {
+                binary_path,
+                working_dir,
+                export_on_stop,
+            } => {
+                return commands::systemd::install_service(
+                    binary_path,
+                    working_dir,
+                    export_on_stop,
+                );
+            }
+        },
+        Some(Commands::Config { command }) => match command {
+            ConfigCommands::Show => {
+                return commands::config::show_config();
+            }
+            ConfigCommands::Validate => {
+                return commands::config::validate_config();
+            }
+            ConfigCommands::Init { force } => {
+                return commands::config::init_config(force);
+            }
+            ConfigCommands::SetupRemote { host, port, protocol } => {
+                return commands::config::setup_remote_syslog(host, port, protocol);
+            }
+        },
+        Some(Commands::Run { force_stop: _ }) | None => {
+            // Fall through to run the recorder (default behavior)
+        }
+    }
+
+    // Run the black box recorder (default behavior)
+    run_recorder(cli)
+}
+
+fn run_recorder(cli: Cli) -> Result<()> {
+    // Parse protection mode from CLI flags
+    let protection_mode = if cli.hardened {
+        ProtectionMode::Hardened
+    } else if cli.protected {
+        ProtectionMode::Protected
+    } else {
+        ProtectionMode::Default
+    };
+
+    // Check for UI disable flags
+    let disable_ui = cli.no_ui || cli.headless;
 
     // Load configuration
     let config = Config::load()?;
@@ -59,12 +161,7 @@ fn main() -> Result<()> {
     protection_manager.print_info();
 
     // Parse port (command line overrides config)
-    let port = args
-        .iter()
-        .position(|arg| arg == "--port")
-        .and_then(|idx| args.get(idx + 1))
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(config.server.port);
+    let port = cli.port.unwrap_or(config.server.port);
 
     let data_dir = config.server.data_dir.clone();
 
@@ -554,6 +651,99 @@ fn main() -> Result<()> {
                     };
                     recorder.append(&Event::Anomaly(anomaly))?;
                     println!("  [!] Port scan: {}", alert);
+                }
+            }
+
+            // Check for user account changes
+            if let Ok(Some(msg)) = check_passwd_changes() {
+                let event = SecurityEvent {
+                    ts: OffsetDateTime::now_utc(),
+                    kind: SecurityEventKind::UserAccountModified,
+                    user: "root".to_string(),
+                    source_ip: None,
+                    message: msg.clone(),
+                };
+                recorder.append(&Event::SecurityEvent(event))?;
+                println!("  [SEC] {}", msg);
+            }
+
+            // Check for group changes
+            if let Ok(Some(msg)) = check_group_changes() {
+                let event = SecurityEvent {
+                    ts: OffsetDateTime::now_utc(),
+                    kind: SecurityEventKind::GroupModified,
+                    user: "root".to_string(),
+                    source_ip: None,
+                    message: msg.clone(),
+                };
+                recorder.append(&Event::SecurityEvent(event))?;
+                println!("  [SEC] {}", msg);
+            }
+
+            // Check for sudoers changes
+            if let Ok(Some(msg)) = check_sudoers_changes() {
+                let event = SecurityEvent {
+                    ts: OffsetDateTime::now_utc(),
+                    kind: SecurityEventKind::SudoersModified,
+                    user: "root".to_string(),
+                    source_ip: None,
+                    message: msg.clone(),
+                };
+                recorder.append(&Event::SecurityEvent(event))?;
+                println!("  [SEC] {}", msg);
+            }
+
+            // Check for new/closed listening ports
+            if let Ok((new_ports, closed_ports)) = check_listening_port_changes() {
+                for (proto_addr, port) in new_ports {
+                    let event = SecurityEvent {
+                        ts: OffsetDateTime::now_utc(),
+                        kind: SecurityEventKind::NewListeningPort,
+                        user: "system".to_string(),
+                        source_ip: None,
+                        message: format!("New listening port: {} port {}", proto_addr, port),
+                    };
+                    recorder.append(&Event::SecurityEvent(event))?;
+                    println!("  [SEC] New listening port: {} port {}", proto_addr, port);
+                }
+
+                for (proto_addr, port) in closed_ports {
+                    let event = SecurityEvent {
+                        ts: OffsetDateTime::now_utc(),
+                        kind: SecurityEventKind::ListeningPortClosed,
+                        user: "system".to_string(),
+                        source_ip: None,
+                        message: format!("Listening port closed: {} port {}", proto_addr, port),
+                    };
+                    recorder.append(&Event::SecurityEvent(event))?;
+                    println!("  [SEC] Listening port closed: {} port {}", proto_addr, port);
+                }
+            }
+
+            // Check for kernel module changes
+            if let Ok((loaded, unloaded)) = check_kernel_module_changes() {
+                for module in loaded {
+                    let event = SecurityEvent {
+                        ts: OffsetDateTime::now_utc(),
+                        kind: SecurityEventKind::KernelModuleLoaded,
+                        user: "kernel".to_string(),
+                        source_ip: None,
+                        message: format!("Kernel module loaded: {}", module),
+                    };
+                    recorder.append(&Event::SecurityEvent(event))?;
+                    println!("  [SEC] Kernel module loaded: {}", module);
+                }
+
+                for module in unloaded {
+                    let event = SecurityEvent {
+                        ts: OffsetDateTime::now_utc(),
+                        kind: SecurityEventKind::KernelModuleUnloaded,
+                        user: "kernel".to_string(),
+                        source_ip: None,
+                        message: format!("Kernel module unloaded: {}", module),
+                    };
+                    recorder.append(&Event::SecurityEvent(event))?;
+                    println!("  [SEC] Kernel module unloaded: {}", module);
                 }
             }
         }

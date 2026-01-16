@@ -119,6 +119,15 @@ pub enum SecurityEventKind {
     SudoCommand,
     FailedAuth,
     PortScanDetected,
+    // Immediate value security events
+    UserAccountModified,
+    GroupModified,
+    FailedSuAttempt,
+    SudoersModified,
+    NewListeningPort,
+    ListeningPortClosed,
+    KernelModuleLoaded,
+    KernelModuleUnloaded,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
