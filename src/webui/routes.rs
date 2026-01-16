@@ -91,46 +91,47 @@ pub async fn index() -> HttpResponse {
         .log-entry {
             margin-bottom: 8px;
             font-size: 12px;
+            color: #d0d0d0;
         }
 
-        .timestamp {
-            color: #666;
-        }
-
-        .event-system {
-            color: #00aaff;
-        }
-
-        .event-process {
-            color: #ffaa00;
-        }
-
-        .event-security {
-            color: #ff00ff;
-        }
-
-        .event-anomaly {
-            color: #ff0000;
-        }
-
-        .metric {
+        .log-entry.event-system {
             color: #00ff00;
         }
 
-        .warning {
+        .log-entry.event-process {
+            color: #ffaa00;
+        }
+
+        .log-entry.event-security {
+            color: #ff00ff;
+        }
+
+        .log-entry.event-anomaly {
             color: #ffff00;
         }
 
-        .error {
+        .log-entry.event-anomaly.critical {
             color: #ff5555;
         }
 
-        .info {
-            color: #55aaff;
+        .graph-container {
+            background: #0f0f0f;
+            border: 1px solid #333;
+            padding: 10px;
+            margin-bottom: 15px;
         }
 
-        .success {
-            color: #55ff55;
+        .graph-header {
+            color: #666;
+            font-size: 10px;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
+        #metricsCanvas {
+            width: 100%;
+            height: 120px;
+            display: block;
         }
 
         .footer {
@@ -175,6 +176,8 @@ pub async fn index() -> HttpResponse {
             background: #111;
             border: 1px solid #333;
             padding: 12px;
+            display: flex;
+            flex-direction: column;
         }
 
         .stat-label {
@@ -207,7 +210,8 @@ pub async fn index() -> HttpResponse {
         .stat-bar {
             height: 4px;
             background: #222;
-            margin-top: 6px;
+            margin-top: auto;
+            padding-top: 6px;
             border-radius: 2px;
             overflow: hidden;
         }
@@ -240,6 +244,7 @@ pub async fn index() -> HttpResponse {
         <div class="stat-box">
             <div class="stat-label">CPU Usage</div>
             <div class="stat-value" id="statCpu">--</div>
+            <div class="stat-detail" id="statCpuDetail">overall usage</div>
             <div class="stat-bar"><div class="stat-bar-fill" id="statCpuBar" style="width: 0%"></div></div>
         </div>
         <div class="stat-box">
@@ -271,6 +276,11 @@ pub async fn index() -> HttpResponse {
         </div>
     </div>
 
+    <div class="graph-container">
+        <div class="graph-header">Metrics History (60s)</div>
+        <canvas id="metricsCanvas"></canvas>
+    </div>
+
     <div class="controls">
         <label>Filter: <input type="text" id="filterInput" placeholder="search events..."></label>
         <select id="eventType">
@@ -295,9 +305,36 @@ pub async fn index() -> HttpResponse {
         let ws = null;
         let reconnectTimeout = null;
         let eventBuffer = [];
-        const MAX_BUFFER_SIZE = 1000;
+        const MAX_BUFFER_SIZE = 500;
+        const MAX_DOM_SIZE = 300;
         const filterInput = document.getElementById('filterInput');
         const eventTypeSelect = document.getElementById('eventType');
+
+        // Metrics history for graph
+        const metricsHistory = {
+            cpu: [],
+            mem: [],
+            disk: [],
+            maxPoints: 60
+        };
+
+        // Counter for system metrics - only log every 10th reading
+        let systemMetricsCounter = 0;
+
+        const canvas = document.getElementById('metricsCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Set canvas size accounting for device pixel ratio
+        function resizeCanvas() {
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * window.devicePixelRatio;
+            canvas.height = rect.height * window.devicePixelRatio;
+            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+            drawGraph();
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
 
         function connectWebSocket() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -368,8 +405,92 @@ pub async fn index() -> HttpResponse {
             return '';
         }
 
+        function drawGraph() {
+            const rect = canvas.getBoundingClientRect();
+            const width = rect.width;
+            const height = rect.height;
+
+            // Clear canvas
+            ctx.fillStyle = '#0f0f0f';
+            ctx.fillRect(0, 0, width, height);
+
+            // Draw grid lines
+            ctx.strokeStyle = '#222';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 4; i++) {
+                const y = (height / 4) * i;
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(width, y);
+                ctx.stroke();
+            }
+
+            // Draw percentage labels
+            ctx.fillStyle = '#444';
+            ctx.font = '9px monospace';
+            ctx.textAlign = 'right';
+            for (let i = 0; i <= 4; i++) {
+                const pct = 100 - (i * 25);
+                const y = (height / 4) * i + 3;
+                ctx.fillText(pct + '%', width - 2, y);
+            }
+
+            if (metricsHistory.cpu.length < 2) return;
+
+            const pointSpacing = width / (metricsHistory.maxPoints - 1);
+
+            // Draw lines for each metric
+            function drawLine(data, color) {
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+
+                const startIdx = Math.max(0, data.length - metricsHistory.maxPoints);
+                for (let i = 0; i < data.length - startIdx; i++) {
+                    const value = data[startIdx + i];
+                    const x = i * pointSpacing;
+                    const y = height - (value / 100) * height;
+
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                ctx.stroke();
+            }
+
+            drawLine(metricsHistory.cpu, '#00ff00');
+            drawLine(metricsHistory.mem, '#00aaff');
+            drawLine(metricsHistory.disk, '#ffaa00');
+
+            // Draw legend
+            ctx.font = '10px monospace';
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#00ff00';
+            ctx.fillText('CPU', 5, 12);
+            ctx.fillStyle = '#00aaff';
+            ctx.fillText('MEM', 40, 12);
+            ctx.fillStyle = '#ffaa00';
+            ctx.fillText('DISK', 80, 12);
+        }
+
         function updateStats(event) {
             if (event.type !== 'SystemMetrics') return;
+
+            // Update metrics history
+            metricsHistory.cpu.push(event.cpu);
+            metricsHistory.mem.push(event.mem);
+            metricsHistory.disk.push(event.disk);
+
+            if (metricsHistory.cpu.length > metricsHistory.maxPoints) {
+                metricsHistory.cpu.shift();
+                metricsHistory.mem.shift();
+                metricsHistory.disk.shift();
+            }
+
+            // Draw the graph
+            drawGraph();
 
             // CPU
             const cpuEl = document.getElementById('statCpu');
@@ -425,6 +546,15 @@ pub async fn index() -> HttpResponse {
             // Update stats panel for SystemMetrics
             updateStats(event);
 
+            // For SystemMetrics, only add to log display every 10th reading
+            if (event.type === 'SystemMetrics') {
+                systemMetricsCounter++;
+                if (systemMetricsCounter % 10 !== 0) {
+                    // Still add to buffer for filtering purposes, but don't render
+                    return;
+                }
+            }
+
             // Apply client-side filter
             const filter = filterInput.value.toLowerCase();
             const eventType = eventTypeSelect.value;
@@ -441,16 +571,16 @@ pub async fn index() -> HttpResponse {
 
             // Render event
             const container = document.getElementById('logContainer');
-            const eventHtml = formatEvent(event);
-            const div = document.createElement('div');
-            div.innerHTML = eventHtml;
-            container.appendChild(div.firstChild);
+            const logEntry = createLogEntry(event);
+            if (logEntry) {
+                container.appendChild(logEntry);
+            }
 
             // Auto-scroll to bottom
             container.scrollTop = container.scrollHeight;
 
-            // Limit DOM size
-            while (container.children.length > MAX_BUFFER_SIZE) {
+            // Limit DOM size - keep it lower than buffer for better performance
+            while (container.children.length > MAX_DOM_SIZE) {
                 container.removeChild(container.firstChild);
             }
         }
@@ -481,59 +611,60 @@ pub async fn index() -> HttpResponse {
             return true;
         }
 
-        function formatEvent(event) {
+        function createLogEntry(event) {
             const ts = event.timestamp || '';
             const type = event.type || 'unknown';
 
-            let line = '<div class="log-entry">';
-            line += '<span class="timestamp">[' + ts.substring(11, 19) + ']</span> ';
-
-            if (type === 'SystemMetrics') {
-                line += '<span class="event-system">[SYSTEM]</span> ';
-                line += '<span class="metric">';
-                line += 'CPU:' + event.cpu.toFixed(1) + '% ';
-                line += 'Mem:' + event.mem.toFixed(1) + '% ';
-                line += 'Load:' + event.load.toFixed(2) + ' ';
-                line += 'Disk:' + event.disk + '% ';
-                line += 'TCP:' + event.tcp;
-                line += '</span>';
-            } else if (type === 'ProcessLifecycle') {
-                line += '<span class="event-process">[PROCESS]</span> ';
-                if (event.kind === 'Started') {
-                    line += '<span class="success">[+]</span> ';
-                } else if (event.kind === 'Exited') {
-                    line += '<span class="info">[-]</span> ';
-                } else if (event.kind === 'Stuck') {
-                    line += '<span class="warning">[D]</span> ';
-                } else if (event.kind === 'Zombie') {
-                    line += '<span class="warning">[Z]</span> ';
-                }
-                line += event.name + ' (pid ' + event.pid + ')';
-            } else if (type === 'SecurityEvent') {
-                line += '<span class="event-security">[SECURITY]</span> ';
-                if (event.kind === 'SshLoginSuccess') {
-                    line += '<span class="success">[SSH OK]</span> ';
-                } else if (event.kind === 'SshLoginFailure') {
-                    line += '<span class="error">[SSH FAIL]</span> ';
-                } else if (event.kind === 'SudoCommand') {
-                    line += '<span class="warning">[SUDO]</span> ';
-                }
-                line += event.user;
-                if (event.source_ip) {
-                    line += ' from ' + event.source_ip;
-                }
-            } else if (type === 'Anomaly') {
-                line += '<span class="event-anomaly">[ANOMALY]</span> ';
-                if (event.severity === 'Critical') {
-                    line += '<span class="error">[CRITICAL]</span> ';
-                } else if (event.severity === 'Warning') {
-                    line += '<span class="warning">[WARNING]</span> ';
-                }
-                line += event.message;
+            // Filter out ProcessSnapshot and unknown event types from the log display
+            if (type === 'ProcessSnapshot' || type === 'unknown') {
+                return null;
             }
 
-            line += '</div>';
-            return line;
+            const div = document.createElement('div');
+            div.className = 'log-entry';
+
+            let text = '[' + ts.substring(11, 19) + '] ';
+
+            if (type === 'SystemMetrics') {
+                text += '[SYSTEM] CPU:' + event.cpu.toFixed(1) + '% ';
+                text += 'Mem:' + event.mem.toFixed(1) + '% ';
+                text += 'Load:' + event.load.toFixed(2) + ' ';
+                text += 'Disk:' + event.disk + '% ';
+                text += 'TCP:' + event.tcp;
+                div.className += ' event-system';
+            } else if (type === 'ProcessLifecycle') {
+                let symbol = '';
+                if (event.kind === 'Started') symbol = '[+]';
+                else if (event.kind === 'Exited') symbol = '[-]';
+                else if (event.kind === 'Stuck') symbol = '[D]';
+                else if (event.kind === 'Zombie') symbol = '[Z]';
+
+                text += '[PROCESS] ' + symbol + ' ' + event.name + ' (pid ' + event.pid + ')';
+                div.className += ' event-process';
+            } else if (type === 'SecurityEvent') {
+                let label = '';
+                if (event.kind === 'SshLoginSuccess') label = '[SSH OK]';
+                else if (event.kind === 'SshLoginFailure') label = '[SSH FAIL]';
+                else if (event.kind === 'SudoCommand') label = '[SUDO]';
+
+                text += '[SECURITY] ' + label + ' ' + event.user;
+                if (event.source_ip) {
+                    text += ' from ' + event.source_ip;
+                }
+                div.className += ' event-security';
+            } else if (type === 'Anomaly') {
+                let severity = event.severity === 'Critical' ? '[CRITICAL]' : '[WARNING]';
+                text += '[ANOMALY] ' + severity + ' ' + event.message;
+                div.className += ' event-anomaly';
+                if (event.severity === 'Critical') {
+                    div.className += ' critical';
+                }
+            } else {
+                return null;
+            }
+
+            div.textContent = text;
+            return div;
         }
 
         function clearFilter() {
@@ -546,16 +677,21 @@ pub async fn index() -> HttpResponse {
         function reloadEvents() {
             const container = document.getElementById('logContainer');
             container.innerHTML = '';
-            eventBuffer.forEach(event => {
-                const filter = filterInput.value.toLowerCase();
-                const eventType = eventTypeSelect.value;
+            const filter = filterInput.value.toLowerCase();
+            const eventType = eventTypeSelect.value;
+
+            // Only render the most recent MAX_DOM_SIZE events for performance
+            const startIdx = Math.max(0, eventBuffer.length - MAX_DOM_SIZE);
+
+            for (let i = startIdx; i < eventBuffer.length; i++) {
+                const event = eventBuffer[i];
                 if (matchesFilter(event, filter, eventType)) {
-                    const eventHtml = formatEvent(event);
-                    const div = document.createElement('div');
-                    div.innerHTML = eventHtml;
-                    container.appendChild(div.firstChild);
+                    const logEntry = createLogEntry(event);
+                    if (logEntry) {
+                        container.appendChild(logEntry);
+                    }
                 }
-            });
+            }
             container.scrollTop = container.scrollHeight;
         }
 
@@ -633,10 +769,25 @@ fn event_to_json(
                 "type": "SystemMetrics",
                 "timestamp": m.ts.format(&Rfc3339).ok()?,
                 "cpu": m.cpu_usage_percent,
+                "per_core_cpu": m.per_core_usage,
                 "mem": mem_pct,
                 "load": m.load_avg_1m,
                 "disk": disk_pct.round(),
+                "per_disk": m.per_disk_metrics.iter().map(|d| serde_json::json!({
+                    "device": d.device_name,
+                    "read": d.read_bytes_per_sec,
+                    "write": d.write_bytes_per_sec,
+                    "temp": d.temp_celsius,
+                })).collect::<Vec<_>>(),
                 "tcp": m.tcp_connections,
+                "cpu_temp": m.temps.cpu_temp_celsius,
+                "per_core_temps": m.temps.per_core_temps,
+                "gpu_temp": m.temps.gpu_temp_celsius,
+                "mobo_temp": m.temps.motherboard_temp_celsius,
+                "fans": m.fans.iter().map(|f| serde_json::json!({
+                    "label": f.label,
+                    "rpm": f.rpm,
+                })).collect::<Vec<_>>(),
             }))
         }
         Event::ProcessLifecycle(p) => {

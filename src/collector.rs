@@ -63,6 +63,76 @@ pub fn read_cpu_stats() -> Result<CpuStats> {
     })
 }
 
+// ===== Per-Core CPU Stats =====
+
+#[derive(Debug, Clone)]
+pub struct CpuStatsSnapshot {
+    pub aggregate: CpuStats,
+    pub per_core: HashMap<u32, CpuStats>,
+}
+
+fn parse_cpu_line(parts: &[&str]) -> Result<CpuStats> {
+    if parts.len() < 9 {
+        anyhow::bail!("Not enough fields in CPU line");
+    }
+
+    Ok(CpuStats {
+        user: parts[1].parse()?,
+        nice: parts[2].parse()?,
+        system: parts[3].parse()?,
+        idle: parts[4].parse()?,
+        iowait: parts[5].parse()?,
+        irq: parts[6].parse()?,
+        softirq: parts[7].parse()?,
+        steal: parts[8].parse()?,
+    })
+}
+
+pub fn read_all_cpu_stats() -> Result<CpuStatsSnapshot> {
+    let content = fs::read_to_string("/proc/stat")?;
+    let mut per_core = HashMap::new();
+    let mut aggregate = None;
+
+    for line in content.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.is_empty() {
+            continue;
+        }
+
+        if parts[0] == "cpu" {
+            aggregate = Some(parse_cpu_line(&parts)?);
+        } else if parts[0].starts_with("cpu") {
+            if let Some(core_id_str) = parts[0].strip_prefix("cpu") {
+                if let Ok(core_id) = core_id_str.parse::<u32>() {
+                    per_core.insert(core_id, parse_cpu_line(&parts)?);
+                }
+            }
+        }
+    }
+
+    Ok(CpuStatsSnapshot {
+        aggregate: aggregate.context("No aggregate CPU line found")?,
+        per_core,
+    })
+}
+
+impl CpuStatsSnapshot {
+    pub fn per_core_usage(&self, prev: &CpuStatsSnapshot) -> Vec<f32> {
+        let mut cores: Vec<(u32, f32)> = self.per_core
+            .iter()
+            .filter_map(|(core_id, current_stats)| {
+                prev.per_core.get(core_id).map(|prev_stats| {
+                    let usage = current_stats.usage_percent(prev_stats);
+                    (*core_id, usage)
+                })
+            })
+            .collect();
+
+        cores.sort_by_key(|(core_id, _)| *core_id);
+        cores.into_iter().map(|(_, usage)| usage).collect()
+    }
+}
+
 // ===== Memory Stats =====
 
 #[derive(Debug)]
@@ -190,9 +260,48 @@ pub struct DiskStats {
     pub write_bytes: u64,
 }
 
-pub fn read_disk_stats() -> Result<DiskStats> {
-    let content = fs::read_to_string("/proc/diskstats").context("Failed to read /proc/diskstats")?;
+// Helper: Check if device name represents a physical disk (not partition)
+fn is_physical_disk(dev_name: &str) -> bool {
+    // SATA/SAS physical disks: sda, sdb, sdc, etc.
+    if dev_name.len() == 3 && dev_name.starts_with("sd") {
+        if let Some(last_char) = dev_name.chars().nth(2) {
+            return last_char.is_ascii_lowercase();
+        }
+    }
 
+    // NVMe physical disks: nvme0n1, nvme1n1, etc.
+    if dev_name.starts_with("nvme") && dev_name.contains("n") && !dev_name.contains("p") {
+        return true;
+    }
+
+    // VirtIO disks: vda, vdb, vdc, etc.
+    if dev_name.len() == 3 && dev_name.starts_with("vd") {
+        if let Some(last_char) = dev_name.chars().nth(2) {
+            return last_char.is_ascii_lowercase();
+        }
+    }
+
+    false
+}
+
+// Per-disk stats structure (for internal use)
+#[derive(Debug, Clone)]
+pub struct DiskStatsDetailed {
+    pub device_name: String,
+    pub read_bytes: u64,
+    pub write_bytes: u64,
+}
+
+// Snapshot of all disks
+#[derive(Debug, Clone)]
+pub struct AllDisksStats {
+    pub by_device: HashMap<String, DiskStatsDetailed>,
+    pub total: DiskStats,
+}
+
+pub fn read_disk_stats_per_device() -> Result<AllDisksStats> {
+    let content = fs::read_to_string("/proc/diskstats")?;
+    let mut by_device = HashMap::new();
     let mut total_read_sectors = 0u64;
     let mut total_write_sectors = 0u64;
 
@@ -202,27 +311,69 @@ pub fn read_disk_stats() -> Result<DiskStats> {
             continue;
         }
 
-        // Skip loop devices, ram devices, etc
         let dev_name = parts[2];
+
+        // Skip loop, ram, sr devices
         if dev_name.starts_with("loop")
             || dev_name.starts_with("ram")
-            || dev_name.starts_with("sr")
-        {
+            || dev_name.starts_with("sr") {
             continue;
         }
 
-        // Field 5: sectors read, Field 9: sectors written
-        if let (Ok(read), Ok(write)) = (parts[5].parse::<u64>(), parts[9].parse::<u64>()) {
-            total_read_sectors += read;
-            total_write_sectors += write;
+        // Only include physical disks (exclude partitions)
+        if !is_physical_disk(dev_name) {
+            continue;
         }
+
+        let read_sectors: u64 = parts[5].parse().unwrap_or(0);
+        let write_sectors: u64 = parts[9].parse().unwrap_or(0);
+
+        total_read_sectors += read_sectors;
+        total_write_sectors += write_sectors;
+
+        by_device.insert(dev_name.to_string(), DiskStatsDetailed {
+            device_name: dev_name.to_string(),
+            read_bytes: read_sectors * 512,
+            write_bytes: write_sectors * 512,
+        });
     }
 
-    // Sectors are typically 512 bytes
-    Ok(DiskStats {
-        read_bytes: total_read_sectors * 512,
-        write_bytes: total_write_sectors * 512,
+    Ok(AllDisksStats {
+        by_device,
+        total: DiskStats {
+            read_bytes: total_read_sectors * 512,
+            write_bytes: total_write_sectors * 512,
+        },
     })
+}
+
+impl AllDisksStats {
+    pub fn per_disk_throughput(
+        &self,
+        prev: &AllDisksStats,
+        interval_secs: f32,
+    ) -> Vec<(String, u64, u64)> {
+        let mut results = Vec::new();
+
+        for (dev_name, current) in &self.by_device {
+            if let Some(previous) = prev.by_device.get(dev_name) {
+                let read_delta = current.read_bytes.saturating_sub(previous.read_bytes);
+                let write_delta = current.write_bytes.saturating_sub(previous.write_bytes);
+
+                let read_per_sec = (read_delta as f32 / interval_secs) as u64;
+                let write_per_sec = (write_delta as f32 / interval_secs) as u64;
+
+                results.push((dev_name.clone(), read_per_sec, write_per_sec));
+            }
+        }
+
+        results.sort_by(|a, b| a.0.cmp(&b.0));
+        results
+    }
+}
+
+pub fn read_disk_stats() -> Result<DiskStats> {
+    Ok(read_disk_stats_per_device()?.total)
 }
 
 impl DiskStats {
@@ -868,6 +1019,375 @@ pub fn get_top_processes(n: usize) -> Result<Vec<ProcessDetail>> {
     processes.truncate(n);
 
     Ok(processes)
+}
+
+// ===== Temperature Monitoring =====
+
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
+
+// Parse temperature from millidegrees to Celsius
+fn parse_temp_millidegrees(path: &std::path::Path) -> Result<f32> {
+    let content = fs::read_to_string(path)?;
+    let millidegrees: i32 = content.trim().parse()?;
+    Ok(millidegrees as f32 / 1000.0)
+}
+
+// Execute command with basic error handling
+fn execute_command_timeout(cmd: &str, args: &[&str]) -> Result<String> {
+    let output = std::process::Command::new(cmd)
+        .args(args)
+        .output()
+        .context("Failed to execute command")?;
+
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        anyhow::bail!("Command failed")
+    }
+}
+
+// CPU Temperature
+fn read_cpu_temperature() -> Result<Option<f32>> {
+    // Try thermal zones first
+    let thermal_zone_pattern = "/sys/class/thermal/thermal_zone*/temp";
+    let mut max_temp = None;
+
+    if let Ok(paths) = glob::glob(thermal_zone_pattern) {
+        for entry in paths.flatten() {
+            if let Ok(temp) = parse_temp_millidegrees(&entry) {
+                max_temp = Some(max_temp.unwrap_or(0.0_f32).max(temp));
+            }
+        }
+    }
+
+    if max_temp.is_some() {
+        return Ok(max_temp);
+    }
+
+    // Fallback to hwmon
+    let hwmon_pattern = "/sys/class/hwmon/hwmon*/temp*_input";
+    if let Ok(paths) = glob::glob(hwmon_pattern) {
+        for entry in paths.flatten() {
+            if let Ok(temp) = parse_temp_millidegrees(&entry) {
+                max_temp = Some(max_temp.unwrap_or(0.0_f32).max(temp));
+            }
+        }
+    }
+
+    Ok(max_temp)
+}
+
+// GPU Temperature
+#[derive(Debug, Clone, Copy)]
+enum GpuCommand {
+    NvidiaSmi,
+    RocmSmi,
+    None,
+}
+
+static GPU_COMMAND: OnceLock<GpuCommand> = OnceLock::new();
+
+fn detect_gpu_command() -> GpuCommand {
+    if std::process::Command::new("nvidia-smi").arg("--version").output().is_ok() {
+        return GpuCommand::NvidiaSmi;
+    }
+    if std::process::Command::new("rocm-smi").arg("--version").output().is_ok() {
+        return GpuCommand::RocmSmi;
+    }
+    GpuCommand::None
+}
+
+fn read_gpu_temperature() -> Result<Option<f32>> {
+    let cmd = GPU_COMMAND.get_or_init(detect_gpu_command);
+
+    match cmd {
+        GpuCommand::NvidiaSmi => {
+            let output = execute_command_timeout(
+                "nvidia-smi",
+                &["--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"],
+            )?;
+            let temp: f32 = output.trim().parse()?;
+            Ok(Some(temp))
+        }
+        GpuCommand::RocmSmi => {
+            let output = execute_command_timeout("rocm-smi", &["--showtemp"])?;
+            // Parse output - format varies, look for temperature value
+            for line in output.lines() {
+                if line.contains("Temperature") {
+                    if let Some(temp_str) = line.split_whitespace().find(|s| s.parse::<f32>().is_ok()) {
+                        if let Ok(temp) = temp_str.parse::<f32>() {
+                            return Ok(Some(temp));
+                        }
+                    }
+                }
+            }
+            Ok(None)
+        }
+        GpuCommand::None => Ok(None),
+    }
+}
+
+// Disk Temperature (throttled to every 30 seconds)
+static DISK_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+static DISK_TEMP_CACHE: OnceLock<std::sync::Mutex<Option<f32>>> = OnceLock::new();
+
+fn read_disk_temperature() -> Result<Option<f32>> {
+    let counter = DISK_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+
+    // Only check every 30 seconds
+    if counter % 30 != 0 {
+        let cache = DISK_TEMP_CACHE.get_or_init(|| std::sync::Mutex::new(None));
+        return Ok(*cache.lock().unwrap());
+    }
+
+    let temp = try_smartctl("/dev/sda").or_else(|_| try_hddtemp("/dev/sda")).ok().flatten();
+
+    // Update cache
+    if let Some(cache) = DISK_TEMP_CACHE.get() {
+        *cache.lock().unwrap() = temp;
+    }
+
+    Ok(temp)
+}
+
+fn try_smartctl(dev_path: &str) -> Result<Option<f32>> {
+    let output = execute_command_timeout("smartctl", &["-A", dev_path])?;
+
+    for line in output.lines() {
+        if line.contains("Temperature") || line.contains("temperature") {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            for part in parts {
+                if let Ok(temp) = part.parse::<f32>() {
+                    if temp > 0.0 && temp < 100.0 {
+                        return Ok(Some(temp));
+                    }
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn try_hddtemp(dev_path: &str) -> Result<Option<f32>> {
+    let output = execute_command_timeout("hddtemp", &[dev_path])?;
+
+    // Parse: /dev/sda: DISK_NAME: 42°C
+    for part in output.split(':') {
+        if part.contains("°C") || part.contains("C") {
+            let temp_str = part.trim().replace("°C", "").replace("C", "");
+            if let Ok(temp) = temp_str.parse::<f32>() {
+                return Ok(Some(temp));
+            }
+        }
+    }
+    Ok(None)
+}
+
+// Motherboard Temperature
+fn read_motherboard_temperature() -> Result<Option<f32>> {
+    let hwmon_pattern = "/sys/class/hwmon/hwmon*";
+
+    if let Ok(paths) = glob::glob(hwmon_pattern) {
+        for dir in paths.flatten() {
+            // Look for temperature inputs
+            let temp_pattern = format!("{}/*_input", dir.display());
+            if let Ok(temp_paths) = glob::glob(&temp_pattern) {
+                for temp_path in temp_paths.flatten() {
+                    // Check corresponding label file
+                    let label_path = temp_path.to_string_lossy().replace("_input", "_label");
+                    if let Ok(label) = fs::read_to_string(&label_path) {
+                        let label_lower = label.to_lowercase();
+                        if label_lower.contains("motherboard") ||
+                           label_lower.contains("chipset") ||
+                           label_lower.contains("pch") {
+                            if let Ok(temp) = parse_temp_millidegrees(&temp_path) {
+                                return Ok(Some(temp));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
+// Main wrapper function
+pub fn read_temperatures() -> crate::event::TemperatureReadings {
+    crate::event::TemperatureReadings {
+        cpu_temp_celsius: read_cpu_temperature().ok().flatten(),
+        per_core_temps: Vec::new(),  // Will be populated separately in main loop
+        gpu_temp_celsius: read_gpu_temperature().ok().flatten(),
+        motherboard_temp_celsius: read_motherboard_temperature().ok().flatten(),
+    }
+}
+
+// ===== Per-Core Temperature =====
+
+pub fn read_per_core_temperatures(num_cores: usize) -> Vec<Option<f32>> {
+    let mut core_temps: HashMap<u32, f32> = HashMap::new();
+
+    // Try to map thermal zones to cores
+    if let Ok(paths) = glob::glob("/sys/class/thermal/thermal_zone*/") {
+        for zone_path in paths.flatten() {
+            if let Ok(type_str) = fs::read_to_string(zone_path.join("type")) {
+                let type_name = type_str.trim();
+
+                if type_name.contains("coretemp") {
+                    if let Some(zone_name) = zone_path.file_name().and_then(|n| n.to_str()) {
+                        if let Some(idx_str) = zone_name.strip_prefix("thermal_zone") {
+                            if let Ok(zone_idx) = idx_str.parse::<u32>() {
+                                if let Ok(temp) = parse_temp_millidegrees(&zone_path.join("temp")) {
+                                    core_temps.insert(zone_idx, temp);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Build result vector with proper ordering
+    let mut result = Vec::with_capacity(num_cores);
+    for core_id in 0..num_cores {
+        result.push(core_temps.get(&(core_id as u32)).copied());
+    }
+
+    // If no per-core temps found, fall back to aggregate CPU temp
+    if core_temps.is_empty() {
+        if let Some(aggregate_temp) = read_cpu_temperature().ok().flatten() {
+            result = vec![Some(aggregate_temp); num_cores];
+        }
+    }
+
+    result
+}
+
+// ===== Per-Disk Temperature =====
+
+use std::collections::HashMap as StdHashMap;
+
+static DISK_TEMPS_CACHE: OnceLock<std::sync::Mutex<StdHashMap<String, CachedDiskTemp>>> = OnceLock::new();
+
+#[derive(Debug, Clone)]
+struct CachedDiskTemp {
+    temp: Option<f32>,
+    last_update: std::time::Instant,
+}
+
+fn get_physical_disks() -> Result<Vec<String>> {
+    let content = fs::read_to_string("/proc/diskstats")?;
+    let mut disks = Vec::new();
+
+    for line in content.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 3 {
+            let dev_name = parts[2];
+            if is_physical_disk(dev_name) {
+                disks.push(dev_name.to_string());
+            }
+        }
+    }
+
+    Ok(disks)
+}
+
+pub fn read_disk_temperatures() -> StdHashMap<String, Option<f32>> {
+    let mut temps = StdHashMap::new();
+
+    let Ok(disks) = get_physical_disks() else {
+        return temps;
+    };
+
+    let cache = DISK_TEMPS_CACHE.get_or_init(|| std::sync::Mutex::new(StdHashMap::new()));
+    let mut cache_lock = cache.lock().unwrap();
+
+    for disk in disks {
+        // Check cache (30-second interval per disk)
+        if let Some(cached) = cache_lock.get(&disk) {
+            if cached.last_update.elapsed().as_secs() < 30 {
+                temps.insert(disk.clone(), cached.temp);
+                continue;
+            }
+        }
+
+        // Read fresh temperature
+        let dev_path = format!("/dev/{}", disk);
+        let temp = try_smartctl(&dev_path)
+            .or_else(|_| try_hddtemp(&dev_path))
+            .ok()
+            .flatten();
+
+        // Update cache
+        cache_lock.insert(disk.clone(), CachedDiskTemp {
+            temp,
+            last_update: std::time::Instant::now(),
+        });
+
+        temps.insert(disk, temp);
+    }
+
+    temps
+}
+
+// ===== Fan Speed Monitoring =====
+
+pub fn read_fan_speeds() -> Vec<crate::event::FanReading> {
+    let mut fans = Vec::new();
+
+    let hwmon_pattern = "/sys/class/hwmon/hwmon*";
+
+    if let Ok(paths) = glob::glob(hwmon_pattern) {
+        for dir in paths.flatten() {
+            let fan_pattern = format!("{}/*_input", dir.display());
+            if let Ok(fan_paths) = glob::glob(&fan_pattern) {
+                for fan_path in fan_paths.flatten() {
+                    let path_str = fan_path.to_string_lossy();
+
+                    // Only process fan*_input files
+                    if !path_str.contains("fan") {
+                        continue;
+                    }
+
+                    // Read RPM value
+                    if let Ok(rpm_str) = fs::read_to_string(&fan_path) {
+                        if let Ok(rpm) = rpm_str.trim().parse::<u32>() {
+                            // Skip if fan is not spinning or invalid
+                            if rpm == 0 || rpm > 50000 {
+                                continue;
+                            }
+
+                            // Try to read label
+                            let label_path = path_str.replace("_input", "_label");
+                            let label = fs::read_to_string(&label_path)
+                                .ok()
+                                .map(|s| s.trim().to_string())
+                                .unwrap_or_else(|| {
+                                    if let Some(fan_num) = path_str
+                                        .split('/')
+                                        .last()
+                                        .and_then(|s| s.strip_prefix("fan"))
+                                        .and_then(|s| s.chars().next())
+                                        .and_then(|c| c.to_digit(10)) {
+                                        format!("Fan {}", fan_num)
+                                    } else {
+                                        "Unknown Fan".to_string()
+                                    }
+                                });
+
+                            fans.push(crate::event::FanReading { label, rpm });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Sort by label for consistent ordering
+    fans.sort_by(|a, b| a.label.cmp(&b.label));
+    fans
 }
 
 #[cfg(test)]

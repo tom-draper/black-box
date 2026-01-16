@@ -22,15 +22,16 @@ use broadcast::EventBroadcaster;
 use config::Config;
 
 use collector::{
-    diff_processes, get_top_processes, read_context_switches, read_cpu_stats, read_disk_space,
-    read_disk_stats, read_load_avg, read_logged_in_users, read_memory_stats, read_network_stats,
-    read_processes, read_swap_stats, read_tcp_stats, tail_auth_log, AuthEventType,
-    ConnectionTracker,
+    diff_processes, get_top_processes, read_all_cpu_stats, read_context_switches, read_disk_space,
+    read_disk_stats_per_device, read_disk_temperatures, read_fan_speeds, read_load_avg,
+    read_logged_in_users, read_memory_stats, read_network_stats, read_per_core_temperatures,
+    read_processes, read_swap_stats, read_tcp_stats, read_temperatures, tail_auth_log,
+    AuthEventType, ConnectionTracker,
 };
 use event::{
-    Anomaly, AnomalyKind, AnomalySeverity, Event, ProcessInfo, ProcessLifecycle,
+    Anomaly, AnomalyKind, AnomalySeverity, Event, PerDiskMetrics, ProcessInfo, ProcessLifecycle,
     ProcessLifecycleKind, ProcessSnapshot as EventProcessSnapshot, SecurityEvent,
-    SecurityEventKind, SystemMetrics,
+    SecurityEventKind, SystemMetrics, TemperatureReadings,
 };
 use recorder::Recorder;
 
@@ -115,8 +116,8 @@ fn main() -> Result<()> {
     println!("Press Ctrl+C to stop\n");
 
     // Initialize baseline metrics
-    let mut prev_cpu = read_cpu_stats()?;
-    let mut prev_disk = read_disk_stats()?;
+    let mut prev_cpu_snapshot = read_all_cpu_stats()?;
+    let mut prev_disk_snapshot = read_disk_stats_per_device()?;
     let mut prev_network = read_network_stats()?;
     let mut prev_ctxt = read_context_switches()?;
     let mut prev_processes = read_processes()?;
@@ -143,10 +144,23 @@ fn main() -> Result<()> {
     loop {
         thread::sleep(Duration::from_secs(COLLECTION_INTERVAL_SECS));
 
-        let cpu_stats = read_cpu_stats()?;
+        // CPU stats
+        let cpu_snapshot = read_all_cpu_stats()?;
+        let per_core_usage = cpu_snapshot.per_core_usage(&prev_cpu_snapshot);
+        let cpu_usage = cpu_snapshot.aggregate.usage_percent(&prev_cpu_snapshot.aggregate);
+
+        // Disk stats
+        let disk_snapshot = read_disk_stats_per_device()?;
+        let per_disk_throughput = disk_snapshot.per_disk_throughput(
+            &prev_disk_snapshot,
+            COLLECTION_INTERVAL_SECS as f32,
+        );
+        let (disk_read_per_sec, disk_write_per_sec) =
+            disk_snapshot.total.bytes_per_sec(&prev_disk_snapshot.total, COLLECTION_INTERVAL_SECS as f32);
+
+        // Other existing stats
         let mem_stats = read_memory_stats()?;
         let swap_stats = read_swap_stats()?;
-        let disk_stats = read_disk_stats()?;
         let disk_space = read_disk_space()?;
         let load_avg = read_load_avg()?;
         let network_stats = read_network_stats()?;
@@ -154,17 +168,35 @@ fn main() -> Result<()> {
         let tcp_stats = read_tcp_stats()?;
         let current_processes = read_processes()?;
 
-        let cpu_usage = cpu_stats.usage_percent(&prev_cpu);
-        let (disk_read_per_sec, disk_write_per_sec) =
-            disk_stats.bytes_per_sec(&prev_disk, COLLECTION_INTERVAL_SECS as f32);
+        // Temperature and fans
+        let temps = read_temperatures();
+        let per_core_temps = read_per_core_temperatures(per_core_usage.len());
+        let disk_temps = read_disk_temperatures();
+        let fans = read_fan_speeds();
+
+        // Calculate throughput
         let (net_recv_per_sec, net_send_per_sec) =
             network_stats.bytes_per_sec(&prev_network, COLLECTION_INTERVAL_SECS as f32);
         let ctxt_per_sec = ctxt_stats.per_sec(&prev_ctxt, COLLECTION_INTERVAL_SECS as f32);
+
+        // Build per-disk metrics with temperatures
+        let per_disk_metrics: Vec<PerDiskMetrics> = per_disk_throughput
+            .into_iter()
+            .map(|(dev_name, read_ps, write_ps)| {
+                PerDiskMetrics {
+                    device_name: dev_name.clone(),
+                    read_bytes_per_sec: read_ps,
+                    write_bytes_per_sec: write_ps,
+                    temp_celsius: disk_temps.get(&dev_name).and_then(|t| *t),
+                }
+            })
+            .collect();
 
         // Record system metrics
         let system_metrics = SystemMetrics {
             ts: OffsetDateTime::now_utc(),
             cpu_usage_percent: cpu_usage,
+            per_core_usage,
             mem_used_bytes: mem_stats.used_kb() * 1024,
             mem_total_bytes: mem_stats.total_kb * 1024,
             swap_used_bytes: swap_stats.used_kb() * 1024,
@@ -176,11 +208,19 @@ fn main() -> Result<()> {
             disk_write_bytes_per_sec: disk_write_per_sec,
             disk_used_bytes: disk_space.used_bytes,
             disk_total_bytes: disk_space.total_bytes,
+            per_disk_metrics,
             net_recv_bytes_per_sec: net_recv_per_sec,
             net_send_bytes_per_sec: net_send_per_sec,
             tcp_connections: tcp_stats.total_connections,
             tcp_time_wait: tcp_stats.time_wait,
             context_switches_per_sec: ctxt_per_sec,
+            temps: TemperatureReadings {
+                cpu_temp_celsius: temps.cpu_temp_celsius,
+                per_core_temps,
+                gpu_temp_celsius: temps.gpu_temp_celsius,
+                motherboard_temp_celsius: temps.motherboard_temp_celsius,
+            },
+            fans,
         };
         recorder.append(&Event::SystemMetrics(system_metrics))?;
 
@@ -316,8 +356,8 @@ fn main() -> Result<()> {
             recorder.append(&Event::Anomaly(anomaly))?;
         }
 
-        prev_cpu = cpu_stats;
-        prev_disk = disk_stats;
+        prev_cpu_snapshot = cpu_snapshot;
+        prev_disk_snapshot = disk_snapshot;
         prev_network = network_stats;
         prev_ctxt = ctxt_stats;
         prev_processes = current_processes;

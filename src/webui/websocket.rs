@@ -52,11 +52,6 @@ impl WsSession {
             while count < 10 {
                 match rx.try_recv() {
                     Ok(event) => {
-                        // Skip ProcessSnapshot events (don't show top 10 processes)
-                        if matches!(event, Event::ProcessSnapshot(_)) {
-                            continue;
-                        }
-
                         // Only show every 10th SystemMetrics event
                         if matches!(event, Event::SystemMetrics(_)) {
                             let counter = METRICS_COUNTER.fetch_add(1, Ordering::Relaxed) + 1;
@@ -167,6 +162,7 @@ fn event_to_json(event: &crate::event::Event) -> serde_json::Value {
                 "type": "SystemMetrics",
                 "timestamp": m.ts.format(&Rfc3339).unwrap_or_default(),
                 "cpu": m.cpu_usage_percent,
+                "per_core_cpu": m.per_core_usage,
                 "mem": mem_pct,
                 "mem_used": m.mem_used_bytes,
                 "mem_total": m.mem_total_bytes,
@@ -181,11 +177,25 @@ fn event_to_json(event: &crate::event::Event) -> serde_json::Value {
                 "disk_total": m.disk_total_bytes,
                 "disk_read": m.disk_read_bytes_per_sec,
                 "disk_write": m.disk_write_bytes_per_sec,
+                "per_disk": m.per_disk_metrics.iter().map(|d| serde_json::json!({
+                    "device": d.device_name,
+                    "read": d.read_bytes_per_sec,
+                    "write": d.write_bytes_per_sec,
+                    "temp": d.temp_celsius,
+                })).collect::<Vec<_>>(),
                 "net_recv": m.net_recv_bytes_per_sec,
                 "net_send": m.net_send_bytes_per_sec,
                 "tcp": m.tcp_connections,
                 "tcp_wait": m.tcp_time_wait,
                 "ctxt": m.context_switches_per_sec,
+                "cpu_temp": m.temps.cpu_temp_celsius,
+                "per_core_temps": m.temps.per_core_temps,
+                "gpu_temp": m.temps.gpu_temp_celsius,
+                "mobo_temp": m.temps.motherboard_temp_celsius,
+                "fans": m.fans.iter().map(|f| serde_json::json!({
+                    "label": f.label,
+                    "rpm": f.rpm,
+                })).collect::<Vec<_>>(),
             })
         }
         Event::ProcessLifecycle(p) => serde_json::json!({
