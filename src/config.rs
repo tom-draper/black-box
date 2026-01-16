@@ -2,10 +2,31 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProtectionMode {
+    Default,
+    Protected,
+    Hardened,
+}
+
+impl ProtectionMode {
+    pub fn from_args(args: &[String]) -> Self {
+        if args.iter().any(|arg| arg == "--hardened") {
+            ProtectionMode::Hardened
+        } else if args.iter().any(|arg| arg == "--protected") {
+            ProtectionMode::Protected
+        } else {
+            ProtectionMode::Default
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
     pub auth: AuthConfig,
     pub server: ServerConfig,
+    #[serde(default)]
+    pub protection: ProtectionConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -19,6 +40,38 @@ pub struct AuthConfig {
 pub struct ServerConfig {
     pub port: u16,
     pub data_dir: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ProtectionConfig {
+    #[serde(default)]
+    pub append_only: bool,
+    #[serde(default)]
+    pub remote_syslog: Option<RemoteSyslogConfig>,
+    #[serde(default)]
+    pub sign_events: bool,
+    #[serde(default)]
+    pub signing_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RemoteSyslogConfig {
+    pub enabled: bool,
+    pub host: String,
+    pub port: u16,
+    #[serde(default)]
+    pub protocol: String, // "tcp" or "udp"
+}
+
+impl Default for ProtectionConfig {
+    fn default() -> Self {
+        Self {
+            append_only: false,
+            remote_syslog: None,
+            sign_events: false,
+            signing_key: None,
+        }
+    }
 }
 
 impl Config {
@@ -53,6 +106,7 @@ impl Config {
                 port: 8080,
                 data_dir: "./data".to_string(),
             },
+            protection: ProtectionConfig::default(),
         };
 
         let toml_content = toml::to_string_pretty(&config)
@@ -84,6 +138,7 @@ impl Config {
                 port: 8080,
                 data_dir: "./test_data".to_string(),
             },
+            protection: ProtectionConfig::default(),
         }
     }
 }

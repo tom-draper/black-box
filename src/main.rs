@@ -2,6 +2,7 @@ mod broadcast;
 mod collector;
 mod config;
 mod event;
+mod protection;
 mod reader;
 mod recorder;
 mod storage;
@@ -19,7 +20,8 @@ use std::{
 use time::OffsetDateTime;
 
 use broadcast::EventBroadcaster;
-use config::Config;
+use config::{Config, ProtectionMode, RemoteSyslogConfig};
+use protection::ProtectionManager;
 
 use collector::{
     diff_processes, get_top_processes, read_all_cpu_stats, read_context_switches, read_disk_space,
@@ -43,11 +45,18 @@ const SECURITY_CHECK_INTERVAL: u64 = 5; // Check security events every 5 seconds
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
+    // Parse protection mode from command line
+    let protection_mode = ProtectionMode::from_args(&args);
+
     // Check for --no-ui or --headless flag
     let disable_ui = args.iter().any(|arg| arg == "--no-ui" || arg == "--headless");
 
     // Load configuration
     let config = Config::load()?;
+
+    // Create protection manager
+    let mut protection_manager = ProtectionManager::new(protection_mode, config.protection.clone());
+    protection_manager.print_info();
 
     // Parse port (command line overrides config)
     let port = args
@@ -62,11 +71,12 @@ fn main() -> Result<()> {
     // Create broadcast channel for event streaming
     let (broadcast_tx, broadcaster) = EventBroadcaster::new();
 
-    // Start async web server (unless disabled)
-    if !disable_ui {
+    // Start async services (web server and remote streaming)
+    if !disable_ui || config.protection.remote_syslog.as_ref().map(|c| c.enabled).unwrap_or(false) {
         let data_dir_clone = data_dir.clone();
         let config_clone = config.clone();
         let broadcaster = Arc::new(broadcaster);
+        let protection_config = config.protection.clone();
 
         // Spawn Tokio runtime in background thread
         std::thread::spawn(move || {
@@ -82,12 +92,29 @@ fn main() -> Result<()> {
                 }
             };
 
-            // Run async web server
+            // Run async services
             rt.block_on(async {
-                if let Err(e) =
-                    webui::start_server(data_dir_clone, port, broadcaster, config_clone).await
-                {
-                    eprintln!("Web UI failed to start: {}", e);
+                // Start remote streaming if configured
+                if let Some(ref syslog_config) = protection_config.remote_syslog {
+                    if syslog_config.enabled && protection_mode != ProtectionMode::Default {
+                        let broadcaster_clone = broadcaster.clone();
+                        let syslog_config = syslog_config.clone();
+                        tokio::spawn(async move {
+                            start_remote_streaming(broadcaster_clone, syslog_config).await;
+                        });
+                    }
+                }
+
+                // Start web server if not disabled
+                if !disable_ui {
+                    if let Err(e) =
+                        webui::start_server(data_dir_clone, port, broadcaster, config_clone).await
+                    {
+                        eprintln!("Web UI failed to start: {}", e);
+                    }
+                } else {
+                    // Keep runtime alive for remote streaming
+                    tokio::signal::ctrl_c().await.ok();
                 }
             });
         });
@@ -95,6 +122,15 @@ fn main() -> Result<()> {
 
     // Run recorder in main thread with broadcasting
     let mut recorder = Recorder::open_with_broadcast(&data_dir, broadcast_tx)?;
+
+    // Protect existing segment files
+    if let Ok(entries) = std::fs::read_dir(&data_dir) {
+        for entry in entries.flatten() {
+            if entry.path().extension().and_then(|s| s.to_str()) == Some("seg") {
+                let _ = protection_manager.protect_file(&entry.path());
+            }
+        }
+    }
 
     println!("Black Box");
     println!();
@@ -608,6 +644,85 @@ fn format_bytes(bytes: u64) -> String {
         format!("{:.1}MB", bytes as f64 / 1024.0 / 1024.0)
     } else {
         format!("{:.1}GB", bytes as f64 / 1024.0 / 1024.0 / 1024.0)
+    }
+}
+
+// Remote streaming task - sends events to remote syslog
+async fn start_remote_streaming(broadcaster: Arc<EventBroadcaster>, config: RemoteSyslogConfig) {
+    use tokio::net::TcpStream;
+    use tokio::net::UdpSocket;
+    use tokio::io::AsyncWriteExt;
+
+    println!("✓ Remote log streaming enabled: {}:{} ({})", config.host, config.port, config.protocol);
+
+    let mut rx = broadcaster.subscribe();
+    let addr = format!("{}:{}", config.host, config.port);
+
+    // Try to establish connection for TCP
+    let mut tcp_stream: Option<TcpStream> = None;
+    if config.protocol == "tcp" {
+        match TcpStream::connect(&addr).await {
+            Ok(stream) => {
+                println!("✓ Connected to remote syslog via TCP");
+                tcp_stream = Some(stream);
+            }
+            Err(e) => {
+                eprintln!("⚠ Failed to connect to remote syslog: {}", e);
+                eprintln!("  Events will be buffered and retried");
+            }
+        }
+    }
+
+    // For UDP, create socket once
+    let udp_socket = if config.protocol == "udp" {
+        match UdpSocket::bind("0.0.0.0:0").await {
+            Ok(socket) => {
+                println!("✓ Remote syslog via UDP ready");
+                Some(socket)
+            }
+            Err(e) => {
+                eprintln!("⚠ Failed to create UDP socket: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    loop {
+        match rx.recv().await {
+            Ok(event) => {
+                // Serialize event to JSON
+                let json = match serde_json::to_string(&event) {
+                    Ok(j) => j,
+                    Err(_) => continue,
+                };
+
+                // Send based on protocol
+                if config.protocol == "tcp" {
+                    if let Some(ref mut stream) = tcp_stream {
+                        let msg = format!("{}\n", json);
+                        if stream.write_all(msg.as_bytes()).await.is_err() {
+                            // Connection lost, try to reconnect
+                            eprintln!("⚠ Lost connection to remote syslog, reconnecting...");
+                            tcp_stream = TcpStream::connect(&addr).await.ok();
+                        }
+                    } else {
+                        // Try to reconnect periodically
+                        tcp_stream = TcpStream::connect(&addr).await.ok();
+                        if tcp_stream.is_some() {
+                            println!("✓ Reconnected to remote syslog");
+                        }
+                    }
+                } else if let Some(ref socket) = udp_socket {
+                    let _ = socket.send_to(json.as_bytes(), &addr).await;
+                }
+            }
+            Err(_) => {
+                // Channel closed
+                break;
+            }
+        }
     }
 }
 

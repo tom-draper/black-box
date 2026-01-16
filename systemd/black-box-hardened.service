@@ -1,0 +1,43 @@
+[Unit]
+Description=Black Box Server Forensics Recorder (Hardened Mode)
+Documentation=https://github.com/yourusername/black-box
+After=network.target
+# Make it harder to disable this unit
+DefaultDependencies=no
+RequiresMountsFor=/opt/black-box
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/black-box
+ExecStart=/opt/black-box/black-box --hardened --no-ui
+Restart=always
+RestartSec=2s
+
+# Aggressive restart policy
+StartLimitInterval=0
+StartLimitBurst=0
+
+# Security hardening
+PrivateTmp=yes
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/black-box/data
+
+# Protection from OOM killer (maximum protection)
+OOMScoreAdjust=-1000
+
+# Make it harder to stop
+# Note: This can still be stopped with: systemctl stop black-box-hardened
+# For maximum protection, also run: systemctl mask --runtime black-box-hardened
+KillMode=mixed
+KillSignal=SIGTERM
+SendSIGHUP=yes
+SendSIGKILL=yes
+TimeoutStopSec=10s
+
+[Install]
+WantedBy=multi-user.target
+# Also want it in emergency mode
+WantedBy=emergency.target

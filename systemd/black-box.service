@@ -1,0 +1,21 @@
+[Unit]
+Description=Black Box Server Forensics Recorder (Default Mode)
+Documentation=https://github.com/yourusername/black-box
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/black-box
+ExecStart=/opt/black-box/black-box --no-ui
+Restart=no
+
+# Security hardening
+PrivateTmp=yes
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/black-box/data
+
+[Install]
+WantedBy=multi-user.target

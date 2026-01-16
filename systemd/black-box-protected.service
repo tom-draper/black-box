@@ -1,0 +1,29 @@
+[Unit]
+Description=Black Box Server Forensics Recorder (Protected Mode)
+Documentation=https://github.com/yourusername/black-box
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/black-box
+ExecStart=/opt/black-box/black-box --protected --no-ui
+Restart=always
+RestartSec=5s
+
+# Restart limits (prevent resource exhaustion)
+StartLimitInterval=300
+StartLimitBurst=10
+
+# Security hardening
+PrivateTmp=yes
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/black-box/data
+
+# Protection from OOM killer
+OOMScoreAdjust=-900
+
+[Install]
+WantedBy=multi-user.target
