@@ -1,4 +1,8 @@
-# Black Box - Server Forensics Recorder
+<p align="center">
+  <img width="50" height="50" alt="black-box" src="https://github.com/user-attachments/assets/94d70715-e9fe-4d74-8e3e-7a591e9ab543" />
+</p>
+
+<h1 align="center">Black Box</h1>
 
 A lightweight, always-on forensics recorder for Linux servers. Captures system metrics, process events, and security events to help with post-incident analysis.
 
