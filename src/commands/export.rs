@@ -199,6 +199,7 @@ mod tests {
             disk_used_bytes: 0,
             disk_total_bytes: 0,
             per_disk_metrics: vec![],
+            filesystems: vec![],
             net_recv_bytes_per_sec: 0,
             net_send_bytes_per_sec: 0,
             tcp_connections: 0,
@@ -211,6 +212,7 @@ mod tests {
                 motherboard_temp_celsius: None,
             },
             fans: vec![],
+            logged_in_users: vec![],
         });
 
         assert!(matches_event_type(&event, "system"));

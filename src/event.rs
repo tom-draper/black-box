@@ -28,6 +28,7 @@ pub struct SystemMetrics {
     pub disk_used_bytes: u64,
     pub disk_total_bytes: u64,
     pub per_disk_metrics: Vec<PerDiskMetrics>,
+    pub filesystems: Vec<FilesystemInfo>,
     pub net_recv_bytes_per_sec: u64,
     pub net_send_bytes_per_sec: u64,
     pub tcp_connections: u32,
@@ -35,6 +36,15 @@ pub struct SystemMetrics {
     pub context_switches_per_sec: u64,
     pub temps: TemperatureReadings,
     pub fans: Vec<FanReading>,
+    pub logged_in_users: Vec<LoggedInUserInfo>,
+}
+
+// Logged in user info
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoggedInUserInfo {
+    pub username: String,
+    pub terminal: String,
+    pub remote_host: Option<String>,
 }
 
 // Temperature readings from various sensors
@@ -53,13 +63,23 @@ pub struct FanReading {
     pub rpm: u32,
 }
 
-// Per-disk metrics
+// Per-disk metrics (I/O stats)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerDiskMetrics {
     pub device_name: String,
     pub read_bytes_per_sec: u64,
     pub write_bytes_per_sec: u64,
     pub temp_celsius: Option<f32>,
+}
+
+// Filesystem usage stats (like df output)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FilesystemInfo {
+    pub filesystem: String,
+    pub mount_point: String,
+    pub total_bytes: u64,
+    pub used_bytes: u64,
+    pub available_bytes: u64,
 }
 
 // Process lifecycle events (start/exit)

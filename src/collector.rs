@@ -396,6 +396,15 @@ pub struct DiskSpaceStats {
     pub used_bytes: u64,
 }
 
+#[derive(Debug, Clone)]
+pub struct FilesystemStats {
+    pub filesystem: String,
+    pub mount_point: String,
+    pub total_bytes: u64,
+    pub used_bytes: u64,
+    pub available_bytes: u64,
+}
+
 pub fn read_disk_space() -> Result<DiskSpaceStats> {
     // Simple approach: use df for root
     let output = std::process::Command::new("df")
@@ -419,6 +428,46 @@ pub fn read_disk_space() -> Result<DiskSpaceStats> {
     }
 
     anyhow::bail!("Failed to parse df output")
+}
+
+pub fn read_all_filesystems() -> Result<Vec<FilesystemStats>> {
+    let output = std::process::Command::new("df")
+        .arg("-B1") // 1-byte blocks
+        .arg("-x").arg("tmpfs")
+        .arg("-x").arg("devtmpfs")
+        .arg("-x").arg("squashfs")
+        .arg("-x").arg("overlay")
+        .output()
+        .context("Failed to run df")?;
+
+    let content = String::from_utf8_lossy(&output.stdout);
+    let mut filesystems = Vec::new();
+
+    for line in content.lines().skip(1) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 6 {
+            let filesystem = parts[0].to_string();
+            let total: u64 = parts[1].parse().unwrap_or(0);
+            let used: u64 = parts[2].parse().unwrap_or(0);
+            let available: u64 = parts[3].parse().unwrap_or(0);
+            let mount_point = parts[5].to_string();
+
+            // Skip if total is 0 or mount point is system-related
+            if total == 0 {
+                continue;
+            }
+
+            filesystems.push(FilesystemStats {
+                filesystem,
+                mount_point,
+                total_bytes: total,
+                used_bytes: used,
+                available_bytes: available,
+            });
+        }
+    }
+
+    Ok(filesystems)
 }
 
 // ===== Network I/O Stats =====

@@ -171,6 +171,18 @@ fn event_to_json(event: &crate::event::Event) -> serde_json::Value {
                     "write": d.write_bytes_per_sec,
                     "temp": d.temp_celsius,
                 })).collect::<Vec<_>>(),
+                "filesystems": m.filesystems.iter().map(|fs| serde_json::json!({
+                    "filesystem": fs.filesystem,
+                    "mount": fs.mount_point,
+                    "total": fs.total_bytes,
+                    "used": fs.used_bytes,
+                    "available": fs.available_bytes,
+                })).collect::<Vec<_>>(),
+                "users": m.logged_in_users.iter().map(|u| serde_json::json!({
+                    "username": u.username,
+                    "terminal": u.terminal,
+                    "remote_host": u.remote_host,
+                })).collect::<Vec<_>>(),
                 "net_recv": m.net_recv_bytes_per_sec,
                 "net_send": m.net_send_bytes_per_sec,
                 "tcp": m.tcp_connections,

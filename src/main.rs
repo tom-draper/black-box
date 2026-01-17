@@ -29,16 +29,16 @@ use protection::ProtectionManager;
 use collector::{
     check_group_changes, check_kernel_module_changes, check_listening_port_changes,
     check_passwd_changes, check_sudoers_changes, diff_processes, get_top_processes,
-    read_all_cpu_stats, read_context_switches, read_disk_space, read_disk_stats_per_device,
-    read_disk_temperatures, read_fan_speeds, read_load_avg, read_logged_in_users,
-    read_memory_stats, read_network_stats, read_per_core_temperatures, read_processes,
-    read_swap_stats, read_tcp_stats, read_temperatures, tail_auth_log, AuthEventType,
-    ConnectionTracker,
+    read_all_cpu_stats, read_all_filesystems, read_context_switches, read_disk_space,
+    read_disk_stats_per_device, read_disk_temperatures, read_fan_speeds, read_load_avg,
+    read_logged_in_users, read_memory_stats, read_network_stats, read_per_core_temperatures,
+    read_processes, read_swap_stats, read_tcp_stats, read_temperatures, tail_auth_log,
+    AuthEventType, ConnectionTracker,
 };
 use event::{
-    Anomaly, AnomalyKind, AnomalySeverity, Event, PerDiskMetrics, ProcessInfo, ProcessLifecycle,
-    ProcessLifecycleKind, ProcessSnapshot as EventProcessSnapshot, SecurityEvent,
-    SecurityEventKind, SystemMetrics, TemperatureReadings,
+    Anomaly, AnomalyKind, AnomalySeverity, Event, FilesystemInfo, LoggedInUserInfo, PerDiskMetrics,
+    ProcessInfo, ProcessLifecycle, ProcessLifecycleKind, ProcessSnapshot as EventProcessSnapshot,
+    SecurityEvent, SecurityEventKind, SystemMetrics, TemperatureReadings,
 };
 use recorder::Recorder;
 
@@ -361,6 +361,17 @@ fn run_recorder(cli: Cli) -> Result<()> {
             disk_used_bytes: disk_space.used_bytes,
             disk_total_bytes: disk_space.total_bytes,
             per_disk_metrics,
+            filesystems: read_all_filesystems()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|fs| FilesystemInfo {
+                    filesystem: fs.filesystem,
+                    mount_point: fs.mount_point,
+                    total_bytes: fs.total_bytes,
+                    used_bytes: fs.used_bytes,
+                    available_bytes: fs.available_bytes,
+                })
+                .collect(),
             net_recv_bytes_per_sec: net_recv_per_sec,
             net_send_bytes_per_sec: net_send_per_sec,
             tcp_connections: tcp_stats.total_connections,
@@ -373,6 +384,15 @@ fn run_recorder(cli: Cli) -> Result<()> {
                 motherboard_temp_celsius: temps.motherboard_temp_celsius,
             },
             fans,
+            logged_in_users: read_logged_in_users()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|u| LoggedInUserInfo {
+                    username: u.username,
+                    terminal: u.terminal,
+                    remote_host: u.remote_host,
+                })
+                .collect(),
         };
         recorder.append(&Event::SystemMetrics(system_metrics))?;
 
