@@ -84,7 +84,7 @@ pub async fn index() -> HttpResponse {
             border: 1px solid #333;
             padding: 15px;
             overflow-x: auto;
-            max-height: 70vh;
+            max-height: calc(100vh - 650px);
             overflow-y: auto;
         }
 
@@ -648,7 +648,7 @@ pub async fn index() -> HttpResponse {
             const div = document.createElement('div');
             div.className = 'log-entry';
 
-            let text = '[' + ts.substring(11, 19) + '] ';
+            let text = '[' + ts.substring(11, 23) + '] ';
 
             if (type === 'SystemMetrics') {
                 text += '[SYSTEM] CPU:' + event.cpu.toFixed(1) + '% ';

@@ -26,7 +26,7 @@ pub async fn start_server(
         broadcaster_clone.run().await;
     });
 
-    println!("Starting web server on 0.0.0.0:{}", port);
+    println!("Server listening on http://localhost:{}", port);
 
     HttpServer::new(move || {
         App::new()
@@ -42,7 +42,6 @@ pub async fn start_server(
             .route("/health", web::get().to(health::health_check))
     })
     .bind(("0.0.0.0", port))?
-    // .bind(("127.0.0.1", port))?
     .run()
     .await
     .map_err(|e| anyhow::anyhow!("Server error: {}", e))

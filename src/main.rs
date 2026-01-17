@@ -47,6 +47,18 @@ const TOP_PROCESSES_COUNT: usize = 10;
 const PROCESS_SNAPSHOT_INTERVAL: u64 = 5; // Snapshot top processes every 5 seconds
 const SECURITY_CHECK_INTERVAL: u64 = 5; // Check security events every 5 seconds
 
+/// Format current time as HH:MM:SS.mmm
+fn now_timestamp() -> String {
+    let now = OffsetDateTime::now_utc();
+    format!(
+        "{:02}:{:02}:{:02}.{:03}",
+        now.hour(),
+        now.minute(),
+        now.second(),
+        now.millisecond()
+    )
+}
+
 fn main() -> Result<()> {
     use cli::{Cli, Commands, ConfigCommands, SystemdCommands};
 
@@ -534,7 +546,8 @@ fn run_recorder(cli: Cli) -> Result<()> {
                         };
                         recorder.append(&Event::SecurityEvent(event))?;
                         println!(
-                            "  [SEC] User login: {} on {} from {}",
+                            "[{}] [SEC] User login: {} on {} from {}",
+                            now_timestamp(),
                             user.username,
                             user.terminal,
                             user.remote_host.as_deref().unwrap_or("local")
@@ -593,7 +606,8 @@ fn run_recorder(cli: Cli) -> Result<()> {
                                         };
                                         recorder.append(&Event::Anomaly(anomaly))?;
                                         println!(
-                                            "  [!] Brute force detected from {}: {} attempts",
+                                            "[{}] [!] Brute force detected from {}: {} attempts",
+                                            now_timestamp(),
                                             ip,
                                             attempts.len()
                                         );
@@ -625,7 +639,8 @@ fn run_recorder(cli: Cli) -> Result<()> {
                     match entry.event_type {
                         AuthEventType::SshSuccess => {
                             println!(
-                                "  [SEC] SSH login: {} from {}",
+                                "[{}] [SEC] SSH login: {} from {}",
+                                now_timestamp(),
                                 entry.user,
                                 entry.source_ip.as_deref().unwrap_or("unknown")
                             );
@@ -633,14 +648,15 @@ fn run_recorder(cli: Cli) -> Result<()> {
                         AuthEventType::SshFailure | AuthEventType::InvalidUser => {
                             if severity == AnomalySeverity::Warning {
                                 println!(
-                                    "  [SEC] SSH failure: {} from {}",
+                                    "[{}] [SEC] SSH failure: {} from {}",
+                                    now_timestamp(),
                                     entry.user,
                                     entry.source_ip.as_deref().unwrap_or("unknown")
                                 );
                             }
                         }
                         AuthEventType::SudoCommand => {
-                            println!("  [SEC] Sudo: {}", entry.user);
+                            println!("[{}] [SEC] [SUDO] {}", now_timestamp(), entry.user);
                         }
                         _ => {}
                     }
@@ -657,7 +673,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
                         message: alert.clone(),
                     };
                     recorder.append(&Event::Anomaly(anomaly))?;
-                    println!("  [!] Port scan: {}", alert);
+                    println!("[{}] [!] Port scan: {}", now_timestamp(), alert);
                 }
             }
 
@@ -671,7 +687,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
                     message: msg.clone(),
                 };
                 recorder.append(&Event::SecurityEvent(event))?;
-                println!("  [SEC] {}", msg);
+                println!("[{}] [SEC] {}", now_timestamp(), msg);
             }
 
             // Check for group changes
@@ -684,7 +700,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
                     message: msg.clone(),
                 };
                 recorder.append(&Event::SecurityEvent(event))?;
-                println!("  [SEC] {}", msg);
+                println!("[{}] [SEC] {}", now_timestamp(), msg);
             }
 
             // Check for sudoers changes
@@ -697,7 +713,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
                     message: msg.clone(),
                 };
                 recorder.append(&Event::SecurityEvent(event))?;
-                println!("  [SEC] {}", msg);
+                println!("[{}] [SEC] {}", now_timestamp(), msg);
             }
 
             // Check for new/closed listening ports
@@ -711,7 +727,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
                         message: format!("New listening port: {} port {}", proto_addr, port),
                     };
                     recorder.append(&Event::SecurityEvent(event))?;
-                    println!("  [SEC] New listening port: {} port {}", proto_addr, port);
+                    println!("[{}] [SEC] New listening port: {} port {}", now_timestamp(), proto_addr, port);
                 }
 
                 for (proto_addr, port) in closed_ports {
@@ -723,7 +739,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
                         message: format!("Listening port closed: {} port {}", proto_addr, port),
                     };
                     recorder.append(&Event::SecurityEvent(event))?;
-                    println!("  [SEC] Listening port closed: {} port {}", proto_addr, port);
+                    println!("[{}] [SEC] Listening port closed: {} port {}", now_timestamp(), proto_addr, port);
                 }
             }
 
@@ -738,7 +754,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
                         message: format!("Kernel module loaded: {}", module),
                     };
                     recorder.append(&Event::SecurityEvent(event))?;
-                    println!("  [SEC] Kernel module loaded: {}", module);
+                    println!("[{}] [SEC] Kernel module loaded: {}", now_timestamp(), module);
                 }
 
                 for module in unloaded {
@@ -750,7 +766,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
                         message: format!("Kernel module unloaded: {}", module),
                     };
                     recorder.append(&Event::SecurityEvent(event))?;
-                    println!("  [SEC] Kernel module unloaded: {}", module);
+                    println!("[{}] [SEC] Kernel module unloaded: {}", now_timestamp(), module);
                 }
             }
         }
@@ -801,7 +817,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
 
             println!(
                 "[{}] CPU:{:.1}%  Mem:{:.1}%  Disk:{:.0}%  Load:{:.2}  Net:R={}/s,T={}/s  TCP:{}  Ctxt:{}/s{}",
-                count,
+                now_timestamp(),
                 cpu_usage,
                 mem_usage_percent,
                 disk_usage_percent,
@@ -817,25 +833,25 @@ fn run_recorder(cli: Cli) -> Result<()> {
         // Report interesting events
         if !proc_diff.started.is_empty() {
             for proc in &proc_diff.started {
-                println!("  [+] Process started: {} (pid {})", proc.name, proc.pid);
+                println!("[{}] [+] Process started: {} (pid {})", now_timestamp(), proc.name, proc.pid);
             }
         }
 
         if !proc_diff.exited.is_empty() {
             for proc in &proc_diff.exited {
-                println!("  [-] Process exited: {} (pid {})", proc.name, proc.pid);
+                println!("[{}] [-] Process exited: {} (pid {})", now_timestamp(), proc.name, proc.pid);
             }
         }
 
         if !proc_diff.stuck.is_empty() {
             for proc in &proc_diff.stuck {
-                println!("  [!] Process STUCK (D state): {} (pid {})", proc.name, proc.pid);
+                println!("[{}] [!] Process STUCK (D state): {} (pid {})", now_timestamp(), proc.name, proc.pid);
             }
         }
 
         if !proc_diff.zombie.is_empty() {
             for proc in &proc_diff.zombie {
-                println!("  [Z] Zombie process: {} (pid {})", proc.name, proc.pid);
+                println!("[{}] [Z] Zombie process: {} (pid {})", now_timestamp(), proc.name, proc.pid);
             }
         }
     }
