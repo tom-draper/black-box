@@ -6,8 +6,6 @@
 
 A lightweight, always-on forensics recorder for Linux servers. Captures system metrics, process events, and security events to help with post-incident analysis.
 
-Platform: Linux only (requires `/proc` filesystem)
-
 ## Features
 
 - Always-on monitoring with minimal overhead
