@@ -37,32 +37,6 @@ impl CpuStats {
     }
 }
 
-pub fn read_cpu_stats() -> Result<CpuStats> {
-    let content = fs::read_to_string("/proc/stat").context("Failed to read /proc/stat")?;
-
-    let line = content.lines().next().context("Empty /proc/stat")?;
-
-    if !line.starts_with("cpu ") {
-        anyhow::bail!("Unexpected /proc/stat format");
-    }
-
-    let parts: Vec<&str> = line.split_whitespace().collect();
-    if parts.len() < 9 {
-        anyhow::bail!("Not enough fields in /proc/stat cpu line");
-    }
-
-    Ok(CpuStats {
-        user: parts[1].parse().context("Parse user")?,
-        nice: parts[2].parse().context("Parse nice")?,
-        system: parts[3].parse().context("Parse system")?,
-        idle: parts[4].parse().context("Parse idle")?,
-        iowait: parts[5].parse().context("Parse iowait")?,
-        irq: parts[6].parse().context("Parse irq")?,
-        softirq: parts[7].parse().context("Parse softirq")?,
-        steal: parts[8].parse().context("Parse steal")?,
-    })
-}
-
 // ===== Per-Core CPU Stats =====
 
 #[derive(Debug, Clone)]
@@ -287,6 +261,7 @@ fn is_physical_disk(dev_name: &str) -> bool {
 // Per-disk stats structure (for internal use)
 #[derive(Debug, Clone)]
 pub struct DiskStatsDetailed {
+    #[allow(dead_code)]
     pub device_name: String,
     pub read_bytes: u64,
     pub write_bytes: u64,
@@ -370,10 +345,6 @@ impl AllDisksStats {
         results.sort_by(|a, b| a.0.cmp(&b.0));
         results
     }
-}
-
-pub fn read_disk_stats() -> Result<DiskStats> {
-    Ok(read_disk_stats_per_device()?.total)
 }
 
 impl DiskStats {
@@ -602,6 +573,7 @@ pub struct ProcessDetail {
     pub name: String,
     pub cmdline: String,
     pub state: String,
+    #[allow(dead_code)]
     pub cpu_time_jiffies: u64, // Total CPU time (user + system)
     pub mem_bytes: u64,
     pub read_bytes: u64,
@@ -807,6 +779,7 @@ pub fn diff_processes(prev: &ProcessSnapshot, current: &ProcessSnapshot) -> Proc
 pub struct LoggedInUser {
     pub username: String,
     pub terminal: String,
+    #[allow(dead_code)]
     pub login_time: String,
     pub remote_host: Option<String>,
 }
@@ -850,6 +823,7 @@ pub fn read_logged_in_users() -> Result<Vec<LoggedInUser>> {
 
 #[derive(Debug, Clone)]
 pub struct AuthLogEntry {
+    #[allow(dead_code)]
     pub timestamp: String,
     pub event_type: AuthEventType,
     pub user: String,
@@ -862,8 +836,10 @@ pub enum AuthEventType {
     SshSuccess,
     SshFailure,
     SudoCommand,
+    #[allow(dead_code)]
     FailedPassword,
     InvalidUser,
+    #[allow(dead_code)]
     Other,
 }
 
@@ -1072,7 +1048,6 @@ pub fn get_top_processes(n: usize) -> Result<Vec<ProcessDetail>> {
 
 // ===== Temperature Monitoring =====
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 // Parse temperature from millidegrees to Celsius
@@ -1175,29 +1150,6 @@ fn read_gpu_temperature() -> Result<Option<f32>> {
         }
         GpuCommand::None => Ok(None),
     }
-}
-
-// Disk Temperature (throttled to every 30 seconds)
-static DISK_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
-static DISK_TEMP_CACHE: OnceLock<std::sync::Mutex<Option<f32>>> = OnceLock::new();
-
-fn read_disk_temperature() -> Result<Option<f32>> {
-    let counter = DISK_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-
-    // Only check every 30 seconds
-    if counter % 30 != 0 {
-        let cache = DISK_TEMP_CACHE.get_or_init(|| std::sync::Mutex::new(None));
-        return Ok(*cache.lock().unwrap());
-    }
-
-    let temp = try_smartctl("/dev/sda").or_else(|_| try_hddtemp("/dev/sda")).ok().flatten();
-
-    // Update cache
-    if let Some(cache) = DISK_TEMP_CACHE.get() {
-        *cache.lock().unwrap() = temp;
-    }
-
-    Ok(temp)
 }
 
 fn try_smartctl(dev_path: &str) -> Result<Option<f32>> {
@@ -1658,66 +1610,6 @@ fn get_loaded_modules() -> Result<std::collections::HashSet<String>> {
     }
 
     Ok(modules)
-}
-
-// ===== Enhanced Auth Log Parser for su attempts =====
-
-// Update AuthEventType to include Su events
-impl AuthEventType {
-    pub fn from_su_line(success: bool) -> Self {
-        if success {
-            AuthEventType::SudoCommand  // Reuse for successful su
-        } else {
-            AuthEventType::FailedPassword
-        }
-    }
-}
-
-// Enhanced parser that also detects su attempts
-pub fn parse_auth_log_line_enhanced(line: &str) -> Option<AuthLogEntry> {
-    // First try the existing parser
-    if let Some(entry) = parse_auth_log_line(line) {
-        return Some(entry);
-    }
-
-    // Now check for su attempts
-    let parts: Vec<&str> = line.splitn(4, ' ').collect();
-    if parts.len() < 4 {
-        return None;
-    }
-
-    let timestamp = format!("{} {} {}", parts[0], parts[1], parts[2]);
-    let rest = parts[3];
-
-    // Check for failed su attempts
-    if rest.contains("su:") && (rest.contains("FAILED su") || rest.contains("authentication failure")) {
-        let user = extract_after(rest, "for ").or_else(|| Some("unknown".to_string()))?;
-
-        return Some(AuthLogEntry {
-            timestamp,
-            event_type: AuthEventType::FailedPassword,
-            user,
-            source_ip: None,
-            message: rest.to_string(),
-        });
-    }
-
-    // Check for successful su
-    if rest.contains("su:") && (rest.contains("session opened") || rest.contains("Successful su")) {
-        let user = extract_after(rest, "for user ")
-            .or_else(|| extract_after(rest, "to "))
-            .or_else(|| Some("root".to_string()))?;
-
-        return Some(AuthLogEntry {
-            timestamp,
-            event_type: AuthEventType::SudoCommand,
-            user: user.clone(),
-            source_ip: None,
-            message: format!("su to {}", user),
-        });
-    }
-
-    None
 }
 
 #[cfg(test)]

@@ -7,6 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct HealthResponse {
     uptime_seconds: u64,
     event_count: usize,

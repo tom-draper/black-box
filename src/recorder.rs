@@ -25,10 +25,6 @@ pub struct Recorder {
 }
 
 impl Recorder {
-    pub fn open(dir: impl AsRef<Path>) -> Result<Self> {
-        Self::open_with_config(dir, DEFAULT_MAX_SEGMENTS, None)
-    }
-
     pub fn open_with_broadcast(dir: impl AsRef<Path>, broadcast_tx: SyncSender) -> Result<Self> {
         Self::open_with_config(dir, DEFAULT_MAX_SEGMENTS, Some(broadcast_tx))
     }

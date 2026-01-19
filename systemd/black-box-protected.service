@@ -7,7 +7,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/opt/black-box
-ExecStart=/opt/black-box/black-box --protected --no-ui
+ExecStart=/opt/black-box/black-box --protected --headless
 Restart=always
 RestartSec=5s
 

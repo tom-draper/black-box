@@ -49,11 +49,6 @@ impl EventBroadcaster {
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {
         self.tokio_broadcast.subscribe()
     }
-
-    // Get a clone of the broadcast sender (useful for sharing)
-    pub fn get_sender(&self) -> broadcast::Sender<Event> {
-        self.tokio_broadcast.clone()
-    }
 }
 
 impl Clone for EventBroadcaster {

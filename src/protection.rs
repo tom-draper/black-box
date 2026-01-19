@@ -1,5 +1,4 @@
-use anyhow::{Context, Result};
-use std::io::Write;
+use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -18,10 +17,6 @@ impl ProtectionManager {
             config,
             protected_files: Vec::new(),
         }
-    }
-
-    pub fn mode(&self) -> ProtectionMode {
-        self.mode
     }
 
     /// Apply protection to a log file based on the protection mode
@@ -76,69 +71,12 @@ impl ProtectionManager {
         Ok(())
     }
 
-    /// Send event to remote syslog if configured
-    pub fn send_to_remote(&self, event_json: &str) -> Result<()> {
-        if let Some(ref syslog_config) = self.config.remote_syslog {
-            if !syslog_config.enabled {
-                return Ok(());
-            }
-
-            // Only send in Protected or Hardened mode
-            if self.mode == ProtectionMode::Default {
-                return Ok(());
-            }
-
-            // Simple TCP/UDP send (basic implementation)
-            use std::net::TcpStream;
-            use std::net::UdpSocket;
-            use std::time::Duration;
-
-            let addr = format!("{}:{}", syslog_config.host, syslog_config.port);
-
-            match syslog_config.protocol.as_str() {
-                "tcp" => {
-                    if let Ok(mut stream) = TcpStream::connect_timeout(
-                        &addr.parse().context("Invalid syslog address")?,
-                        Duration::from_secs(2)
-                    ) {
-                        let _ = stream.write_all(event_json.as_bytes());
-                        let _ = stream.write_all(b"\n");
-                    }
-                }
-                "udp" | _ => {
-                    if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
-                        let _ = socket.send_to(event_json.as_bytes(), &addr);
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
     /// Print protection mode information
     pub fn print_info(&self) {
         // Print will be handled in main.rs - this is now a no-op
         // Kept for backwards compatibility
 
         println!();
-    }
-
-    /// Check if force-stop is requested
-    pub fn should_allow_stop(args: &[String], mode: ProtectionMode) -> bool {
-        let force_stop = args.iter().any(|arg| arg == "--force-stop");
-
-        match mode {
-            ProtectionMode::Default | ProtectionMode::Protected => true,
-            ProtectionMode::Hardened => {
-                if force_stop {
-                    println!("\n⚠️  Force stop requested for HARDENED mode");
-                    println!("   Disabling protections...\n");
-                    true
-                } else {
-                    false
-                }
-            }
-        }
     }
 }
 

@@ -9,17 +9,6 @@ pub enum ProtectionMode {
     Hardened,
 }
 
-impl ProtectionMode {
-    pub fn from_args(args: &[String]) -> Self {
-        if args.iter().any(|arg| arg == "--hardened") {
-            ProtectionMode::Hardened
-        } else if args.iter().any(|arg| arg == "--protected") {
-            ProtectionMode::Protected
-        } else {
-            ProtectionMode::Default
-        }
-    }
-}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {

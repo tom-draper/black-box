@@ -162,8 +162,8 @@ fn run_recorder(cli: Cli) -> Result<()> {
         ProtectionMode::Default
     };
 
-    // Check for UI disable flags
-    let disable_ui = cli.no_ui || cli.headless;
+    // Check for headless mode
+    let disable_ui = cli.headless;
 
     // Load configuration
     let config = Config::load()?;

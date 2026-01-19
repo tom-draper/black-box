@@ -15,11 +15,7 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub hardened: bool,
 
-    /// Disable web UI
-    #[arg(long, global = true)]
-    pub no_ui: bool,
-
-    /// Disable web UI (alias)
+    /// Run in headless mode (disables web UI)
     #[arg(long, global = true)]
     pub headless: bool,
 
