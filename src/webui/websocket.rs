@@ -225,6 +225,8 @@ fn event_to_json(event: &crate::event::Event) -> serde_json::Value {
             "type": "ProcessSnapshot",
             "timestamp": p.ts.format(&Rfc3339).unwrap_or_default(),
             "count": p.processes.len(),
+            "total_processes": p.total_processes,
+            "running_processes": p.running_processes,
             "processes": p.processes.iter().map(|proc| serde_json::json!({
                 "pid": proc.pid,
                 "name": proc.name,

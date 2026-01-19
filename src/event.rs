@@ -105,6 +105,8 @@ pub enum ProcessLifecycleKind {
 pub struct ProcessSnapshot {
     pub ts: OffsetDateTime,
     pub processes: Vec<ProcessInfo>,
+    pub total_processes: u32,
+    pub running_processes: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

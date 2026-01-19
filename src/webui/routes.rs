@@ -29,7 +29,10 @@ pub async fn index() -> HttpResponse {
 </head>
 <body class="bg-gray-50 min-h-screen">
 <div class="max-w-42 mx-auto px-4 py-5vh">
-    <div class="text-gray-900 font-semibold">Black Box</div>
+    <div class="flex justify-between items-center">
+        <div class="text-gray-900 font-semibold">Black Box</div>
+        <span id="wsStatus" class="text-red-600" style="display:none;">Disconnected</span>
+    </div>
     <div class="flex justify-between text-gray-500">
         <span id="datetime"></span>
         <span id="uptime"></span>
@@ -91,10 +94,6 @@ pub async fn index() -> HttpResponse {
         </div>
     </div>
     <div id="eventsContainer" class="font-mono max-h-96 overflow-y-auto bg-white border border-gray-200"></div>
-
-    <div class="text-center text-gray-400">
-        <span id="wsStatus"></span>
-    </div>
 </div>
 
 <script>
@@ -102,6 +101,8 @@ let ws=null;
 let eventBuffer=[];
 let lastStats=null;
 let topProcs=[];
+let totalProcs=0;
+let runningProcs=0;
 let startTime=Date.now();
 const MAX_BUFFER=1000;
 
@@ -155,8 +156,7 @@ function render(){
     } else {
         document.getElementById('uptime').textContent = '';
     }
-    document.getElementById('wsStatus').textContent = wsOk ? '● Connected' : '● Disconnected';
-    document.getElementById('wsStatus').className = wsOk ? 'text-green-600' : 'text-red-600';
+    document.getElementById('wsStatus').style.display = wsOk ? 'none' : 'inline';
 
     // CPU info
     if(e.cpu !== undefined){
@@ -210,7 +210,7 @@ function render(){
             const pct = fs.total > 0 ? Math.round((fs.used/fs.total)*100) : 0;
             const mount = fs.mount;
             const usage = `${fmt(fs.used)}/${fmt(fs.total)} ${pct}%`;
-            return `<div class="text-gray-500 flex items-center justify-between font-mono">
+            return `<div class="text-gray-500 flex items-center justify-between">
                 <span>${mount}</span>
                 <span class="flex items-center gap-1">
                     <span>${usage}</span>
@@ -223,9 +223,7 @@ function render(){
 
     // Processes
     if(topProcs.length > 0){
-        const total = topProcs.length;
-        const running = topProcs.filter(p => p.state === 'R').length;
-        document.getElementById('procCount').textContent = `${total} total ${running} running`;
+        document.getElementById('procCount').textContent = `${totalProcs} total ${runningProcs} running`;
 
         const topCpu = topProcs.slice().sort((a,b) => b.cpu_percent - a.cpu_percent).slice(0,5);
         const topMem = topProcs.slice().sort((a,b) => b.mem_bytes - a.mem_bytes).slice(0,5);
@@ -279,6 +277,8 @@ function handleEvent(event){
         render();
     } else if(event.type === 'ProcessSnapshot'){
         topProcs = event.processes || [];
+        totalProcs = event.total_processes || 0;
+        runningProcs = event.running_processes || 0;
         render();
     } else {
         addEventToLog(event);
@@ -537,6 +537,8 @@ fn event_to_json(
                 "type": "ProcessSnapshot",
                 "timestamp": p.ts.format(&Rfc3339).ok()?,
                 "count": p.processes.len(),
+                "total_processes": p.total_processes,
+                "running_processes": p.running_processes,
                 "processes": p.processes.iter().map(|proc| serde_json::json!({
                     "pid": proc.pid,
                     "name": proc.name,

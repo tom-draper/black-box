@@ -534,6 +534,10 @@ fn run_recorder(cli: Cli) -> Result<()> {
             recorder.append(&Event::Anomaly(anomaly))?;
         }
 
+        // Calculate process counts before current_processes is moved
+        let total_process_count = current_processes.len() as u32;
+        let running_process_count = current_processes.values().filter(|p| p.state == "R").count() as u32;
+
         prev_cpu_snapshot = cpu_snapshot;
         prev_disk_snapshot = disk_snapshot;
         prev_network = network_stats;
@@ -850,6 +854,8 @@ fn run_recorder(cli: Cli) -> Result<()> {
                 let snapshot = EventProcessSnapshot {
                     ts: OffsetDateTime::now_utc(),
                     processes: proc_infos,
+                    total_processes: total_process_count,
+                    running_processes: running_process_count,
                 };
                 recorder.append(&Event::ProcessSnapshot(snapshot))?;
             }
