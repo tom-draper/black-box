@@ -12,7 +12,7 @@ A lightweight, always-on forensics recorder for Linux servers. Captures system m
 - Fixed disk usage (100MB ring buffer)
 - Configuration via `config.toml`
 - Single static binary
-- Real-time WebSocket streaming with terminal-like web UI
+- Real-time WebSocket streaming with a web UI
 - HTTP Basic Authentication for security
 - Health monitoring endpoint
 
@@ -54,17 +54,8 @@ A lightweight, always-on forensics recorder for Linux servers. Captures system m
 
 ## Usage
 
-### First Run
+### Start Black Box
 
-On first run, Black Box will create a `config.toml` file with default credentials:
-
-```bash
-./black-box
-```
-
-IMPORTANT: Change the default password immediately! See Configuration section below.
-
-### Start Black Box (Recorder + Web UI)
 ```bash
 ./black-box
 ```
@@ -72,7 +63,10 @@ IMPORTANT: Change the default password immediately! See Configuration section be
 This starts:
 - Data recording to `./data/` directory
 - Web UI at `http://localhost:8080` with authentication (default: admin/admin)
+- Events API at `http://localhost:8080/api/events` with authentication (default: admin/admin)
 - Health endpoint at `http://localhost:8080/health`
+
+On first run, Black Box will create a `config.toml` file with default credentials. If using authentication, change the default password immediately. See configuration details below.
 
 ### Command Line Options
 ```bash
@@ -80,16 +74,12 @@ This starts:
 ./black-box --port 9000
 
 # Run without web UI (headless mode)
-./black-box --no-ui
 ./black-box --headless
-
-# Combine options
-./black-box --port 9000
 ```
 
 ### Web UI Features
-- **Real-time WebSocket streaming** - Events pushed to browser instantly
-- **HTTP Basic Authentication** - Secure access with username/password
+- Real-time WebSocket streaming - Events pushed to browser instantly
+- HTTP Basic Authentication - Secure access with username/password
 - Search/filter events
 - Filter by event type (System/Process/Security/Anomalies)
 - Terminal-like aesthetic with color coding
