@@ -1,6 +1,15 @@
 use anyhow::{Context, Result};
 use std::{collections::HashMap, fs};
 
+// ===== System Uptime =====
+
+pub fn read_system_uptime() -> Result<u64> {
+    let content = fs::read_to_string("/proc/uptime")?;
+    let uptime_str = content.split_whitespace().next().context("Empty /proc/uptime")?;
+    let uptime_secs = uptime_str.parse::<f64>().context("Parse uptime")?;
+    Ok(uptime_secs as u64)
+}
+
 // ===== CPU Stats =====
 
 #[derive(Debug, Clone)]

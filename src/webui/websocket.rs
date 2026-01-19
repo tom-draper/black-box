@@ -149,6 +149,7 @@ fn event_to_json(event: &crate::event::Event) -> serde_json::Value {
             serde_json::json!({
                 "type": "SystemMetrics",
                 "timestamp": m.ts.format(&Rfc3339).unwrap_or_default(),
+                "system_uptime_seconds": m.system_uptime_seconds,
                 "cpu": m.cpu_usage_percent,
                 "per_core_cpu": m.per_core_usage,
                 "mem": mem_pct,

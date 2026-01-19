@@ -284,6 +284,10 @@ fn run_recorder(cli: Cli) -> Result<()> {
     let mut failed_logins: std::collections::HashMap<String, Vec<std::time::Instant>> =
         std::collections::HashMap::new();
 
+    // Track process CPU times for per-process CPU percentage calculation
+    let mut prev_process_cpu: std::collections::HashMap<u32, (u64, std::time::Instant)> =
+        std::collections::HashMap::new();
+
     // Thresholds for anomaly detection
     let cpu_spike_threshold = 80.0;
     let mem_spike_threshold = 90.0;
@@ -299,6 +303,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
         // CPU stats
         let cpu_snapshot = read_all_cpu_stats()?;
         let per_core_usage = cpu_snapshot.per_core_usage(&prev_cpu_snapshot);
+        let num_cpus = per_core_usage.len() as f32;
         let cpu_usage = cpu_snapshot.aggregate.usage_percent(&prev_cpu_snapshot.aggregate);
 
         // Disk stats
@@ -347,6 +352,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
         // Record system metrics
         let system_metrics = SystemMetrics {
             ts: OffsetDateTime::now_utc(),
+            system_uptime_seconds: collector::read_system_uptime().unwrap_or(0),
             cpu_usage_percent: cpu_usage,
             per_core_usage,
             mem_used_bytes: mem_stats.used_kb() * 1024,
@@ -797,21 +803,49 @@ fn run_recorder(cli: Cli) -> Result<()> {
 
         if snapshot_count % PROCESS_SNAPSHOT_INTERVAL == 0 {
             if let Ok(top_procs) = get_top_processes(TOP_PROCESSES_COUNT) {
-                let proc_infos: Vec<ProcessInfo> = top_procs
-                    .iter()
-                    .map(|p| ProcessInfo {
+                let now = std::time::Instant::now();
+
+                // Calculate CPU percentages and build process infos
+                let mut proc_infos: Vec<ProcessInfo> = Vec::new();
+                let mut new_process_cpu: std::collections::HashMap<u32, (u64, std::time::Instant)> =
+                    std::collections::HashMap::new();
+
+                for p in &top_procs {
+                    // Calculate CPU percentage based on previous measurement
+                    let cpu_percent = if let Some((prev_cpu, prev_time)) = prev_process_cpu.get(&p.pid) {
+                        let elapsed_secs = now.duration_since(*prev_time).as_secs_f32();
+                        if elapsed_secs > 0.0 {
+                            let delta_cpu = p.cpu_time_jiffies.saturating_sub(*prev_cpu) as f32;
+                            // USER_HZ is typically 100 on Linux (clock ticks per second)
+                            let delta_cpu_secs = delta_cpu / 100.0;
+                            // Divide by elapsed time and normalize by number of CPUs
+                            ((delta_cpu_secs / elapsed_secs) * 100.0).min(100.0 * num_cpus)
+                        } else {
+                            0.0
+                        }
+                    } else {
+                        0.0
+                    };
+
+                    // Track for next iteration
+                    new_process_cpu.insert(p.pid, (p.cpu_time_jiffies, now));
+
+                    proc_infos.push(ProcessInfo {
                         pid: p.pid,
                         name: p.name.clone(),
                         cmdline: p.cmdline.clone(),
                         state: p.state.clone(),
-                        cpu_percent: 0.0, // TODO: Calculate per-process CPU %
+                        cpu_percent,
                         mem_bytes: p.mem_bytes,
                         read_bytes: p.read_bytes,
                         write_bytes: p.write_bytes,
                         num_fds: p.num_fds,
                         num_threads: p.num_threads,
-                    })
-                    .collect();
+                    });
+                }
+
+                // Update tracking map
+                prev_process_cpu = new_process_cpu;
 
                 let snapshot = EventProcessSnapshot {
                     ts: OffsetDateTime::now_utc(),

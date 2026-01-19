@@ -12,508 +12,353 @@ pub struct EventQueryParams {
 }
 
 pub async fn index() -> HttpResponse {
-    let html = r#"<!DOCTYPE html>
-<html>
+    let html = r#"
+<!DOCTYPE html>
+<html lang="en">
 <head>
     <meta charset="utf-8">
     <title>Black Box</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:#0d0d0d;color:#e0e0e0;font:12px/1.2 'Fira Code','Consolas','Courier New',monospace;min-width:900px;overflow-x:auto}
-.container{padding:4px}
-.box{color:#555;white-space:pre;font-family:inherit}
-.g{color:#5f5}.dg{color:#0a0}.y{color:#ff0}.r{color:#f55}.c{color:#5cf}.o{color:#fa0}.m{color:#f5f}.w{color:#fff}.d{color:#888}
-input,select{background:#1a1a1a;border:1px solid #444;color:#e0e0e0;font:inherit;padding:1px 4px;margin:0 2px}
-select{cursor:pointer}
-.bordered-section{border-left:1px solid #555;border-right:1px solid #555;margin:0;padding:4px 8px}
-.bordered-section canvas{width:100%;height:80px;display:block}
-.events-section{max-height:160px;overflow-y:auto;overflow-x:hidden}
-.events-hdr{display:flex;align-items:center;gap:4px;width:100%;white-space:nowrap}
-.events-hdr .filler{flex:1;overflow:hidden;text-overflow:clip}
-.ev{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:1px 0;line-height:1.4}
-.lbl{color:#888}
-.filter-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.filter-row span{white-space:nowrap}
+        * { line-height: 1.5; font-size: 13px; }
+        body { font-family: system-ui, -apple-system, sans-serif; }
+        .max-w-42 { max-width: 42rem; }
+        .py-5vh { padding-top: 5vh; padding-bottom: 5vh; }
     </style>
 </head>
-<body>
-<div class="container">
-<pre class="box" id="header"></pre>
-<pre class="box" id="graphHeader"></pre>
-<div class="bordered-section"><canvas id="graph"></canvas></div>
-<pre class="box" id="graphFooter"></pre>
-<pre class="box" id="eventsHeader"></pre>
-<div class="bordered-section events-section" id="logContainer"></div>
-<pre class="box" id="footer"></pre>
+<body class="bg-gray-50 min-h-screen">
+<div class="max-w-42 mx-auto px-4 py-5vh">
+    <div class="text-gray-900 font-semibold">Black Box</div>
+    <div class="flex justify-between text-gray-500">
+        <span id="datetime"></span>
+        <span id="uptime"></span>
+    </div>
+
+    <div></div>
+    <div class="flex items-center text-gray-900 font-semibold">
+        <span class="pr-2">System</span>
+        <div class="flex-1 border-b border-gray-200"></div>
+    </div>
+    <div id="kernelRow" class="text-gray-500"></div>
+    <div id="cpuRow" class="text-gray-500 flex justify-between"></div>
+    <div id="cpuCoresContainer" class="grid grid-cols-2 gap-x-4"></div>
+    <div class="text-gray-500" id="ramUsed"></div>
+    <div class="text-gray-500" id="ramAvail"></div>
+    <div class="text-gray-500" id="cpuTemp"></div>
+    <div class="text-gray-500" id="moboTemp"></div>
+
+    <div></div>
+    <div class="flex items-center text-gray-900 font-semibold">
+        <span class="pr-2">Network</span>
+        <div class="flex-1 border-b border-gray-200"></div>
+    </div>
+    <div class="text-gray-500" id="netRx"></div>
+    <div class="text-gray-500" id="netTx"></div>
+    <div class="text-gray-500" id="tcpConns"></div>
+    <div class="text-gray-500" id="tcpWait"></div>
+
+    <div></div>
+    <div class="flex items-center text-gray-900 font-semibold">
+        <span class="pr-2">File Systems</span>
+        <div class="flex-1 border-b border-gray-200"></div>
+    </div>
+    <div id="diskContainer"></div>
+
+    <div></div>
+    <div class="flex items-center text-gray-900 font-semibold">
+        <span class="pr-2">Processes</span>
+        <span id="procCount" class="text-gray-500 font-normal pr-2"></span>
+        <div class="flex-1 border-b border-gray-200"></div>
+    </div>
+    <div id="topProcsContainer"></div>
+
+    <div></div>
+    <div class="flex items-center text-gray-900 font-semibold">
+        <span class="pr-2">Events</span>
+        <div class="flex-1 flex items-center">
+            <div class="flex-1 border-b border-gray-200"></div>
+            <div class="flex gap-2 items-center font-normal ml-2">
+                <input type="text" id="filterInput" placeholder="Search..."
+                    class="px-2 py-0 border border-gray-300 rounded text-gray-700 focus:outline-none focus:ring-1 focus:ring-gray-400" />
+                <select id="eventType" class="px-2 py-0 border border-gray-300 rounded text-gray-700 focus:outline-none">
+                    <option value="">All</option>
+                    <option value="process">Process</option>
+                    <option value="security">Security</option>
+                    <option value="anomaly">Anomaly</option>
+                </select>
+            </div>
+        </div>
+    </div>
+    <div id="eventsContainer" class="font-mono max-h-96 overflow-y-auto bg-white border border-gray-200"></div>
+
+    <div class="text-center text-gray-400">
+        <span id="wsStatus"></span>
+    </div>
 </div>
+
 <script>
-const B='│',H='─',TL='┌',TR='┐',BL='└',BR='┘',LT='├',RT='┤',TB='┬',BT='┴',X='┼';
-let ws=null,reconnectTimeout=null,eventBuffer=[],systemMetricsCounter=0,startTime=Date.now();
-const MAX_BUFFER=500,MAX_DOM=200;
-const metricsHistory={cpu:[],mem:[],disk:[],net:[],maxPoints:60};
-let topCpu=[],topMem=[],lastStats=null,canvas=null,ctx=null,totalProcs=0,runningProcs=0;
+let ws=null;
+let eventBuffer=[];
+let lastStats=null;
+let topProcs=[];
+let startTime=Date.now();
+const MAX_BUFFER=1000;
 
-function bar(pct,w=6){
-    const f=Math.round((pct/100)*w);
-    return '['+'\u2588'.repeat(f)+'\u2591'.repeat(w-f)+']';
-}
-
-function barColor(pct,w=6){
-    const f=Math.round((pct/100)*w);
-    const c=pct>=90?'r':pct>=70?'y':'g';
-    return '[<span class="'+c+'">'+'█'.repeat(f)+'</span><span class="d">'+'░'.repeat(w-f)+'</span>]';
-}
-
+// Utility functions
 function fmt(b){
-    if(b===0)return'0B';
-    const k=1024,s=['B','K','M','G','T'];
+    if(b===0 || b===undefined)return'0B';
+    const k=1024,s=['B','KB','MB','GB','TB'];
     const i=Math.floor(Math.log(b)/Math.log(k));
     return(b/Math.pow(k,i)).toFixed(i>1?1:0)+s[i];
 }
 
 function fmtRate(b){
-    if(b===0)return'0B/s';
-    const k=1024,s=['B','K','M','G'];
-    const i=Math.floor(Math.log(b)/Math.log(k));
-    return(b/Math.pow(k,i)).toFixed(i>1?1:0)+s[i]+'/s';
+    return fmt(b)+'/s';
 }
 
-function uptime(){
-    const s=Math.floor((Date.now()-startTime)/1000);
-    const d=Math.floor(s/86400),h=Math.floor((s%86400)/3600),m=Math.floor((s%3600)/60);
-    if(d>0)return d+'d '+h+'h '+String(m).padStart(2,'0')+'m';
-    if(h>0)return h+'h '+String(m).padStart(2,'0')+'m';
-    return m+'m '+String(s%60).padStart(2,'0')+'s';
+function formatUptime(s){
+    const d=Math.floor(s/86400),h=Math.floor((s%86400)/3600),m=Math.floor((s%3600)/60),sec=Math.floor(s%60);
+    if(d>0)return `${d}d ${h}h ${m}m`;
+    if(h>0)return `${h}h ${m}m ${sec}s`;
+    return `${m}m ${sec}s`;
 }
 
-function pad(s,n,r=false){s=String(s);return r?s.padStart(n):s.padEnd(n);}
-function line(ch,n){return ch.repeat(n);}
-function span(cls,txt){return '<span class="'+cls+'">'+txt+'</span>';}
+function formatDate(date){
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const day = days[date.getDay()];
+    const d = String(date.getDate()).padStart(2, '0');
+    const month = months[date.getMonth()];
+    const year = date.getFullYear();
+    const time = date.toTimeString().substring(0, 8);
+    return `${day}, ${d} ${month} ${year}, ${time}`;
+}
 
-let savedFilter='',savedEvType='',userScrolled=false;
+function createBar(pct, width='w-32'){
+    const color = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-yellow-500' : 'bg-green-500';
+    return `<span class="inline-block ${width} h-3 bg-gray-200 rounded-sm overflow-hidden align-middle ml-1">
+        <span class="${color} block h-full transition-all duration-300" style="width:${Math.min(100,pct)}%"></span>
+    </span>`;
+}
 
 function render(){
-    const W=Math.max(100,Math.floor((window.innerWidth-20)/7.2));
-    const e=lastStats||{};
+    if(!lastStats)return;
+    const e=lastStats;
     const wsOk=ws&&ws.readyState===1;
-    const wsStatus=wsOk?span('g','●')+' CONNECTED':span('r','●')+' DISCONNECTED';
-    const perCore=e.per_core_cpu||[];
-
-    // Save focus state before re-render
-    const activeEl=document.activeElement;
-    const hadFocus=activeEl&&activeEl.id==='filterInput';
-    const cursorPos=hadFocus?activeEl.selectionStart:0;
-    const fi=document.getElementById('filterInput');
-    const et=document.getElementById('eventType');
-    if(fi)savedFilter=fi.value;
-    if(et)savedEvType=et.value;
-    const filter=savedFilter;
-    const evType=savedEvType;
     const now=new Date();
-    const timeStr=now.toLocaleTimeString();
-    const tz=Intl.DateTimeFormat().resolvedOptions().timeZone||'Unknown';
 
-    // Header
-    let o=TL+H+' '+span('g','BLACK-BOX')+' '+span('d','Server Monitor')+' '+line(H,W-30)+TR+'\n';
-    o+=B+' '+span('lbl','Status:')+' '+span('g','▲ ACTIVE')+' '+B+' '+span('lbl','WS:')+' '+wsStatus+' '+B+' '+span('lbl','Uptime:')+' '+span('c',uptime())+' '+B+' '+span('d',timeStr)+' '+span('y',tz)+pad('',W-75-tz.length)+B+'\n';
-
-    // Calculate column widths
-    const c1=24,c2=22,c3=W-c1-c2-4;
-
-    // Section headers
-    o+=LT+H+' '+span('c','CPU')+' '+line(H,c1-6)+TB+H+' '+span('c','MEMORY')+' '+line(H,c2-9)+TB+H+' '+span('c','DISK')+' '+line(H,c3-7)+RT+'\n';
-
-    // CPU section
-    const cpu=e.cpu!==undefined?e.cpu.toFixed(1):'--';
-    const cpuBar=e.cpu!==undefined?barColor(e.cpu,8):'[░░░░░░░░]';
-    const load=e.load!==undefined?e.load.toFixed(2):'--';
-    const load5=e.load5!==undefined?e.load5.toFixed(2):'--';
-    const load15=e.load15!==undefined?e.load15.toFixed(2):'--';
-    const temp=e.cpu_temp?Math.round(e.cpu_temp)+'°C':'--';
-    const tempClass=e.cpu_temp?(e.cpu_temp>=80?'r':e.cpu_temp>=60?'y':'g'):'d';
-
-    // Memory section
-    const mem=e.mem!==undefined?e.mem.toFixed(1):'--';
-    const memBar=e.mem!==undefined?barColor(e.mem,8):'[░░░░░░░░]';
-    const memUsed=e.mem_used?fmt(e.mem_used):'--';
-    const memTotal=e.mem_total?fmt(e.mem_total):'--';
-    const memFree=e.mem_total&&e.mem_used?fmt(e.mem_total-e.mem_used):'--';
-    const swap=e.swap_percent||0;
-    const swapBar=barColor(swap,8);
-    const swapUsed=e.swap_used?fmt(e.swap_used):'0B';
-    const swapTotal=e.swap_total?fmt(e.swap_total):'0B';
-
-    // Disk section
-    const disk=e.disk!==undefined?e.disk:'--';
-    const diskBar=e.disk!==undefined?barColor(e.disk,10):'[░░░░░░░░░░]';
-    const diskUsed=e.disk_used?fmt(e.disk_used):'--';
-    const diskTotal=e.disk_total?fmt(e.disk_total):'--';
-    const diskFree=e.disk_total&&e.disk_used?fmt(e.disk_total-e.disk_used):'--';
-
-    // Build rows
-    const cpuRows=[];
-    cpuRows.push(span('lbl','Total ')+span('w',pad(cpu+'%',6,true))+' '+cpuBar);
-    for(let i=0;i<Math.min(perCore.length,6);i++){
-        const v=perCore[i];
-        const coreClass=v>=90?'r':v>=70?'y':'g';
-        cpuRows.push(span('d','Core'+i)+' '+span(coreClass,pad(v.toFixed(1)+'%',6,true))+' '+barColor(v,8));
+    // Status line
+    document.getElementById('datetime').textContent = formatDate(now);
+    if(e.system_uptime_seconds !== undefined && e.system_uptime_seconds !== null){
+        document.getElementById('uptime').textContent = `Uptime: ${formatUptime(e.system_uptime_seconds)}`;
+    } else {
+        document.getElementById('uptime').textContent = '';
     }
-    cpuRows.push(span('lbl','Load ')+span('w',load)+span('d','/'+load5+'/'+load15));
-    cpuRows.push(span('lbl','Temp ')+span(tempClass,temp));
+    document.getElementById('wsStatus').textContent = wsOk ? '● Connected' : '● Disconnected';
+    document.getElementById('wsStatus').className = wsOk ? 'text-green-600' : 'text-red-600';
 
-    const memRows=[];
-    memRows.push(span('lbl','Used ')+span('w',pad(mem+'%',6,true))+' '+memBar);
-    memRows.push(span('lbl','     ')+span('c',memUsed)+span('d',' / '+memTotal));
-    memRows.push(span('lbl','Free ')+span('g',memFree));
-    memRows.push(span('lbl','Swap ')+span('w',pad(swap.toFixed(1)+'%',6,true))+' '+swapBar);
-    memRows.push(span('lbl','     ')+span('d',swapUsed+' / '+swapTotal));
-
-    // Build disk rows with filesystems (df-style)
-    const filesystems=e.filesystems||[];
-    const drives=e.per_disk||[];
-    const maxIO=Math.max(1,...drives.map(d=>(d.read||0)+(d.write||0)));
-
-    function ioBar(read,write,maxVal,w=6){
-        const total=read+write;
-        const pct=maxVal>0?(total/maxVal)*100:0;
-        const filled=Math.round((pct/100)*w);
-        const readPct=total>0?read/total:0.5;
-        const readFill=Math.round(filled*readPct);
-        const writeFill=filled-readFill;
-        return '['+span('g','▓'.repeat(readFill))+span('o','▓'.repeat(writeFill))+span('d','░'.repeat(w-filled))+']';
+    // CPU info
+    if(e.cpu !== undefined){
+        document.getElementById('cpuRow').innerHTML = `<span>CPU ${e.cpu.toFixed(1)}%</span><span>Load ${e.load?.toFixed(2) || '--'} ${e.load5?.toFixed(2) || '--'} ${e.load15?.toFixed(2) || '--'}</span>`;
     }
 
-    const diskRows=[];
-    // Show filesystems with usage bars
-    for(const fs of filesystems){
-        const pct=fs.total>0?Math.round((fs.used/fs.total)*100):0;
-        const mount=fs.mount.length>8?fs.mount.substring(0,7)+'…':fs.mount;
-        diskRows.push(span('c',pad(mount,8))+' '+barColor(pct,6)+' '+span('w',pad(pct+'%',4,true)));
-        diskRows.push(span('d','  ')+span('c',fmt(fs.used))+span('d','/'+fmt(fs.total)));
-    }
-    // Show I/O per physical drive
-    if(drives.length>0){
-        diskRows.push(span('lbl','── I/O ──'));
-        for(const d of drives){
-            const name=d.device.substring(0,6);
-            const tempVal=d.temp!==null&&d.temp!==undefined?d.temp:null;
-            const tempClass=tempVal?(tempVal>=50?'r':tempVal>=40?'y':'g'):'d';
-            const tempStr=tempVal?' '+span(tempClass,Math.round(tempVal)+'°'):'';
-            diskRows.push(span('c',pad(name,6))+' '+ioBar(d.read,d.write,maxIO,6)+tempStr);
-            diskRows.push(span('d',' ')+span('g','R:')+pad(fmtRate(d.read),7)+span('o','W:')+fmtRate(d.write));
-        }
+    // Per-core CPUs in 2 columns
+    const perCore = e.per_core_cpu || [];
+    if(perCore.length > 0){
+        const coresHTML = perCore.map((v,i) => {
+            return `<div class="text-gray-500 flex items-center justify-between">
+                <span>CPU${i} ${v.toFixed(1)}%</span>
+                ${createBar(v, 'w-32')}
+            </div>`;
+        }).join('');
+        document.getElementById('cpuCoresContainer').innerHTML = coresHTML;
     }
 
-    const maxRows=Math.max(cpuRows.length,memRows.length,diskRows.length);
-    for(let i=0;i<maxRows;i++){
-        const col1=cpuRows[i]?cpuRows[i]+pad('',c1-stripHtml(cpuRows[i]).length):pad('',c1);
-        const col2=memRows[i]?memRows[i]+pad('',c2-stripHtml(memRows[i]).length):pad('',c2);
-        const col3=diskRows[i]?diskRows[i]+pad('',c3-stripHtml(diskRows[i]).length):pad('',c3);
-        o+=B+col1+B+col2+B+col3+B+'\n';
+    // RAM
+    if(e.mem !== undefined){
+        document.getElementById('ramUsed').innerHTML = `RAM ${fmt(e.mem_used)}/${fmt(e.mem_total)} ${e.mem.toFixed(1)}% ${createBar(e.mem, 'w-32')}`;
+        document.getElementById('ramAvail').innerHTML = `Available RAM ${fmt(e.mem_total - e.mem_used)}`;
     }
 
-    // Network | GPU | Processes row
-    const hasGpu=e.gpu_temp!==undefined&&e.gpu_temp!==null;
-    const nc=20,gc=hasGpu?16:0,pc=W-nc-gc-4-(hasGpu?1:0);
-
-    if(hasGpu){
-        o+=LT+H+' '+span('c','NETWORK')+' '+line(H,nc-10)+TB+H+' '+span('m','GPU')+' '+line(H,gc-6)+TB+H+' '+span('c','PROCESSES')+' '+line(H,pc-12)+RT+'\n';
-    }else{
-        o+=LT+H+' '+span('c','NETWORK')+' '+line(H,nc-10)+TB+H+' '+span('c','PROCESSES')+' '+line(H,W-nc-15)+RT+'\n';
+    // Temps
+    if(e.cpu_temp){
+        const tempClass = e.cpu_temp >= 80 ? 'text-red-600' : e.cpu_temp >= 60 ? 'text-yellow-600' : 'text-green-600';
+        document.getElementById('cpuTemp').innerHTML = `<span class="${tempClass}">CPU Temp ${Math.round(e.cpu_temp)}°C</span>`;
+    } else {
+        document.getElementById('cpuTemp').innerHTML = '';
     }
 
-    const rx=e.net_recv||0;
-    const tx=e.net_send||0;
-    const tcp=e.tcp!==undefined?e.tcp:'--';
-    const tcpWait=e.tcp_wait!==undefined?e.tcp_wait:'--';
-    const totalNet=rx+tx;
-
-    const netRows=[];
-    netRows.push(span('g','▼ RX ')+span('w',pad(fmtRate(rx),9)));
-    netRows.push(span('o','▲ TX ')+span('w',pad(fmtRate(tx),9)));
-    netRows.push(span('lbl','Tot  ')+span('c',fmtRate(totalNet)));
-    netRows.push(span('lbl','TCP  ')+span('w',tcp));
-    netRows.push(span('lbl','Wait ')+span('d',tcpWait));
-
-    const gpuRows=[];
-    if(hasGpu){
-        const gpuTemp=Math.round(e.gpu_temp);
-        const gpuTempClass=gpuTemp>=80?'r':gpuTemp>=60?'y':'g';
-        gpuRows.push(span('lbl','Temp ')+span(gpuTempClass,gpuTemp+'°C'));
-        if(e.mobo_temp){
-            const moboTemp=Math.round(e.mobo_temp);
-            gpuRows.push(span('lbl','Mobo ')+span('d',moboTemp+'°C'));
-        }
-        if(e.fans&&e.fans.length>0){
-            for(let i=0;i<Math.min(e.fans.length,2);i++){
-                const f=e.fans[i];
-                const lbl=f.label?f.label.substring(0,4):'Fan'+i;
-                gpuRows.push(span('d',lbl+' ')+span('c',f.rpm+'rpm'));
-            }
-        }
+    if(e.mobo_temp){
+        document.getElementById('moboTemp').innerHTML = `Motherboard ${Math.round(e.mobo_temp)}°C`;
+    } else {
+        document.getElementById('moboTemp').innerHTML = '';
     }
 
-    const procRows=[];
-    procRows.push(span('w',totalProcs)+span('d',' procs ')+span('g',runningProcs)+span('d',' run'));
-    procRows.push(span('lbl','─ Top CPU ─'));
-    topCpu.slice(0,3).forEach(p=>{
-        const pctClass=p.cpu>=50?'r':p.cpu>=20?'y':'g';
-        procRows.push(span('c',pad(p.name.substring(0,12),12))+' '+span(pctClass,pad(p.cpu.toFixed(1)+'%',6,true)));
-    });
-    procRows.push(span('lbl','─ Top MEM ─'));
-    topMem.slice(0,3).forEach(p=>{
-        procRows.push(span('c',pad(p.name.substring(0,12),12))+' '+span('m',pad(fmt(p.mem),6,true)));
-    });
+    // Network
+    const rx = e.net_recv || 0;
+    const tx = e.net_send || 0;
+    document.getElementById('netRx').innerHTML = `RX ${fmtRate(rx)}`;
+    document.getElementById('netTx').innerHTML = `TX ${fmtRate(tx)}`;
+    document.getElementById('tcpConns').innerHTML = `TCP ${e.tcp || '--'}`;
+    document.getElementById('tcpWait').innerHTML = `TIME_WAIT ${e.tcp_wait || '--'}`;
 
-    const maxNet=Math.max(netRows.length,gpuRows.length,procRows.length);
-    for(let i=0;i<maxNet;i++){
-        const col1=netRows[i]?netRows[i]+pad('',nc-stripHtml(netRows[i]).length):pad('',nc);
-        const col3=procRows[i]?procRows[i]+pad('',pc-stripHtml(procRows[i]).length):pad('',pc);
-        if(hasGpu){
-            const col2=gpuRows[i]?gpuRows[i]+pad('',gc-stripHtml(gpuRows[i]).length):pad('',gc);
-            o+=B+col1+B+col2+B+col3+B+'\n';
-        }else{
-            o+=B+col1+B+col3+B+'\n';
-        }
+    // Disks
+    const filesystems = e.filesystems || [];
+    if(filesystems.length > 0){
+        const disksHTML = filesystems.map(fs => {
+            const pct = fs.total > 0 ? Math.round((fs.used/fs.total)*100) : 0;
+            const mount = fs.mount;
+            const usage = `${fmt(fs.used)}/${fmt(fs.total)} ${pct}%`;
+            return `<div class="text-gray-500 flex items-center justify-between font-mono">
+                <span>${mount}</span>
+                <span class="flex items-center gap-1">
+                    <span>${usage}</span>
+                    ${createBar(pct, 'w-32')}
+                </span>
+            </div>`;
+        }).join('');
+        document.getElementById('diskContainer').innerHTML = disksHTML;
     }
 
-    // Users section
-    const users=e.users||[];
-    if(users.length>0){
-        o+=LT+H+' '+span('c','USERS')+' ('+users.length+') '+line(H,W-14-String(users.length).length)+RT+'\n';
-        const userStr=users.map(u=>{
-            const host=u.remote_host?span('y',u.remote_host):span('d','local');
-            return span('w',u.username)+span('d','@')+span('c',u.terminal)+span('d',' [')+host+span('d',']');
-        }).join('  ');
-        o+=B+' '+userStr+pad('',Math.max(0,W-2-stripHtml(userStr).length))+B+'\n';
-    }
+    // Processes
+    if(topProcs.length > 0){
+        const total = topProcs.length;
+        const running = topProcs.filter(p => p.state === 'R').length;
+        document.getElementById('procCount').textContent = `${total} total ${running} running`;
 
-    document.getElementById('header').innerHTML=o;
+        const topCpu = topProcs.slice().sort((a,b) => b.cpu_percent - a.cpu_percent).slice(0,5);
+        const topMem = topProcs.slice().sort((a,b) => b.mem_bytes - a.mem_bytes).slice(0,5);
 
-    // Graph section header with legend
-    const graphHdr=LT+H+' '+span('c','METRICS')+span('d',' (60s)')+' '+span('g','━')+span('lbl',' CPU')+' '+span('c','━')+span('lbl',' MEM')+' '+span('o','━')+span('lbl',' DISK')+' '+span('m','━')+span('lbl',' NET')+' '+line(H,W-50)+RT;
-    document.getElementById('graphHeader').innerHTML=graphHdr;
+        let procsHTML = '<div class="grid grid-cols-2 gap-4">';
 
-    // Events header - use flex layout for proper width handling
-    let evHdr='<div class="events-hdr">';
-    evHdr+=span('c',LT+H)+' '+span('c','EVENTS')+' '+line(H,3)+' ';
-    evHdr+=span('lbl','Filter:')+' <input type="text" id="filterInput" value="'+escHtml(filter)+'" style="width:80px" placeholder="search..."> ';
-    evHdr+=span('lbl','Type:')+' <select id="eventType"><option value=""'+(evType===''?' selected':'')+'>All</option><option value="process"'+(evType==='process'?' selected':'')+'>Proc</option><option value="security"'+(evType==='security'?' selected':'')+'>Sec</option><option value="anomaly"'+(evType==='anomaly'?' selected':'')+'>Anom</option></select> ';
-    evHdr+='<span style="cursor:pointer" class="d" onclick="clearFilter()">[Clr]</span> '+span('d','('+eventBuffer.length+')');
-    evHdr+='<span class="filler">'+line(H,200)+'</span>'+span('c',RT)+'</div>';
-    document.getElementById('eventsHeader').innerHTML=evHdr;
+        // Top CPU column
+        procsHTML += '<div><div class="text-gray-700 font-medium">Top CPU</div>';
+        topCpu.forEach(p => {
+            const name = p.name.substring(0,18).padEnd(18);
+            procsHTML += `<div class="text-gray-500 font-mono">${name} ${p.cpu_percent.toFixed(1)}%</div>`;
+        });
+        procsHTML += '</div>';
 
-    // Graph section footer (connects to events header)
-    document.getElementById('graphFooter').innerHTML=LT+line(H,W)+RT;
+        // Top Memory column
+        procsHTML += '<div><div class="text-gray-700 font-medium">Top Memory</div>';
+        topMem.forEach(p => {
+            const name = p.name.substring(0,16).padEnd(16);
+            procsHTML += `<div class="text-gray-500 font-mono">${name} ${fmt(p.mem_bytes)}</div>`;
+        });
+        procsHTML += '</div>';
 
-    // Footer
-    document.getElementById('footer').innerHTML=BL+line(H,W)+BR;
+        procsHTML += '</div>';
 
-    // Setup canvas
-    setupCanvas();
-
-    // Rebind events and restore focus
-    const newFi=document.getElementById('filterInput');
-    const newEt=document.getElementById('eventType');
-    if(newFi){
-        newFi.removeEventListener('input',reloadEvents);
-        newFi.addEventListener('input',reloadEvents);
-        if(hadFocus){
-            newFi.focus();
-            newFi.setSelectionRange(cursorPos,cursorPos);
-        }
-    }
-    if(newEt){
-        newEt.removeEventListener('change',reloadEvents);
-        newEt.addEventListener('change',reloadEvents);
+        document.getElementById('topProcsContainer').innerHTML = procsHTML;
     }
 }
 
-function stripHtml(s){return s.replace(/<[^>]*>/g,'');}
-function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-
-function setupCanvas(){
-    canvas=document.getElementById('graph');
-    if(canvas){
-        const rect=canvas.getBoundingClientRect();
-        canvas.width=rect.width*window.devicePixelRatio;
-        canvas.height=rect.height*window.devicePixelRatio;
-        ctx=canvas.getContext('2d');
-        ctx.scale(window.devicePixelRatio,window.devicePixelRatio);
-        drawGraph();
-    }
-}
-
-function drawGraph(){
-    if(!canvas||!ctx)return;
-    const rect=canvas.getBoundingClientRect();
-    const w=rect.width,h=rect.height;
-    ctx.fillStyle='#0d0d0d';
-    ctx.fillRect(0,0,w,h);
-
-    ctx.strokeStyle='#1a1a1a';
-    ctx.lineWidth=1;
-    for(let i=0;i<=4;i++){
-        const y=(h/4)*i;
-        ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();
-    }
-    ctx.fillStyle='#333';
-    ctx.font='9px monospace';
-    ctx.textAlign='right';
-    for(let i=0;i<=4;i++){
-        ctx.fillText((100-i*25)+'%',w-4,(h/4)*i+10);
-    }
-
-    if(metricsHistory.cpu.length<2)return;
-    const ps=w/(metricsHistory.maxPoints-1);
-
-    function drawLine(data,color,maxVal=100){
-        ctx.strokeStyle=color;ctx.lineWidth=1.5;ctx.beginPath();
-        const si=Math.max(0,data.length-metricsHistory.maxPoints);
-        for(let i=0;i<data.length-si;i++){
-            const x=i*ps,y=h-(data[si+i]/maxVal)*h;
-            i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
-        }
-        ctx.stroke();
-    }
-    drawLine(metricsHistory.cpu,'#55ff55');
-    drawLine(metricsHistory.mem,'#55ccff');
-    drawLine(metricsHistory.disk,'#ffaa00');
-    if(metricsHistory.net.length>0){
-        const maxNet=Math.max(...metricsHistory.net,1);
-        drawLine(metricsHistory.net,'#ff55ff',maxNet);
-    }
-}
-
+// WebSocket connection
 function connectWebSocket(){
-    const protocol=window.location.protocol==='https:'?'wss:':'ws:';
-    ws=new WebSocket(protocol+'//'+window.location.host+'/ws');
-    ws.onopen=()=>{render();};
-    ws.onmessage=(ev)=>{try{addEvent(JSON.parse(ev.data));}catch(e){}};
-    ws.onerror=()=>{render();};
-    ws.onclose=()=>{render();setTimeout(connectWebSocket,5000);};
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(protocol + '//' + window.location.host + '/ws');
+
+    ws.onopen = () => render();
+    ws.onmessage = (ev) => {
+        try {
+            const event = JSON.parse(ev.data);
+            handleEvent(event);
+        } catch(e) {}
+    };
+    ws.onerror = () => render();
+    ws.onclose = () => {
+        render();
+        setTimeout(connectWebSocket, 5000);
+    };
 }
 
-function updateStats(e){
-    if(e.type!=='SystemMetrics')return;
-    lastStats=e;
-    metricsHistory.cpu.push(e.cpu);
-    metricsHistory.mem.push(e.mem);
-    metricsHistory.disk.push(e.disk);
-    metricsHistory.net.push((e.net_recv||0)+(e.net_send||0));
-    if(metricsHistory.cpu.length>metricsHistory.maxPoints){
-        metricsHistory.cpu.shift();metricsHistory.mem.shift();metricsHistory.disk.shift();metricsHistory.net.shift();
+function handleEvent(event){
+    if(event.type === 'SystemMetrics'){
+        lastStats = event;
+        render();
+    } else if(event.type === 'ProcessSnapshot'){
+        topProcs = event.processes || [];
+        render();
+    } else {
+        addEventToLog(event);
     }
-    render();
 }
 
-function updateProcesses(e){
-    if(e.type!=='ProcessSnapshot')return;
-    const procs=e.processes||[];
-    totalProcs=procs.length;
-    runningProcs=procs.filter(p=>p.state==='R').length;
-    topCpu=procs.slice().sort((a,b)=>b.cpu_percent-a.cpu_percent).slice(0,3).map(p=>({name:p.name,cpu:p.cpu_percent,mem:p.mem_bytes}));
-    topMem=procs.slice().sort((a,b)=>b.mem_bytes-a.mem_bytes).slice(0,3).map(p=>({name:p.name,cpu:p.cpu_percent,mem:p.mem_bytes}));
-}
-
-function addEvent(event){
-    updateStats(event);
-    updateProcesses(event);
-
-    if(event.type==='SystemMetrics'){
-        systemMetricsCounter++;
-        if(systemMetricsCounter%10!==0)return;
-    }
-    if(event.type==='ProcessSnapshot')return;
-
-    const filter=(document.getElementById('filterInput')||{}).value||'';
-    const evType=(document.getElementById('eventType')||{}).value||'';
-    if(!matchesFilter(event,filter.toLowerCase(),evType))return;
-
+function addEventToLog(event){
     eventBuffer.push(event);
-    if(eventBuffer.length>MAX_BUFFER)eventBuffer.shift();
+    if(eventBuffer.length > MAX_BUFFER) eventBuffer.shift();
 
-    const container=document.getElementById('logContainer');
-    if(!container)return;
-    const entry=createLogEntry(event);
-    if(entry)container.appendChild(entry);
-    // Only auto-scroll if user is near bottom
-    const nearBottom=container.scrollHeight-container.scrollTop-container.clientHeight<50;
-    if(nearBottom)container.scrollTop=container.scrollHeight;
-    while(container.children.length>MAX_DOM)container.removeChild(container.firstChild);
+    const filter = document.getElementById('filterInput').value.toLowerCase();
+    const evType = document.getElementById('eventType').value;
+
+    if(matchesFilter(event, filter, evType)){
+        const container = document.getElementById('eventsContainer');
+        const entry = createEventEntry(event);
+        if(entry){
+            container.insertBefore(entry, container.firstChild);
+            while(container.children.length > 200) container.removeChild(container.lastChild);
+        }
+    }
 }
 
-function matchesFilter(e,filter,evType){
+function matchesFilter(e, filter, evType){
     if(evType){
-        const map={system:'SystemMetrics',process:'ProcessLifecycle',security:'SecurityEvent',anomaly:'Anomaly'};
-        if(e.type!==map[evType])return false;
+        const map = {process:'ProcessLifecycle', security:'SecurityEvent', anomaly:'Anomaly'};
+        if(e.type !== map[evType]) return false;
     }
-    if(filter&&!JSON.stringify(e).toLowerCase().includes(filter))return false;
+    if(filter && !JSON.stringify(e).toLowerCase().includes(filter)) return false;
     return true;
 }
 
-function createLogEntry(e){
-    const ts=e.timestamp||'',type=e.type||'';
-    if(type==='ProcessSnapshot'||type==='unknown')return null;
-    const div=document.createElement('div');
-    div.className='ev';
-    const time='<span class="d">'+ts.substring(11,19)+'</span>';
-    let txt='';
+function createEventEntry(e){
+    if(!e.type || e.type === 'ProcessSnapshot') return null;
 
-    if(type==='SystemMetrics'){
-        txt=time+' <span class="dg">[SYS]</span> <span class="g">CPU:</span>'+e.cpu.toFixed(1)+'% <span class="c">Mem:</span>'+e.mem.toFixed(1)+'% <span class="lbl">Load:</span>'+e.load.toFixed(2);
-    }else if(type==='ProcessLifecycle'){
-        const sym=e.kind==='Started'?'<span class="g">+</span>':e.kind==='Exited'?'<span class="r">-</span>':e.kind==='Stuck'?'<span class="y">D</span>':'<span class="r">Z</span>';
-        txt=time+' <span class="o">[PROC]</span> '+sym+' <span class="c">'+e.name+'</span> <span class="d">(pid '+e.pid+')</span>';
-    }else if(type==='SecurityEvent'){
-        const isOk=e.kind==='SshLoginSuccess';
-        const lbl=e.kind==='SshLoginSuccess'?'SSH OK':e.kind==='SshLoginFailure'?'SSH FAIL':e.kind==='SudoCommand'?'SUDO':e.kind;
-        txt=time+' <span class="m">[SEC]</span> <span class="'+(isOk?'g':'r')+'">'+lbl+'</span> <span class="c">'+e.user+'</span>'+(e.source_ip?' <span class="d">from</span> <span class="y">'+e.source_ip+'</span>':'');
-    }else if(type==='Anomaly'){
-        const isCrit=e.severity==='Critical';
-        txt=time+' <span class="'+(isCrit?'r':'y')+'">['+( isCrit?'CRIT':'WARN')+']</span> '+e.message;
-    }else{return null;}
+    const div = document.createElement('div');
+    div.className = 'text-gray-600';
+    const time = (e.timestamp || '').substring(11,19);
 
-    div.innerHTML=txt;
+    if(e.type === 'ProcessLifecycle'){
+        const color = e.kind === 'Started' ? 'text-green-600' : e.kind === 'Exited' ? 'text-gray-400' : 'text-yellow-600';
+        div.innerHTML = `<span class="text-gray-400">${time}</span> <span class="${color}">[${e.kind}]</span> ${e.name} <span class="text-gray-400">(pid ${e.pid})</span>`;
+    } else if(e.type === 'SecurityEvent'){
+        const color = e.kind.includes('Success') ? 'text-green-600' : 'text-red-600';
+        div.innerHTML = `<span class="text-gray-400">${time}</span> <span class="${color}">[${e.kind}]</span> ${e.user} ${e.source_ip ? 'from ' + e.source_ip : ''}`;
+    } else if(e.type === 'Anomaly'){
+        const color = e.severity === 'Critical' ? 'text-red-600' : 'text-yellow-600';
+        div.innerHTML = `<span class="text-gray-400">${time}</span> <span class="${color}">[${e.severity}]</span> ${e.message}`;
+    }
+
     return div;
 }
 
-function clearFilter(){
-    const fi=document.getElementById('filterInput');
-    const et=document.getElementById('eventType');
-    if(fi){fi.value='';savedFilter='';}
-    if(et){et.value='';savedEvType='';}
-    reloadEvents();
-}
-
 function reloadEvents(){
-    const container=document.getElementById('logContainer');
-    if(!container)return;
-    const fi=document.getElementById('filterInput');
-    const et=document.getElementById('eventType');
-    if(fi)savedFilter=fi.value;
-    if(et)savedEvType=et.value;
-    container.innerHTML='';
-    const filter=savedFilter.toLowerCase();
-    const evType=savedEvType;
-    const start=Math.max(0,eventBuffer.length-MAX_DOM);
-    for(let i=start;i<eventBuffer.length;i++){
-        if(matchesFilter(eventBuffer[i],filter,evType)){
-            const entry=createLogEntry(eventBuffer[i]);
-            if(entry)container.appendChild(entry);
+    const container = document.getElementById('eventsContainer');
+    container.innerHTML = '';
+    const filter = document.getElementById('filterInput').value.toLowerCase();
+    const evType = document.getElementById('eventType').value;
+
+    eventBuffer.slice().reverse().forEach(event => {
+        if(matchesFilter(event, filter, evType)){
+            const entry = createEventEntry(event);
+            if(entry) container.appendChild(entry);
         }
-    }
-    container.scrollTop=container.scrollHeight;
+    });
 }
 
-window.addEventListener('resize',()=>{render();setupCanvas();});
-render();
+document.getElementById('filterInput').addEventListener('input', reloadEvents);
+document.getElementById('eventType').addEventListener('change', reloadEvents);
+
 connectWebSocket();
-setTimeout(setupCanvas,100);
+setInterval(() => {
+    if(lastStats){
+        document.getElementById('datetime').textContent = formatDate(new Date());
+    }
+}, 1000);
 </script>
 </body>
-</html>"#;
+</html>
+"#;
 
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
@@ -578,6 +423,7 @@ fn event_to_json(
             Some(serde_json::json!({
                 "type": "SystemMetrics",
                 "timestamp": m.ts.format(&Rfc3339).ok()?,
+                "system_uptime_seconds": m.system_uptime_seconds,
                 "cpu": m.cpu_usage_percent,
                 "per_core_cpu": m.per_core_usage,
                 "mem": mem_pct,
