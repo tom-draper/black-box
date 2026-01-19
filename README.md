@@ -73,7 +73,7 @@ On first run, Black Box will create a `config.toml` file with default credential
 # Run with custom port
 ./black-box --port 9000
 
-# Run without web UI (headless mode)
+# Run purely data collection without web server (headless mode)
 ./black-box --headless
 ```
 
