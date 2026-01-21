@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn test_matches_event_type() {
-        use crate::event::{SystemMetrics, TemperatureReadings};
+        use crate::event::{GpuInfo, SystemMetrics, TemperatureReadings};
         use time::OffsetDateTime;
 
         let event = Event::SystemMetrics(SystemMetrics {
@@ -216,6 +216,7 @@ mod tests {
                 motherboard_temp_celsius: None,
             },
             fans: vec![],
+            gpu: GpuInfo::default(),
             logged_in_users: vec![],
         });
 

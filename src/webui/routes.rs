@@ -25,12 +25,13 @@ pub async fn index() -> HttpResponse {
     <style>
         * { line-height: 1.5; font-size: 13px; }
         body { font-family: system-ui, -apple-system, sans-serif; }
-        .max-w-46 { max-width: 46rem; }
+        .max-w-42 { max-width: 42rem; }
         .py-5vh { padding-top: 5vh; padding-bottom: 5vh; }
+        th, td { padding: 0; }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
-<div class="max-w-46 mx-auto px-4 py-5vh">
+<div class="max-w-42 mx-auto px-4 py-5vh">
     <div class="flex justify-between items-center">
         <div class="text-gray-900 font-semibold">Black Box</div>
         <span id="wsStatus" class="text-red-600" style="display:none;">Disconnected</span>
@@ -62,6 +63,20 @@ pub async fn index() -> HttpResponse {
     </div>
 
     <div></div>
+    <div class="flex items-center text-gray-900 font-semibold" id="graphicsSection" style="display:none">
+        <span class="pr-2">Graphics</span>
+        <div class="flex-1 border-b border-gray-200"></div>
+    </div>
+    <div class="flex justify-between gap-4" id="graphicsRow1" style="display:none">
+        <div class="text-gray-500" id="gpuFreq"></div>
+        <div class="text-gray-500 text-right" id="gpuTemp"></div>
+    </div>
+    <div class="flex justify-between gap-4" id="graphicsRow2" style="display:none">
+        <div class="text-gray-500" id="memFreq"></div>
+        <div class="text-gray-500 text-right" id="imgQuality"></div>
+    </div>
+
+    <div></div>
     <div class="flex items-center text-gray-900 font-semibold">
         <span class="pr-2">Network</span>
         <div class="flex-1 border-b border-gray-200"></div>
@@ -84,20 +99,18 @@ pub async fn index() -> HttpResponse {
         <span id="procCount" class="text-gray-500 font-normal pr-2"></span>
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
-    <div class="text-gray-700 font-medium">Top CPU</div>
     <table class="w-full text-gray-500">
         <thead><tr class="text-left text-gray-400">
-            <th class="font-normal">Name</th>
+            <th class="font-medium text-gray-700">Top CPU</th>
             <th class="font-normal w-16">PID</th>
             <th class="font-normal w-16 text-right">CPU%</th>
             <th class="font-normal w-16 text-right">MEM%</th>
         </tr></thead>
         <tbody id="topCpuTable"></tbody>
     </table>
-    <div class="text-gray-700 font-medium mt-2">Top Memory</div>
     <table class="w-full text-gray-500">
         <thead><tr class="text-left text-gray-400">
-            <th class="font-normal">Name</th>
+            <th class="font-medium text-gray-700">Top Memory</th>
             <th class="font-normal w-16">PID</th>
             <th class="font-normal w-16 text-right">CPU%</th>
             <th class="font-normal w-16 text-right">MEM%</th>
@@ -167,6 +180,64 @@ function updateBar(id, pct, container, labelText, rightLabel){
     if(rlbl && rightLabel !== undefined) { rlbl.textContent = rightLabel; rlbl.className = ''; }
 }
 
+function updateCoreBar(id, pct, container, coreNum){
+    let el = document.getElementById(id);
+    if(!el){
+        container.insertAdjacentHTML('beforeend', `<div class="text-gray-500 flex items-center gap-4" id="row_${id}">
+            <span class="w-10">CPU${coreNum}</span>
+            <span class="relative flex-1 bg-gray-200 rounded-sm" style="height:10px">
+                <span id="${id}" class="block h-full transition-all duration-300" style="width:0%"></span>
+                <span id="pct_${id}" class="absolute inset-0 flex items-center justify-center text-gray-500/60 overflow-visible"></span>
+            </span>
+        </div>`);
+        el = document.getElementById(id);
+    }
+    const color = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-yellow-500' : 'bg-green-500';
+    el.style.width = Math.min(100, pct) + '%';
+    el.className = `block h-full transition-all duration-300 ${color}`;
+    document.getElementById('pct_'+id).textContent = pct.toFixed(1) + '%';
+}
+
+function updateRamBar(pct, used, container){
+    let el = document.getElementById('ramBar');
+    if(!el){
+        container.innerHTML = `<div class="text-gray-500 flex items-center gap-4">
+            <span id="ramLabel">RAM Used ${fmt(used)}</span>
+            <span class="relative flex-1 bg-gray-200 rounded-sm" style="height:10px">
+                <span id="ramBar" class="block h-full transition-all duration-300" style="width:0%"></span>
+                <span id="ramPct" class="absolute inset-0 flex items-center justify-center text-gray-500/60 overflow-visible"></span>
+            </span>
+        </div>`;
+        el = document.getElementById('ramBar');
+    }
+    const color = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-yellow-500' : 'bg-green-500';
+    el.style.width = Math.min(100, pct) + '%';
+    el.className = `block h-full transition-all duration-300 ${color}`;
+    document.getElementById('ramLabel').textContent = `RAM Used ${fmt(used)}`;
+    document.getElementById('ramPct').textContent = pct.toFixed(1) + '%';
+}
+
+function updateDiskBar(id, pct, container, mount, sizeText){
+    let el = document.getElementById(id);
+    if(!el){
+        container.insertAdjacentHTML('beforeend', `<div class="text-gray-500 flex items-center gap-4" id="row_${id}">
+            <span id="lbl_${id}" class="flex-1">${mount}</span>
+            <span id="size_${id}">${sizeText}</span>
+            <span class="relative bg-gray-200 rounded-sm" style="height:10px;width:128px">
+                <span id="${id}" class="block h-full transition-all duration-300" style="width:0%"></span>
+                <span id="pct_${id}" class="absolute inset-0 flex items-center justify-center text-gray-400 overflow-visible"></span>
+            </span>
+        </div>`);
+        el = document.getElementById(id);
+    }
+    const color = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-yellow-500' : 'bg-green-500';
+    el.style.width = Math.min(100, pct) + '%';
+    el.className = `block h-full transition-all duration-300 ${color}`;
+    document.getElementById('lbl_'+id).textContent = mount;
+    document.getElementById('pct_'+id).textContent = pct + '%';
+    document.getElementById('size_'+id).textContent = sizeText;
+}
+
 function updateProcTable(tableId, procs, memTotal){
     const tbody = document.getElementById(tableId);
     tbody.innerHTML = '';
@@ -192,9 +263,9 @@ function render(){
         document.getElementById('cpuVal').textContent = `CPU ${e.cpu.toFixed(1)}%`;
         document.getElementById('loadVal').textContent = `Load ${e.load?.toFixed(2) || '--'} ${e.load5?.toFixed(2) || '--'} ${e.load15?.toFixed(2) || '--'}`;
     }
-    (e.per_core_cpu || []).forEach((v, i) => updateBar(`core_${i}`, v, document.getElementById('cpuCoresContainer'), `CPU${i} ${v.toFixed(1)}%`));
+    (e.per_core_cpu || []).forEach((v, i) => updateCoreBar(`core_${i}`, v, document.getElementById('cpuCoresContainer'), i));
     if(e.mem !== undefined){
-        updateBar('ramBar', e.mem, document.getElementById('ramUsed'), `RAM Used ${fmt(e.mem_used)} (${e.mem.toFixed(1)}%)`);
+        updateRamBar(e.mem, e.mem_used, document.getElementById('ramUsed'));
         document.getElementById('ramAvail').textContent = `Available RAM ${fmt(e.mem_total - e.mem_used)}`;
     }
     if(e.cpu_temp){
@@ -208,8 +279,25 @@ function render(){
         const el = document.getElementById('moboTemp');
         const color = e.mobo_temp >= 80 ? 'text-red-600' : e.mobo_temp >= 60 ? 'text-yellow-600' : 'text-green-600';
         el.innerHTML = `MB Temp <span class="${color}">${Math.round(e.mobo_temp)}°C</span>`;
+    } else if(e.fans && e.fans.length > 0){
+        const fan = e.fans[0];
+        document.getElementById('moboTemp').textContent = `${fan.label || 'Fan'} ${fan.rpm}RPM`;
     } else {
         document.getElementById('moboTemp').textContent = '';
+    }
+    // Graphics section - only show if GPU data available
+    const hasGpu = e.gpu_freq || e.gpu_temp2 || e.gpu_mem_freq || e.gpu_power;
+    document.getElementById('graphicsSection').style.display = hasGpu ? 'flex' : 'none';
+    document.getElementById('graphicsRow1').style.display = hasGpu ? 'flex' : 'none';
+    document.getElementById('graphicsRow2').style.display = hasGpu ? 'flex' : 'none';
+    if(hasGpu){
+        document.getElementById('gpuFreq').textContent = e.gpu_freq ? `GPU Freq ${e.gpu_freq}MHz` : '';
+        if(e.gpu_temp2){
+            const color = e.gpu_temp2 >= 80 ? 'text-red-600' : e.gpu_temp2 >= 60 ? 'text-yellow-600' : 'text-green-600';
+            document.getElementById('gpuTemp').innerHTML = `GPU Temp <span class="${color}">${Math.round(e.gpu_temp2)}°C</span>`;
+        }
+        document.getElementById('memFreq').textContent = e.gpu_mem_freq ? `Mem Freq ${e.gpu_mem_freq}MHz` : '';
+        document.getElementById('imgQuality').textContent = e.gpu_power ? `Power ${e.gpu_power.toFixed(0)}W` : '';
     }
     document.getElementById('netRx').textContent = `RX ${fmtRate(e.net_recv || 0)}`;
     document.getElementById('netTx').textContent = `TX ${fmtRate(e.net_send || 0)}`;
@@ -217,7 +305,7 @@ function render(){
     document.getElementById('tcpWait').textContent = `TIME_WAIT ${e.tcp_wait || '--'}`;
     (e.filesystems || []).forEach((fs, i) => {
         const pct = fs.total > 0 ? Math.round((fs.used/fs.total)*100) : 0;
-        updateBar(`disk_${i}`, pct, document.getElementById('diskContainer'), fs.mount, `${fmt(fs.used)}/${fmt(fs.total)} ${pct}%`);
+        updateDiskBar(`disk_${i}`, pct, document.getElementById('diskContainer'), fs.mount, `${fmt(fs.used)}/${fmt(fs.total)}`);
     });
 }
 
@@ -403,6 +491,10 @@ fn event_to_json(
                 "per_core_temps": m.temps.per_core_temps,
                 "gpu_temp": m.temps.gpu_temp_celsius,
                 "mobo_temp": m.temps.motherboard_temp_celsius,
+                "gpu_freq": m.gpu.gpu_freq_mhz,
+                "gpu_mem_freq": m.gpu.mem_freq_mhz,
+                "gpu_temp2": m.gpu.gpu_temp_celsius,
+                "gpu_power": m.gpu.power_watts,
                 "fans": m.fans.iter().map(|f| serde_json::json!({
                     "label": f.label,
                     "rpm": f.rpm,

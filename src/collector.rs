@@ -50,6 +50,32 @@ pub fn read_cpu_info() -> CpuInfo {
     CpuInfo { model, mhz }
 }
 
+// ===== GPU Info =====
+
+use crate::event::GpuInfo;
+
+pub fn read_gpu_info() -> GpuInfo {
+    // Try nvidia-smi first
+    if let Ok(output) = std::process::Command::new("nvidia-smi")
+        .args(["--query-gpu=clocks.gr,clocks.mem,temperature.gpu,power.draw", "--format=csv,noheader,nounits"])
+        .output()
+    {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let parts: Vec<&str> = stdout.trim().split(", ").collect();
+            if parts.len() >= 4 {
+                return GpuInfo {
+                    gpu_freq_mhz: parts.get(0).and_then(|s| s.trim().parse().ok()),
+                    mem_freq_mhz: parts.get(1).and_then(|s| s.trim().parse().ok()),
+                    gpu_temp_celsius: parts.get(2).and_then(|s| s.trim().parse().ok()),
+                    power_watts: parts.get(3).and_then(|s| s.trim().parse().ok()),
+                };
+            }
+        }
+    }
+    GpuInfo::default()
+}
+
 // ===== CPU Stats =====
 
 #[derive(Debug, Clone)]

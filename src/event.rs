@@ -40,6 +40,7 @@ pub struct SystemMetrics {
     pub context_switches_per_sec: u64,
     pub temps: TemperatureReadings,
     pub fans: Vec<FanReading>,
+    pub gpu: GpuInfo,
     pub logged_in_users: Vec<LoggedInUserInfo>,
 }
 
@@ -58,6 +59,15 @@ pub struct TemperatureReadings {
     pub per_core_temps: Vec<Option<f32>>,
     pub gpu_temp_celsius: Option<f32>,
     pub motherboard_temp_celsius: Option<f32>,
+}
+
+// GPU info
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GpuInfo {
+    pub gpu_freq_mhz: Option<u32>,
+    pub mem_freq_mhz: Option<u32>,
+    pub gpu_temp_celsius: Option<f32>,
+    pub power_watts: Option<f32>,
 }
 
 // Fan speed readings

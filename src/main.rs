@@ -394,6 +394,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
                 motherboard_temp_celsius: temps.motherboard_temp_celsius,
             },
             fans,
+            gpu: collector::read_gpu_info(),
             logged_in_users: read_logged_in_users()
                 .unwrap_or_default()
                 .into_iter()
