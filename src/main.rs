@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 mod broadcast;
 mod cli;
 mod collector;

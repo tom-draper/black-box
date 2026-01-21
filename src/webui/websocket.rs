@@ -149,6 +149,9 @@ fn event_to_json(event: &crate::event::Event) -> serde_json::Value {
             serde_json::json!({
                 "type": "SystemMetrics",
                 "timestamp": m.ts.format(&Rfc3339).unwrap_or_default(),
+                "kernel": m.kernel_version,
+                "cpu_model": m.cpu_model,
+                "cpu_mhz": m.cpu_mhz,
                 "system_uptime_seconds": m.system_uptime_seconds,
                 "cpu": m.cpu_usage_percent,
                 "per_core_cpu": m.per_core_usage,
@@ -193,6 +196,10 @@ fn event_to_json(event: &crate::event::Event) -> serde_json::Value {
                 "per_core_temps": m.temps.per_core_temps,
                 "gpu_temp": m.temps.gpu_temp_celsius,
                 "mobo_temp": m.temps.motherboard_temp_celsius,
+                "gpu_freq": m.gpu.gpu_freq_mhz,
+                "gpu_mem_freq": m.gpu.mem_freq_mhz,
+                "gpu_temp2": m.gpu.gpu_temp_celsius,
+                "gpu_power": m.gpu.power_watts,
                 "fans": m.fans.iter().map(|f| serde_json::json!({
                     "label": f.label,
                     "rpm": f.rpm,

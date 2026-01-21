@@ -860,29 +860,42 @@ pub struct LoggedInUser {
 }
 
 pub fn read_logged_in_users() -> Result<Vec<LoggedInUser>> {
-    let output = std::process::Command::new("who")
+    // Use 'w' command as it's more reliable than 'who' on some systems
+    let output = std::process::Command::new("w")
+        .args(["-h"]) // no header
         .output()
-        .context("Failed to run who")?;
+        .context("Failed to run w")?;
 
     let content = String::from_utf8_lossy(&output.stdout);
     let mut users = Vec::new();
 
     for line in content.lines() {
         let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 3 {
-            let username = parts[0].to_string();
+        // w output: USER TTY FROM LOGIN@ IDLE JCPU PCPU WHAT
+        if parts.len() >= 4 {
             let terminal = parts[1].to_string();
-            let login_time = parts[2..].iter()
-                .take_while(|p| !p.starts_with('('))
-                .cloned()
-                .collect::<Vec<&str>>()
-                .join(" ");
+            let from = parts[2].to_string();
+            let login_time = parts[3].to_string();
 
-            let remote_host = line.find('(').and_then(|start| {
-                line[start+1..].find(')').map(|end| {
-                    line[start+1..start+1+end].to_string()
-                })
-            });
+            // Get full username via stat on the tty device (w truncates usernames)
+            let tty_path = if terminal.starts_with("pts/") {
+                format!("/dev/{}", terminal)
+            } else {
+                format!("/dev/{}", terminal)
+            };
+            let username = std::process::Command::new("stat")
+                .args(["-c", "%U", &tty_path])
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| s.trim().to_string())
+                .unwrap_or_else(|| parts[0].to_string());
+
+            let remote_host = if from != "-" && !from.is_empty() {
+                Some(from)
+            } else {
+                None
+            };
 
             users.push(LoggedInUser {
                 username,

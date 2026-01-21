@@ -119,6 +119,14 @@ pub async fn index() -> HttpResponse {
     </table>
 
     <div></div>
+    <div class="flex items-center text-gray-900 font-semibold" id="usersSection" style="display:none">
+        <span class="pr-2">Users</span>
+        <span id="userCount" class="text-gray-500 font-normal pr-2"></span>
+        <div class="flex-1 border-b border-gray-200"></div>
+    </div>
+    <div id="usersContainer"></div>
+
+    <div></div>
     <div class="flex items-center text-gray-900 font-semibold">
         <span class="pr-2">Events</span>
         <div class="flex-1 flex items-center">
@@ -306,6 +314,19 @@ function render(){
     (e.filesystems || []).forEach((fs, i) => {
         const pct = fs.total > 0 ? Math.round((fs.used/fs.total)*100) : 0;
         updateDiskBar(`disk_${i}`, pct, document.getElementById('diskContainer'), fs.mount, `${fmt(fs.used)}/${fmt(fs.total)}`);
+    });
+    // Users section
+    const users = e.users || [];
+    document.getElementById('usersSection').style.display = users.length > 0 ? 'flex' : 'none';
+    document.getElementById('userCount').textContent = users.length > 0 ? `${users.length} logged in` : '';
+    const usersContainer = document.getElementById('usersContainer');
+    usersContainer.innerHTML = '';
+    users.forEach(u => {
+        const isRemote = u.remote_host && u.remote_host !== '';
+        const div = document.createElement('div');
+        div.className = 'text-gray-500 flex justify-between';
+        div.innerHTML = `<span>${u.username} <span class="text-gray-400">(${u.terminal})</span></span>${isRemote ? `<span class="text-gray-400">from ${u.remote_host}</span>` : ''}`;
+        usersContainer.appendChild(div);
     });
 }
 
