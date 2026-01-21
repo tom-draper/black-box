@@ -350,8 +350,12 @@ fn run_recorder(cli: Cli) -> Result<()> {
             .collect();
 
         // Record system metrics
+        let cpu_info = collector::read_cpu_info();
         let system_metrics = SystemMetrics {
             ts: OffsetDateTime::now_utc(),
+            kernel_version: collector::read_kernel_version(),
+            cpu_model: cpu_info.model,
+            cpu_mhz: cpu_info.mhz,
             system_uptime_seconds: collector::read_system_uptime().unwrap_or(0),
             cpu_usage_percent: cpu_usage,
             per_core_usage,

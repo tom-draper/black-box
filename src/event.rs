@@ -14,6 +14,9 @@ pub enum Event {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemMetrics {
     pub ts: OffsetDateTime,
+    pub kernel_version: String,
+    pub cpu_model: String,
+    pub cpu_mhz: u32,
     pub system_uptime_seconds: u64,
     pub cpu_usage_percent: f32,
     pub per_core_usage: Vec<f32>,

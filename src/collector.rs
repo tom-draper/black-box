@@ -10,6 +10,46 @@ pub fn read_system_uptime() -> Result<u64> {
     Ok(uptime_secs as u64)
 }
 
+// ===== Kernel Version =====
+
+pub fn read_kernel_version() -> String {
+    let release = fs::read_to_string("/proc/sys/kernel/osrelease")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+    let arch = std::env::consts::ARCH;
+    format!("{} on {}", release, arch)
+}
+
+// ===== CPU Info =====
+
+pub struct CpuInfo {
+    pub model: String,
+    pub mhz: u32,
+}
+
+pub fn read_cpu_info() -> CpuInfo {
+    let content = fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
+    let mut model = String::new();
+    let mut mhz: u32 = 0;
+
+    for line in content.lines() {
+        if line.starts_with("model name") {
+            if let Some(val) = line.split(':').nth(1) {
+                model = val.trim().to_string();
+            }
+        } else if line.starts_with("cpu MHz") {
+            if let Some(val) = line.split(':').nth(1) {
+                mhz = val.trim().parse::<f64>().unwrap_or(0.0) as u32;
+            }
+        }
+        if !model.is_empty() && mhz > 0 {
+            break;
+        }
+    }
+
+    CpuInfo { model, mhz }
+}
+
 // ===== CPU Stats =====
 
 #[derive(Debug, Clone)]

@@ -185,6 +185,10 @@ mod tests {
 
         let event = Event::SystemMetrics(SystemMetrics {
             ts: OffsetDateTime::now_utc(),
+            kernel_version: "6.0.0-test on x86_64".to_string(),
+            cpu_model: "Test CPU".to_string(),
+            cpu_mhz: 3000,
+            system_uptime_seconds: 0,
             cpu_usage_percent: 50.0,
             per_core_usage: vec![],
             mem_used_bytes: 0,

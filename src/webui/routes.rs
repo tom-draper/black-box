@@ -25,12 +25,12 @@ pub async fn index() -> HttpResponse {
     <style>
         * { line-height: 1.5; font-size: 13px; }
         body { font-family: system-ui, -apple-system, sans-serif; }
-        .max-w-42 { max-width: 42rem; }
+        .max-w-46 { max-width: 46rem; }
         .py-5vh { padding-top: 5vh; padding-bottom: 5vh; }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
-<div class="max-w-42 mx-auto px-4 py-5vh">
+<div class="max-w-46 mx-auto px-4 py-5vh">
     <div class="flex justify-between items-center">
         <div class="text-gray-900 font-semibold">Black Box</div>
         <span id="wsStatus" class="text-red-600" style="display:none;">Disconnected</span>
@@ -46,15 +46,20 @@ pub async fn index() -> HttpResponse {
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
     <div id="kernelRow" class="text-gray-500"></div>
+    <div id="cpuDetailsRow" class="text-gray-500"></div>
     <div id="cpuRow" class="text-gray-500 flex justify-between">
         <span id="cpuVal">CPU --%</span>
         <span id="loadVal">Load -- -- --</span>
     </div>
     <div id="cpuCoresContainer" class="grid grid-cols-2 gap-x-4"></div>
-    <div class="text-gray-500" id="ramUsed"></div>
-    <div class="text-gray-500" id="ramAvail"></div>
-    <div class="text-gray-500" id="cpuTemp"></div>
-    <div class="text-gray-500" id="moboTemp"></div>
+    <div class="flex justify-between gap-4">
+        <div class="text-gray-500 flex-1" id="ramUsed"></div>
+        <div class="text-gray-500 flex-1 text-right" id="cpuTemp"></div>
+    </div>
+    <div class="flex justify-between gap-4">
+        <div class="text-gray-500 flex-1" id="ramAvail"></div>
+        <div class="text-gray-500 flex-1 text-right" id="moboTemp"></div>
+    </div>
 
     <div></div>
     <div class="flex items-center text-gray-900 font-semibold">
@@ -79,10 +84,26 @@ pub async fn index() -> HttpResponse {
         <span id="procCount" class="text-gray-500 font-normal pr-2"></span>
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
-    <div id="topProcsContainer" class="grid grid-cols-2 gap-4">
-        <div id="topCpuCol"><div class="text-gray-700 font-medium">Top CPU</div></div>
-        <div id="topMemCol"><div class="text-gray-700 font-medium">Top Memory</div></div>
-    </div>
+    <div class="text-gray-700 font-medium">Top CPU</div>
+    <table class="w-full text-gray-500">
+        <thead><tr class="text-left text-gray-400">
+            <th class="font-normal">Name</th>
+            <th class="font-normal w-16">PID</th>
+            <th class="font-normal w-16 text-right">CPU%</th>
+            <th class="font-normal w-16 text-right">MEM%</th>
+        </tr></thead>
+        <tbody id="topCpuTable"></tbody>
+    </table>
+    <div class="text-gray-700 font-medium mt-2">Top Memory</div>
+    <table class="w-full text-gray-500">
+        <thead><tr class="text-left text-gray-400">
+            <th class="font-normal">Name</th>
+            <th class="font-normal w-16">PID</th>
+            <th class="font-normal w-16 text-right">CPU%</th>
+            <th class="font-normal w-16 text-right">MEM%</th>
+        </tr></thead>
+        <tbody id="topMemTable"></tbody>
+    </table>
 
     <div></div>
     <div class="flex items-center text-gray-900 font-semibold">
@@ -101,7 +122,7 @@ pub async fn index() -> HttpResponse {
             </div>
         </div>
     </div>
-    <div id="eventsContainer" class="font-mono max-h-96 overflow-y-auto bg-white border border-gray-200"></div>
+    <div id="eventsContainer" class="font-mono max-h-96 p-2 overflow-y-auto bg-white border border-gray-200" style="font-size:12px"></div>
 </div>
 
 <script>
@@ -123,13 +144,16 @@ const formatDate = date => {
     return `${days[date.getDay()]}, ${String(date.getDate()).padStart(2,'0')} ${mons[date.getMonth()]} ${date.getFullYear()}, ${date.toTimeString().substring(0,8)}`;
 };
 
-function updateBar(id, pct, container, labelText){
+function updateBar(id, pct, container, labelText, rightLabel){
     let el = document.getElementById(id);
     if(!el){
         container.insertAdjacentHTML('beforeend', `<div class="text-gray-500 flex items-center justify-between" id="row_${id}">
             <span id="lbl_${id}">${labelText}</span>
-            <span class="inline-block w-32 h-3 bg-gray-200 rounded-sm overflow-hidden align-middle ml-1">
-                <span id="${id}" class="block h-full transition-all duration-300" style="width:0%"></span>
+            <span class="flex items-center">
+                <span id="rlbl_${id}" class="${rightLabel ? '' : 'hidden'}">${rightLabel || ''}</span>
+                <span class="inline-block w-32 h-3 bg-gray-200 rounded-sm overflow-hidden align-middle ml-1">
+                    <span id="${id}" class="block h-full transition-all duration-300" style="width:0%"></span>
+                </span>
             </span>
         </div>`);
         el = document.getElementById(id);
@@ -139,18 +163,19 @@ function updateBar(id, pct, container, labelText){
     el.className = `block h-full transition-all duration-300 ${color}`;
     const lbl = document.getElementById('lbl_'+id);
     if(lbl) lbl.textContent = labelText;
+    const rlbl = document.getElementById('rlbl_'+id);
+    if(rlbl && rightLabel !== undefined) { rlbl.textContent = rightLabel; rlbl.className = ''; }
 }
 
-function updateProcRow(containerId, index, name, value){
-    const id = `${containerId}_row_${index}`;
-    let el = document.getElementById(id);
-    if(!el){
-        el = document.createElement('div');
-        el.id = id;
-        el.className = 'text-gray-500';
-        document.getElementById(containerId).appendChild(el);
-    }
-    el.textContent = `${name.substring(0,18).padEnd(18)} ${value}`;
+function updateProcTable(tableId, procs, memTotal){
+    const tbody = document.getElementById(tableId);
+    tbody.innerHTML = '';
+    procs.forEach(p => {
+        const memPct = memTotal > 0 ? (p.mem_bytes / memTotal) * 100 : 0;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${p.name}</td><td>${p.pid}</td><td class="text-right">${p.cpu_percent.toFixed(1)}%</td><td class="text-right">${memPct.toFixed(1)}%</td>`;
+        tbody.appendChild(tr);
+    });
 }
 
 function render(){
@@ -159,6 +184,9 @@ function render(){
     document.getElementById('datetime').textContent = formatDate(new Date());
     document.getElementById('uptime').textContent = e.system_uptime_seconds ? `Uptime: ${formatUptime(e.system_uptime_seconds)}` : '';
     document.getElementById('wsStatus').style.display = (ws && ws.readyState===1) ? 'none' : 'inline';
+
+    if(e.kernel) document.getElementById('kernelRow').textContent = `Linux Kernel: ${e.kernel}`;
+    if(e.cpu_model) document.getElementById('cpuDetailsRow').textContent = `CPU Details: ${e.cpu_model}${e.cpu_mhz ? `, ${e.cpu_mhz}MHz` : ''}`;
 
     if(e.cpu !== undefined){
         document.getElementById('cpuVal').textContent = `CPU ${e.cpu.toFixed(1)}%`;
@@ -171,8 +199,17 @@ function render(){
     }
     if(e.cpu_temp){
         const el = document.getElementById('cpuTemp');
-        el.textContent = `CPU Temp ${Math.round(e.cpu_temp)}°C`;
-        el.className = `text-gray-500 ${e.cpu_temp >= 80 ? 'text-red-600' : e.cpu_temp >= 60 ? 'text-yellow-600' : 'text-green-600'}`;
+        const color = e.cpu_temp >= 80 ? 'text-red-600' : e.cpu_temp >= 60 ? 'text-yellow-600' : 'text-green-600';
+        el.innerHTML = `CPU Temp <span class="${color}">${Math.round(e.cpu_temp)}°C</span>`;
+    } else {
+        document.getElementById('cpuTemp').textContent = '';
+    }
+    if(e.mobo_temp){
+        const el = document.getElementById('moboTemp');
+        const color = e.mobo_temp >= 80 ? 'text-red-600' : e.mobo_temp >= 60 ? 'text-yellow-600' : 'text-green-600';
+        el.innerHTML = `MB Temp <span class="${color}">${Math.round(e.mobo_temp)}°C</span>`;
+    } else {
+        document.getElementById('moboTemp').textContent = '';
     }
     document.getElementById('netRx').textContent = `RX ${fmtRate(e.net_recv || 0)}`;
     document.getElementById('netTx').textContent = `TX ${fmtRate(e.net_send || 0)}`;
@@ -180,16 +217,17 @@ function render(){
     document.getElementById('tcpWait').textContent = `TIME_WAIT ${e.tcp_wait || '--'}`;
     (e.filesystems || []).forEach((fs, i) => {
         const pct = fs.total > 0 ? Math.round((fs.used/fs.total)*100) : 0;
-        updateBar(`disk_${i}`, pct, document.getElementById('diskContainer'), `${fs.mount} ${fmt(fs.used)}/${fmt(fs.total)} ${pct}%`);
+        updateBar(`disk_${i}`, pct, document.getElementById('diskContainer'), fs.mount, `${fmt(fs.used)}/${fmt(fs.total)} ${pct}%`);
     });
 }
 
 function updateProcs(event){
     document.getElementById('procCount').textContent = `${event.total_processes || 0} total ${event.running_processes || 0} running`;
+    const memTotal = lastStats?.mem_total || 0;
     const topCpu = (event.processes || []).slice().sort((a,b) => b.cpu_percent - a.cpu_percent).slice(0,5);
     const topMem = (event.processes || []).slice().sort((a,b) => b.mem_bytes - a.mem_bytes).slice(0,5);
-    topCpu.forEach((p, i) => updateProcRow('topCpuCol', i, p.name, p.cpu_percent.toFixed(1) + '%'));
-    topMem.forEach((p, i) => updateProcRow('topMemCol', i, p.name, fmt(p.mem_bytes)));
+    updateProcTable('topCpuTable', topCpu, memTotal);
+    updateProcTable('topMemTable', topMem, memTotal);
 }
 
 function connectWebSocket(){
@@ -329,6 +367,9 @@ fn event_to_json(
             Some(serde_json::json!({
                 "type": "SystemMetrics",
                 "timestamp": m.ts.format(&Rfc3339).ok()?,
+                "kernel": m.kernel_version,
+                "cpu_model": m.cpu_model,
+                "cpu_mhz": m.cpu_mhz,
                 "system_uptime_seconds": m.system_uptime_seconds,
                 "cpu": m.cpu_usage_percent,
                 "per_core_cpu": m.per_core_usage,
