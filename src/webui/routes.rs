@@ -20,6 +20,8 @@ pub async fn index() -> HttpResponse {
     <title>Black Box</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="icon" type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect x='10' y='10' width='80' height='80' fill='black'/%3E%3C/svg%3E">
     <style>
         * { line-height: 1.5; font-size: 13px; }
         body { font-family: system-ui, -apple-system, sans-serif; }
@@ -44,7 +46,10 @@ pub async fn index() -> HttpResponse {
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
     <div id="kernelRow" class="text-gray-500"></div>
-    <div id="cpuRow" class="text-gray-500 flex justify-between"></div>
+    <div id="cpuRow" class="text-gray-500 flex justify-between">
+        <span id="cpuVal">CPU --%</span>
+        <span id="loadVal">Load -- -- --</span>
+    </div>
     <div id="cpuCoresContainer" class="grid grid-cols-2 gap-x-4"></div>
     <div class="text-gray-500" id="ramUsed"></div>
     <div class="text-gray-500" id="ramAvail"></div>
@@ -74,7 +79,10 @@ pub async fn index() -> HttpResponse {
         <span id="procCount" class="text-gray-500 font-normal pr-2"></span>
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
-    <div id="topProcsContainer"></div>
+    <div id="topProcsContainer" class="grid grid-cols-2 gap-4">
+        <div id="topCpuCol"><div class="text-gray-700 font-medium">Top CPU</div></div>
+        <div id="topMemCol"><div class="text-gray-700 font-medium">Top Memory</div></div>
+    </div>
 
     <div></div>
     <div class="flex items-center text-gray-900 font-semibold">
@@ -97,207 +105,118 @@ pub async fn index() -> HttpResponse {
 </div>
 
 <script>
-let ws=null;
-let eventBuffer=[];
-let lastStats=null;
-let topProcs=[];
-let totalProcs=0;
-let runningProcs=0;
-let startTime=Date.now();
+let ws=null, eventBuffer=[], lastStats=null;
 const MAX_BUFFER=1000;
 
-// Utility functions
-function fmt(b){
-    if(b===0 || b===undefined)return'0B';
-    const k=1024,s=['B','KB','MB','GB','TB'];
-    const i=Math.floor(Math.log(b)/Math.log(k));
-    return(b/Math.pow(k,i)).toFixed(i>1?1:0)+s[i];
-}
-
-function fmtRate(b){
-    return fmt(b)+'/s';
-}
-
-function formatUptime(s){
+const fmt = b => {
+    if(!b) return '0B';
+    const k=1024, s=['B','KB','MB','GB','TB'], i=Math.floor(Math.log(b)/Math.log(k));
+    return (b/Math.pow(k,i)).toFixed(i>1?1:0)+s[i];
+};
+const fmtRate = b => fmt(b)+'/s';
+const formatUptime = s => {
     const d=Math.floor(s/86400),h=Math.floor((s%86400)/3600),m=Math.floor((s%3600)/60),sec=Math.floor(s%60);
-    if(d>0)return `${d}d ${h}h ${m}m`;
-    if(h>0)return `${h}h ${m}m ${sec}s`;
-    return `${m}m ${sec}s`;
-}
+    return d>0?`${d}d ${h}h ${m}m`:h>0?`${h}h ${m}m ${sec}s`:`${m}m ${sec}s`;
+};
+const formatDate = date => {
+    const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'], mons=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return `${days[date.getDay()]}, ${String(date.getDate()).padStart(2,'0')} ${mons[date.getMonth()]} ${date.getFullYear()}, ${date.toTimeString().substring(0,8)}`;
+};
 
-function formatDate(date){
-    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const day = days[date.getDay()];
-    const d = String(date.getDate()).padStart(2, '0');
-    const month = months[date.getMonth()];
-    const year = date.getFullYear();
-    const time = date.toTimeString().substring(0, 8);
-    return `${day}, ${d} ${month} ${year}, ${time}`;
-}
-
-function createBar(pct, width='w-32'){
+function updateBar(id, pct, container, labelText){
+    let el = document.getElementById(id);
+    if(!el){
+        container.insertAdjacentHTML('beforeend', `<div class="text-gray-500 flex items-center justify-between" id="row_${id}">
+            <span id="lbl_${id}">${labelText}</span>
+            <span class="inline-block w-32 h-3 bg-gray-200 rounded-sm overflow-hidden align-middle ml-1">
+                <span id="${id}" class="block h-full transition-all duration-300" style="width:0%"></span>
+            </span>
+        </div>`);
+        el = document.getElementById(id);
+    }
     const color = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-yellow-500' : 'bg-green-500';
-    return `<span class="inline-block ${width} h-3 bg-gray-200 rounded-sm overflow-hidden align-middle ml-1">
-        <span class="${color} block h-full transition-all duration-300" style="width:${Math.min(100,pct)}%"></span>
-    </span>`;
+    el.style.width = Math.min(100, pct) + '%';
+    el.className = `block h-full transition-all duration-300 ${color}`;
+    const lbl = document.getElementById('lbl_'+id);
+    if(lbl) lbl.textContent = labelText;
+}
+
+function updateProcRow(containerId, index, name, value){
+    const id = `${containerId}_row_${index}`;
+    let el = document.getElementById(id);
+    if(!el){
+        el = document.createElement('div');
+        el.id = id;
+        el.className = 'text-gray-500';
+        document.getElementById(containerId).appendChild(el);
+    }
+    el.textContent = `${name.substring(0,18).padEnd(18)} ${value}`;
 }
 
 function render(){
     if(!lastStats)return;
     const e=lastStats;
-    const wsOk=ws&&ws.readyState===1;
-    const now=new Date();
+    document.getElementById('datetime').textContent = formatDate(new Date());
+    document.getElementById('uptime').textContent = e.system_uptime_seconds ? `Uptime: ${formatUptime(e.system_uptime_seconds)}` : '';
+    document.getElementById('wsStatus').style.display = (ws && ws.readyState===1) ? 'none' : 'inline';
 
-    // Status line
-    document.getElementById('datetime').textContent = formatDate(now);
-    if(e.system_uptime_seconds !== undefined && e.system_uptime_seconds !== null){
-        document.getElementById('uptime').textContent = `Uptime: ${formatUptime(e.system_uptime_seconds)}`;
-    } else {
-        document.getElementById('uptime').textContent = '';
-    }
-    document.getElementById('wsStatus').style.display = wsOk ? 'none' : 'inline';
-
-    // CPU info
     if(e.cpu !== undefined){
-        document.getElementById('cpuRow').innerHTML = `<span>CPU ${e.cpu.toFixed(1)}%</span><span>Load ${e.load?.toFixed(2) || '--'} ${e.load5?.toFixed(2) || '--'} ${e.load15?.toFixed(2) || '--'}</span>`;
+        document.getElementById('cpuVal').textContent = `CPU ${e.cpu.toFixed(1)}%`;
+        document.getElementById('loadVal').textContent = `Load ${e.load?.toFixed(2) || '--'} ${e.load5?.toFixed(2) || '--'} ${e.load15?.toFixed(2) || '--'}`;
     }
-
-    // Per-core CPUs in 2 columns
-    const perCore = e.per_core_cpu || [];
-    if(perCore.length > 0){
-        const coresHTML = perCore.map((v,i) => {
-            return `<div class="text-gray-500 flex items-center justify-between">
-                <span>CPU${i} ${v.toFixed(1)}%</span>
-                ${createBar(v, 'w-32')}
-            </div>`;
-        }).join('');
-        document.getElementById('cpuCoresContainer').innerHTML = coresHTML;
-    }
-
-    // RAM
+    (e.per_core_cpu || []).forEach((v, i) => updateBar(`core_${i}`, v, document.getElementById('cpuCoresContainer'), `CPU${i} ${v.toFixed(1)}%`));
     if(e.mem !== undefined){
-        document.getElementById('ramUsed').innerHTML = `RAM ${fmt(e.mem_used)}/${fmt(e.mem_total)} ${e.mem.toFixed(1)}% ${createBar(e.mem, 'w-32')}`;
-        document.getElementById('ramAvail').innerHTML = `Available RAM ${fmt(e.mem_total - e.mem_used)}`;
+        updateBar('ramBar', e.mem, document.getElementById('ramUsed'), `RAM Used ${fmt(e.mem_used)} ${e.mem.toFixed(1)}%`);
+        document.getElementById('ramAvail').textContent = `Available RAM ${fmt(e.mem_total - e.mem_used)}`;
     }
-
-    // Temps
     if(e.cpu_temp){
-        const tempClass = e.cpu_temp >= 80 ? 'text-red-600' : e.cpu_temp >= 60 ? 'text-yellow-600' : 'text-green-600';
-        document.getElementById('cpuTemp').innerHTML = `<span class="${tempClass}">CPU Temp ${Math.round(e.cpu_temp)}°C</span>`;
-    } else {
-        document.getElementById('cpuTemp').innerHTML = '';
+        const el = document.getElementById('cpuTemp');
+        el.textContent = `CPU Temp ${Math.round(e.cpu_temp)}°C`;
+        el.className = `text-gray-500 ${e.cpu_temp >= 80 ? 'text-red-600' : e.cpu_temp >= 60 ? 'text-yellow-600' : 'text-green-600'}`;
     }
-
-    if(e.mobo_temp){
-        document.getElementById('moboTemp').innerHTML = `Motherboard ${Math.round(e.mobo_temp)}°C`;
-    } else {
-        document.getElementById('moboTemp').innerHTML = '';
-    }
-
-    // Network
-    const rx = e.net_recv || 0;
-    const tx = e.net_send || 0;
-    document.getElementById('netRx').innerHTML = `RX ${fmtRate(rx)}`;
-    document.getElementById('netTx').innerHTML = `TX ${fmtRate(tx)}`;
-    document.getElementById('tcpConns').innerHTML = `TCP ${e.tcp || '--'}`;
-    document.getElementById('tcpWait').innerHTML = `TIME_WAIT ${e.tcp_wait || '--'}`;
-
-    // Disks
-    const filesystems = e.filesystems || [];
-    if(filesystems.length > 0){
-        const disksHTML = filesystems.map(fs => {
-            const pct = fs.total > 0 ? Math.round((fs.used/fs.total)*100) : 0;
-            const mount = fs.mount;
-            const usage = `${fmt(fs.used)}/${fmt(fs.total)} ${pct}%`;
-            return `<div class="text-gray-500 flex items-center justify-between">
-                <span>${mount}</span>
-                <span class="flex items-center gap-1">
-                    <span>${usage}</span>
-                    ${createBar(pct, 'w-32')}
-                </span>
-            </div>`;
-        }).join('');
-        document.getElementById('diskContainer').innerHTML = disksHTML;
-    }
-
-    // Processes
-    if(topProcs.length > 0){
-        document.getElementById('procCount').textContent = `${totalProcs} total ${runningProcs} running`;
-
-        const topCpu = topProcs.slice().sort((a,b) => b.cpu_percent - a.cpu_percent).slice(0,5);
-        const topMem = topProcs.slice().sort((a,b) => b.mem_bytes - a.mem_bytes).slice(0,5);
-
-        let procsHTML = '<div class="grid grid-cols-2 gap-4">';
-
-        // Top CPU column
-        procsHTML += '<div><div class="text-gray-700 font-medium">Top CPU</div>';
-        topCpu.forEach(p => {
-            const name = p.name.substring(0,18).padEnd(18);
-            procsHTML += `<div class="text-gray-500 font-mono">${name} ${p.cpu_percent.toFixed(1)}%</div>`;
-        });
-        procsHTML += '</div>';
-
-        // Top Memory column
-        procsHTML += '<div><div class="text-gray-700 font-medium">Top Memory</div>';
-        topMem.forEach(p => {
-            const name = p.name.substring(0,16).padEnd(16);
-            procsHTML += `<div class="text-gray-500 font-mono">${name} ${fmt(p.mem_bytes)}</div>`;
-        });
-        procsHTML += '</div>';
-
-        procsHTML += '</div>';
-
-        document.getElementById('topProcsContainer').innerHTML = procsHTML;
-    }
+    document.getElementById('netRx').textContent = `RX ${fmtRate(e.net_recv || 0)}`;
+    document.getElementById('netTx').textContent = `TX ${fmtRate(e.net_send || 0)}`;
+    document.getElementById('tcpConns').textContent = `TCP ${e.tcp || '--'}`;
+    document.getElementById('tcpWait').textContent = `TIME_WAIT ${e.tcp_wait || '--'}`;
+    (e.filesystems || []).forEach((fs, i) => {
+        const pct = fs.total > 0 ? Math.round((fs.used/fs.total)*100) : 0;
+        updateBar(`disk_${i}`, pct, document.getElementById('diskContainer'), `${fs.mount} ${fmt(fs.used)}/${fmt(fs.total)} ${pct}%`);
+    });
 }
 
-// WebSocket connection
+function updateProcs(event){
+    document.getElementById('procCount').textContent = `${event.total_processes || 0} total ${event.running_processes || 0} running`;
+    const topCpu = (event.processes || []).slice().sort((a,b) => b.cpu_percent - a.cpu_percent).slice(0,5);
+    const topMem = (event.processes || []).slice().sort((a,b) => b.mem_bytes - a.mem_bytes).slice(0,5);
+    topCpu.forEach((p, i) => updateProcRow('topCpuCol', i, p.name, p.cpu_percent.toFixed(1) + '%'));
+    topMem.forEach((p, i) => updateProcRow('topMemCol', i, p.name, fmt(p.mem_bytes)));
+}
+
 function connectWebSocket(){
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(protocol + '//' + window.location.host + '/ws');
-
-    ws.onopen = () => render();
     ws.onmessage = (ev) => {
         try {
-            const event = JSON.parse(ev.data);
-            handleEvent(event);
-        } catch(e) {}
+            const e = JSON.parse(ev.data);
+            if(e.type === 'SystemMetrics') { lastStats = e; render(); }
+            else if(e.type === 'ProcessSnapshot') { updateProcs(e); }
+            else { addEventToLog(e); }
+        } catch(err) {}
     };
-    ws.onerror = () => render();
-    ws.onclose = () => {
-        render();
-        setTimeout(connectWebSocket, 5000);
-    };
-}
-
-function handleEvent(event){
-    if(event.type === 'SystemMetrics'){
-        lastStats = event;
-        render();
-    } else if(event.type === 'ProcessSnapshot'){
-        topProcs = event.processes || [];
-        totalProcs = event.total_processes || 0;
-        runningProcs = event.running_processes || 0;
-        render();
-    } else {
-        addEventToLog(event);
-    }
+    ws.onclose = () => setTimeout(connectWebSocket, 5000);
 }
 
 function addEventToLog(event){
     eventBuffer.push(event);
     if(eventBuffer.length > MAX_BUFFER) eventBuffer.shift();
-
     const filter = document.getElementById('filterInput').value.toLowerCase();
     const evType = document.getElementById('eventType').value;
-
     if(matchesFilter(event, filter, evType)){
         const container = document.getElementById('eventsContainer');
         const entry = createEventEntry(event);
         if(entry){
             container.insertBefore(entry, container.firstChild);
-            while(container.children.length > 200) container.removeChild(container.lastChild);
+            if(container.children.length > 200) container.removeChild(container.lastChild);
         }
     }
 }
@@ -307,17 +226,14 @@ function matchesFilter(e, filter, evType){
         const map = {process:'ProcessLifecycle', security:'SecurityEvent', anomaly:'Anomaly'};
         if(e.type !== map[evType]) return false;
     }
-    if(filter && !JSON.stringify(e).toLowerCase().includes(filter)) return false;
-    return true;
+    return !filter || JSON.stringify(e).toLowerCase().includes(filter);
 }
 
 function createEventEntry(e){
     if(!e.type || e.type === 'ProcessSnapshot') return null;
-
     const div = document.createElement('div');
     div.className = 'text-gray-600';
-    const time = (e.timestamp || '').substring(11,19);
-
+    const time = (e.timestamp || '').substring(11,23);
     if(e.type === 'ProcessLifecycle'){
         const color = e.kind === 'Started' ? 'text-green-600' : e.kind === 'Exited' ? 'text-gray-400' : 'text-yellow-600';
         div.innerHTML = `<span class="text-gray-400">${time}</span> <span class="${color}">[${e.kind}]</span> ${e.name} <span class="text-gray-400">(pid ${e.pid})</span>`;
@@ -328,7 +244,6 @@ function createEventEntry(e){
         const color = e.severity === 'Critical' ? 'text-red-600' : 'text-yellow-600';
         div.innerHTML = `<span class="text-gray-400">${time}</span> <span class="${color}">[${e.severity}]</span> ${e.message}`;
     }
-
     return div;
 }
 
@@ -337,7 +252,6 @@ function reloadEvents(){
     container.innerHTML = '';
     const filter = document.getElementById('filterInput').value.toLowerCase();
     const evType = document.getElementById('eventType').value;
-
     eventBuffer.slice().reverse().forEach(event => {
         if(matchesFilter(event, filter, evType)){
             const entry = createEventEntry(event);
@@ -348,21 +262,13 @@ function reloadEvents(){
 
 document.getElementById('filterInput').addEventListener('input', reloadEvents);
 document.getElementById('eventType').addEventListener('change', reloadEvents);
-
 connectWebSocket();
-setInterval(() => {
-    if(lastStats){
-        document.getElementById('datetime').textContent = formatDate(new Date());
-    }
-}, 1000);
+setInterval(() => { if(lastStats) document.getElementById('datetime').textContent = formatDate(new Date()); }, 1000);
 </script>
 </body>
 </html>
 "#;
-
-    HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        .body(html)
+    HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html)
 }
 
 pub async fn api_events(
