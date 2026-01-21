@@ -166,7 +166,7 @@ function render(){
     }
     (e.per_core_cpu || []).forEach((v, i) => updateBar(`core_${i}`, v, document.getElementById('cpuCoresContainer'), `CPU${i} ${v.toFixed(1)}%`));
     if(e.mem !== undefined){
-        updateBar('ramBar', e.mem, document.getElementById('ramUsed'), `RAM Used ${fmt(e.mem_used)} ${e.mem.toFixed(1)}%`);
+        updateBar('ramBar', e.mem, document.getElementById('ramUsed'), `RAM Used ${fmt(e.mem_used)} (${e.mem.toFixed(1)}%)`);
         document.getElementById('ramAvail').textContent = `Available RAM ${fmt(e.mem_total - e.mem_used)}`;
     }
     if(e.cpu_temp){
