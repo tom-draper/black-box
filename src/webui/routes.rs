@@ -33,8 +33,8 @@ pub async fn index() -> HttpResponse {
 <body class="bg-gray-50 min-h-screen">
 <div class="max-w mx-auto px-4 py-5vh">
     <div class="flex justify-between items-center">
-        <div class="text-gray-900 font-semibold">■ Black Box</div>
-        <span id="wsStatus" class="text-red-500 font-semibold" style="display:none;">■ Disconnected</span>
+        <div class="text-gray-900 font-semibold">Black Box</div>
+        <span id="wsStatus" class="text-red-500 font-semibold" style="display:none;">Disconnected</span>
     </div>
     <div class="flex justify-between text-gray-500">
         <span id="datetime"></span>
@@ -53,6 +53,9 @@ pub async fn index() -> HttpResponse {
         <span id="loadVal">Load -- -- --</span>
     </div>
     <div id="cpuCoresContainer" class="grid grid-cols-2 gap-x-4"></div>
+    <div class="flex items-center" style="height:19.5px;width:100%;">
+        <div id="cpuChart" class="flex items-end justify-end" style="height:10px;width:100%;"></div>
+    </div>
     <div class="flex justify-between gap-4">
         <div class="text-gray-500 flex-1" id="ramUsed"></div>
         <div class="text-gray-500 flex-1 text-right" id="cpuTemp"></div>
@@ -60,6 +63,9 @@ pub async fn index() -> HttpResponse {
     <div class="flex justify-between gap-4">
         <div class="text-gray-500 flex-1" id="ramAvail"></div>
         <div class="text-gray-500 flex-1 text-right" id="moboTemp"></div>
+    </div>
+    <div class="flex items-center" style="height:19.5px;width:100%;">
+        <div id="memoryChart" class="flex items-end justify-end" style="height:10px;width:100%;"></div>
     </div>
 
     <div></div>
@@ -88,6 +94,10 @@ pub async fn index() -> HttpResponse {
         </span>
         <span id="netSpeedUp" class="flex-1"></span>
     </div>
+    <div class="text-gray-500 flex gap-4">
+        <span class="flex-1" id="netRxStats"></span>
+        <span class="flex-1" id="netTxStats"></span>
+    </div>
     <div class="grid grid-cols-2 gap-x-4 text-gray-500">
         <div id="netAddress"></div>
         <div id="netTcp"></div>
@@ -97,7 +107,7 @@ pub async fn index() -> HttpResponse {
 
     <div></div>
     <div class="flex items-center text-gray-900 font-semibold">
-        <span class="pr-2">File Systems</span>
+        <span class="pr-2">Storage</span>
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
     <div id="diskContainer"></div>
@@ -158,6 +168,9 @@ pub async fn index() -> HttpResponse {
 <script>
 let ws=null, eventBuffer=[], lastStats=null;
 const MAX_BUFFER=1000;
+const memoryHistory = []; // Track last 60 seconds of memory usage
+const cpuHistory = []; // Track last 60 seconds of CPU usage
+const MAX_HISTORY = 60;
 
 const fmt = b => {
     if(!b) return '0B';
@@ -234,6 +247,48 @@ function updateRamBar(pct, used, container){
     document.getElementById('ramPct').textContent = pct.toFixed(1) + '%';
 }
 
+function getUsageColor(pct){
+    // Discrete Tailwind colors based on usage thresholds
+    if(pct >= 90) return 'rgb(239, 68, 68)';    // red-500
+    if(pct >= 80) return 'rgb(248, 113, 113)';  // red-400
+    if(pct >= 70) return 'rgb(252, 165, 165)';  // red-300
+    if(pct >= 60) return 'rgb(234, 179, 8)';    // yellow-500
+    if(pct >= 50) return 'rgb(250, 204, 21)';   // yellow-400
+    if(pct >= 40) return 'rgb(253, 224, 71)';   // yellow-300
+    if(pct >= 30) return 'rgb(163, 230, 53)';   // lime-400
+    if(pct >= 20) return 'rgb(132, 204, 22)';   // lime-500
+    if(pct >= 10) return 'rgb(34, 197, 94)';    // green-500
+    return 'rgb(74, 222, 128)';                  // green-400
+}
+
+function updateMemoryChart(){
+    const container = document.getElementById('memoryChart');
+    container.innerHTML = '';
+    const barWidth = 100 / MAX_HISTORY;
+    memoryHistory.forEach(pct => {
+        const bar = document.createElement('div');
+        bar.style.width = barWidth + '%';
+        bar.style.height = pct + '%';
+        bar.style.alignSelf = 'flex-end'; // Align to bottom
+        bar.style.backgroundColor = getUsageColor(pct);
+        container.appendChild(bar);
+    });
+}
+
+function updateCpuChart(){
+    const container = document.getElementById('cpuChart');
+    container.innerHTML = '';
+    const barWidth = 100 / MAX_HISTORY;
+    cpuHistory.forEach(pct => {
+        const bar = document.createElement('div');
+        bar.style.width = barWidth + '%';
+        bar.style.height = pct + '%';
+        bar.style.alignSelf = 'flex-end'; // Align to bottom
+        bar.style.backgroundColor = getUsageColor(pct);
+        container.appendChild(bar);
+    });
+}
+
 function updateDiskBar(id, pct, container, mount, used, total){
     let el = document.getElementById(id);
     if(!el){
@@ -272,8 +327,7 @@ function render(){
     const e=lastStats;
     document.getElementById('datetime').textContent = formatDate(new Date());
     document.getElementById('uptime').textContent = e.system_uptime_seconds ? `Uptime: ${formatUptime(e.system_uptime_seconds)}` : '';
-    console.log(ws, ws.readyState);
-    document.getElementById('wsStatus').style.display = (ws && ws.readyState===1) ? 'none' : 'inline';
+    updateConnectionStatus();
 
     if(e.kernel) document.getElementById('kernelRow').textContent = `Linux Kernel: ${e.kernel}`;
     if(e.cpu_model) document.getElementById('cpuDetailsRow').textContent = `CPU Details: ${e.cpu_model}${e.cpu_mhz ? `, ${e.cpu_mhz}MHz` : ''}`;
@@ -281,11 +335,19 @@ function render(){
     if(e.cpu !== undefined){
         document.getElementById('cpuVal').textContent = `CPU ${e.cpu.toFixed(1)}%`;
         document.getElementById('loadVal').textContent = `Load ${e.load?.toFixed(2) || '--'} ${e.load5?.toFixed(2) || '--'} ${e.load15?.toFixed(2) || '--'}`;
+        // Update CPU history
+        cpuHistory.push(e.cpu);
+        if(cpuHistory.length > MAX_HISTORY) cpuHistory.shift();
+        updateCpuChart();
     }
     (e.per_core_cpu || []).forEach((v, i) => updateCoreBar(`core_${i}`, v, document.getElementById('cpuCoresContainer'), i));
     if(e.mem !== undefined){
         updateRamBar(e.mem, e.mem_used, document.getElementById('ramUsed'));
         document.getElementById('ramAvail').textContent = `Available RAM ${fmt(e.mem_total - e.mem_used)}`;
+        // Update memory history
+        memoryHistory.push(e.mem);
+        if(memoryHistory.length > MAX_HISTORY) memoryHistory.shift();
+        updateMemoryChart();
     }
     if(e.cpu_temp){
         const el = document.getElementById('cpuTemp');
@@ -323,10 +385,31 @@ function render(){
     document.getElementById('netName').textContent = `${netInterface}:`;
     document.getElementById('netSpeedDown').textContent = `Down ${fmtRate(e.net_recv || 0)}`;
     document.getElementById('netSpeedUp').textContent = `Up ${fmtRate(e.net_send || 0)}`;
+
+    // Show RX and TX stats with errors/drops
+    const rxErrors = e.net_recv_errors || 0;
+    const rxDrops = e.net_recv_drops || 0;
+    const txErrors = e.net_send_errors || 0;
+    const txDrops = e.net_send_drops || 0;
+
+    const rxText = `RX: ${rxErrors} err/s, ${rxDrops} drop/s`;
+    const txText = `TX: ${txErrors} err/s, ${txDrops} drop/s`;
+    const rxColor = (rxErrors > 0 || rxDrops > 0) ? 'text-red-600' : 'text-gray-500';
+    const txColor = (txErrors > 0 || txDrops > 0) ? 'text-red-600' : 'text-gray-500';
+
+    const rxEl = document.getElementById('netRxStats');
+    const txEl = document.getElementById('netTxStats');
+    rxEl.textContent = rxText;
+    txEl.textContent = txText;
+    rxEl.className = `flex-1 ${rxColor}`;
+    txEl.className = `flex-1 ${txColor}`;
+
     document.getElementById('netAddress').textContent = `Address: ${e.net_ip || '--'}`;
     document.getElementById('netTcp').textContent = `TCP Connections: ${e.tcp || '--'}`;
     document.getElementById('netGateway').textContent = `Gateway: ${e.net_gateway || '--'}`;
     document.getElementById('netDns').textContent = `DNS: ${e.net_dns || '--'}`;
+
+    // Storage section
     (e.filesystems || []).forEach((fs, i) => {
         const pct = fs.total > 0 ? Math.round((fs.used/fs.total)*100) : 0;
         updateDiskBar(`disk_${i}`, pct, document.getElementById('diskContainer'), fs.mount, fs.used, fs.total);
@@ -355,9 +438,17 @@ function updateProcs(event){
     updateProcTable('topMemTable', topMem, memTotal);
 }
 
+function updateConnectionStatus(){
+    const isConnected = ws && ws.readyState === 1;
+    document.getElementById('wsStatus').style.display = isConnected ? 'none' : 'inline';
+}
+
 function connectWebSocket(){
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(protocol + '//' + window.location.host + '/ws');
+    ws.onopen = () => {
+        updateConnectionStatus();
+    };
     ws.onmessage = (ev) => {
         try {
             const e = JSON.parse(ev.data);
@@ -366,7 +457,13 @@ function connectWebSocket(){
             else { addEventToLog(e); }
         } catch(err) {}
     };
-    ws.onclose = () => setTimeout(connectWebSocket, 5000);
+    ws.onerror = () => {
+        updateConnectionStatus();
+    };
+    ws.onclose = () => {
+        updateConnectionStatus();
+        setTimeout(connectWebSocket, 5000);
+    };
 }
 
 function addEventToLog(event){
@@ -524,6 +621,10 @@ fn event_to_json(
                 "tcp_wait": m.tcp_time_wait,
                 "net_recv": m.net_recv_bytes_per_sec,
                 "net_send": m.net_send_bytes_per_sec,
+                "net_recv_errors": m.net_recv_errors_per_sec,
+                "net_send_errors": m.net_send_errors_per_sec,
+                "net_recv_drops": m.net_recv_drops_per_sec,
+                "net_send_drops": m.net_send_drops_per_sec,
                 "net_interface": m.net_interface,
                 "net_ip": m.net_ip_address,
                 "net_gateway": m.net_gateway,

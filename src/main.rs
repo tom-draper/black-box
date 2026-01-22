@@ -39,9 +39,10 @@ use collector::{
     ConnectionTracker,
 };
 use event::{
-    Anomaly, AnomalyKind, AnomalySeverity, Event, FilesystemInfo, LoggedInUserInfo, PerDiskMetrics,
-    ProcessInfo, ProcessLifecycle, ProcessLifecycleKind, ProcessSnapshot as EventProcessSnapshot,
-    SecurityEvent, SecurityEventKind, SystemMetrics, TemperatureReadings,
+    Anomaly, AnomalyKind, AnomalySeverity, Event, FilesystemInfo, LoggedInUserInfo,
+    PerDiskMetrics, ProcessInfo, ProcessLifecycle, ProcessLifecycleKind,
+    ProcessSnapshot as EventProcessSnapshot, SecurityEvent, SecurityEventKind, SystemMetrics,
+    TemperatureReadings,
 };
 use recorder::Recorder;
 
@@ -337,6 +338,10 @@ fn run_recorder(cli: Cli) -> Result<()> {
         // Calculate throughput
         let (net_recv_per_sec, net_send_per_sec) =
             network_stats.bytes_per_sec(&prev_network, COLLECTION_INTERVAL_SECS as f32);
+        let (net_recv_errors_per_sec, net_send_errors_per_sec) =
+            network_stats.errors_per_sec(&prev_network, COLLECTION_INTERVAL_SECS as f32);
+        let (net_recv_drops_per_sec, net_send_drops_per_sec) =
+            network_stats.drops_per_sec(&prev_network, COLLECTION_INTERVAL_SECS as f32);
         let net_interface = network_stats.primary_interface.clone();
         let net_ip_address = get_primary_ip_address();
         let net_gateway = get_default_gateway();
@@ -391,6 +396,10 @@ fn run_recorder(cli: Cli) -> Result<()> {
                 .collect(),
             net_recv_bytes_per_sec: net_recv_per_sec,
             net_send_bytes_per_sec: net_send_per_sec,
+            net_recv_errors_per_sec,
+            net_send_errors_per_sec,
+            net_recv_drops_per_sec,
+            net_send_drops_per_sec,
             net_interface,
             net_ip_address,
             net_gateway,
@@ -546,6 +555,33 @@ fn run_recorder(cli: Cli) -> Result<()> {
                 severity: AnomalySeverity::Warning,
                 kind: AnomalyKind::ContextSwitchSpike,
                 message: format!("Context switch spike: {}/s", ctxt_per_sec),
+            };
+            recorder.append(&Event::Anomaly(anomaly))?;
+        }
+
+        // Network errors/drops detection
+        if net_recv_errors_per_sec > 0 || net_send_errors_per_sec > 0 {
+            let anomaly = Anomaly {
+                ts: OffsetDateTime::now_utc(),
+                severity: AnomalySeverity::Warning,
+                kind: AnomalyKind::NetworkSpike,
+                message: format!(
+                    "Network errors detected: RX={}/s TX={}/s",
+                    net_recv_errors_per_sec, net_send_errors_per_sec
+                ),
+            };
+            recorder.append(&Event::Anomaly(anomaly))?;
+        }
+
+        if net_recv_drops_per_sec > 0 || net_send_drops_per_sec > 0 {
+            let anomaly = Anomaly {
+                ts: OffsetDateTime::now_utc(),
+                severity: AnomalySeverity::Warning,
+                kind: AnomalyKind::NetworkSpike,
+                message: format!(
+                    "Network packet drops detected: RX={}/s TX={}/s",
+                    net_recv_drops_per_sec, net_send_drops_per_sec
+                ),
             };
             recorder.append(&Event::Anomaly(anomaly))?;
         }

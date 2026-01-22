@@ -516,12 +516,17 @@ pub fn read_all_filesystems() -> Result<Vec<FilesystemStats>> {
     Ok(filesystems)
 }
 
+
 // ===== Network I/O Stats =====
 
 #[derive(Debug, Clone)]
 pub struct NetworkStats {
     pub recv_bytes: u64,
     pub send_bytes: u64,
+    pub recv_errors: u64,
+    pub send_errors: u64,
+    pub recv_drops: u64,
+    pub send_drops: u64,
     pub primary_interface: String,
 }
 
@@ -530,13 +535,18 @@ pub fn read_network_stats() -> Result<NetworkStats> {
 
     let mut total_recv = 0u64;
     let mut total_send = 0u64;
+    let mut total_recv_errors = 0u64;
+    let mut total_send_errors = 0u64;
+    let mut total_recv_drops = 0u64;
+    let mut total_send_drops = 0u64;
     let mut primary_interface = String::from("net");
     let mut max_bytes = 0u64;
 
     for line in content.lines().skip(2) {
         // Skip header lines
         let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() < 10 {
+        // Format: iface recv_bytes recv_packets recv_errs recv_drop ... transmit_bytes transmit_packets transmit_errs transmit_drop
+        if parts.len() < 13 {
             continue;
         }
 
@@ -545,10 +555,21 @@ pub fn read_network_stats() -> Result<NetworkStats> {
             continue;
         }
 
-        // Recv bytes is field 1, send bytes is field 9
-        if let (Ok(recv), Ok(send)) = (parts[1].parse::<u64>(), parts[9].parse::<u64>()) {
+        // Parse all network stats
+        if let (Ok(recv), Ok(send), Ok(recv_err), Ok(recv_drop), Ok(send_err), Ok(send_drop)) = (
+            parts[1].parse::<u64>(),   // recv bytes
+            parts[9].parse::<u64>(),   // transmit bytes
+            parts[3].parse::<u64>(),   // recv errors
+            parts[4].parse::<u64>(),   // recv drop
+            parts[11].parse::<u64>(),  // transmit errors
+            parts[12].parse::<u64>(),  // transmit drop
+        ) {
             total_recv += recv;
             total_send += send;
+            total_recv_errors += recv_err;
+            total_send_errors += send_err;
+            total_recv_drops += recv_drop;
+            total_send_drops += send_drop;
 
             // Track the interface with the most traffic as primary
             let total_bytes = recv + send;
@@ -562,6 +583,10 @@ pub fn read_network_stats() -> Result<NetworkStats> {
     Ok(NetworkStats {
         recv_bytes: total_recv,
         send_bytes: total_send,
+        recv_errors: total_recv_errors,
+        send_errors: total_send_errors,
+        recv_drops: total_recv_drops,
+        send_drops: total_send_drops,
         primary_interface,
     })
 }
@@ -575,6 +600,26 @@ impl NetworkStats {
         let send_per_sec = (send_delta as f32 / interval_secs) as u64;
 
         (recv_per_sec, send_per_sec)
+    }
+
+    pub fn errors_per_sec(&self, prev: &NetworkStats, interval_secs: f32) -> (u64, u64) {
+        let recv_err_delta = self.recv_errors.saturating_sub(prev.recv_errors);
+        let send_err_delta = self.send_errors.saturating_sub(prev.send_errors);
+
+        let recv_err_per_sec = (recv_err_delta as f32 / interval_secs) as u64;
+        let send_err_per_sec = (send_err_delta as f32 / interval_secs) as u64;
+
+        (recv_err_per_sec, send_err_per_sec)
+    }
+
+    pub fn drops_per_sec(&self, prev: &NetworkStats, interval_secs: f32) -> (u64, u64) {
+        let recv_drop_delta = self.recv_drops.saturating_sub(prev.recv_drops);
+        let send_drop_delta = self.send_drops.saturating_sub(prev.send_drops);
+
+        let recv_drop_per_sec = (recv_drop_delta as f32 / interval_secs) as u64;
+        let send_drop_per_sec = (send_drop_delta as f32 / interval_secs) as u64;
+
+        (recv_drop_per_sec, send_drop_per_sec)
     }
 }
 
