@@ -54,7 +54,7 @@ pub async fn index() -> HttpResponse {
     </div>
     <div id="cpuCoresContainer" class="grid grid-cols-2 gap-x-4"></div>
     <div class="flex items-center" style="height:19.5px;width:100%;">
-        <div id="cpuChart" class="flex items-end justify-end" style="height:10px;width:100%;"></div>
+        <canvas id="cpuChart" style="height:10px;width:100%;"></canvas>
     </div>
     <div class="flex justify-between gap-4">
         <div class="text-gray-500 flex-1" id="ramUsed"></div>
@@ -65,7 +65,7 @@ pub async fn index() -> HttpResponse {
         <div class="text-gray-500 flex-1 text-right" id="moboTemp"></div>
     </div>
     <div class="flex items-center" style="height:19.5px;width:100%;">
-        <div id="memoryChart" class="flex items-end justify-end" style="height:10px;width:100%;"></div>
+        <canvas id="memoryChart" style="height:10px;width:100%;"></canvas>
     </div>
 
     <div></div>
@@ -88,11 +88,21 @@ pub async fn index() -> HttpResponse {
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
     <div class="text-gray-500 flex gap-4">
-        <span class="flex-1">
-            <span id="netName"></span>
-            <span id="netSpeedDown"></span>
-        </span>
-        <span id="netSpeedUp" class="flex-1"></span>
+        <div class="flex-1">
+            <div>
+                <span id="netName"></span>
+                <span id="netSpeedDown"></span>
+            </div>
+            <div class="flex items-center" style="height:19.5px;width:100%;">
+                <canvas id="netDownChart" style="height:10px;width:100%;"></canvas>
+            </div>
+        </div>
+        <div class="flex-1">
+            <div id="netSpeedUp"></div>
+            <div class="flex items-center" style="height:19.5px;width:100%;">
+                <canvas id="netUpChart" style="height:10px;width:100%;"></canvas>
+            </div>
+        </div>
     </div>
     <div class="text-gray-500 flex gap-4">
         <span class="flex-1" id="netRxStats"></span>
@@ -170,6 +180,8 @@ let ws=null, eventBuffer=[], lastStats=null;
 const MAX_BUFFER=1000;
 const memoryHistory = []; // Track last 60 seconds of memory usage
 const cpuHistory = []; // Track last 60 seconds of CPU usage
+const netDownHistory = []; // Track last 60 seconds of download speed
+const netUpHistory = []; // Track last 60 seconds of upload speed
 const MAX_HISTORY = 60;
 
 const fmt = b => {
@@ -261,32 +273,82 @@ function getUsageColor(pct){
     return 'rgb(74, 222, 128)';                  // green-400
 }
 
-function updateMemoryChart(){
-    const container = document.getElementById('memoryChart');
-    container.innerHTML = '';
-    const barWidth = 100 / MAX_HISTORY;
-    memoryHistory.forEach(pct => {
-        const bar = document.createElement('div');
-        bar.style.width = barWidth + '%';
-        bar.style.height = pct + '%';
-        bar.style.alignSelf = 'flex-end'; // Align to bottom
-        bar.style.backgroundColor = getUsageColor(pct);
-        container.appendChild(bar);
+function drawChart(canvasId, history){
+    const canvas = document.getElementById(canvasId);
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+
+    // Set canvas size accounting for device pixel ratio
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+
+    const width = rect.width;
+    const height = rect.height;
+    const barWidth = width / MAX_HISTORY;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height);
+
+    // Draw bars from right to left (newest on right)
+    history.forEach((pct, i) => {
+        const x = (MAX_HISTORY - history.length + i) * barWidth;
+        const barHeight = (pct / 100) * height;
+        const y = height - barHeight;
+
+        ctx.fillStyle = getUsageColor(pct);
+        ctx.fillRect(x, y, barWidth, barHeight);
     });
 }
 
-function updateCpuChart(){
-    const container = document.getElementById('cpuChart');
-    container.innerHTML = '';
-    const barWidth = 100 / MAX_HISTORY;
-    cpuHistory.forEach(pct => {
-        const bar = document.createElement('div');
-        bar.style.width = barWidth + '%';
-        bar.style.height = pct + '%';
-        bar.style.alignSelf = 'flex-end'; // Align to bottom
-        bar.style.backgroundColor = getUsageColor(pct);
-        container.appendChild(bar);
+function drawNetworkChart(canvasId, history){
+    const canvas = document.getElementById(canvasId);
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+
+    // Set canvas size accounting for device pixel ratio
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+
+    const width = rect.width;
+    const height = rect.height;
+    const barWidth = width / MAX_HISTORY;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height);
+
+    // Find max value for scaling
+    const maxVal = Math.max(...history, 1); // At least 1 to avoid division by zero
+
+    // Draw bars from right to left (newest on right)
+    history.forEach((val, i) => {
+        const x = (MAX_HISTORY - history.length + i) * barWidth;
+        const pct = (val / maxVal) * 100;
+        const barHeight = (val / maxVal) * height;
+        const y = height - barHeight;
+
+        ctx.fillStyle = getUsageColor(pct);
+        ctx.fillRect(x, y, barWidth, barHeight);
     });
+}
+
+function updateMemoryChart(){
+    drawChart('memoryChart', memoryHistory);
+}
+
+function updateCpuChart(){
+    drawChart('cpuChart', cpuHistory);
+}
+
+function updateNetDownChart(){
+    drawNetworkChart('netDownChart', netDownHistory);
+}
+
+function updateNetUpChart(){
+    drawNetworkChart('netUpChart', netUpHistory);
 }
 
 function updateDiskBar(id, pct, container, mount, used, total){
@@ -385,6 +447,15 @@ function render(){
     document.getElementById('netName').textContent = `${netInterface}:`;
     document.getElementById('netSpeedDown').textContent = `Down ${fmtRate(e.net_recv || 0)}`;
     document.getElementById('netSpeedUp').textContent = `Up ${fmtRate(e.net_send || 0)}`;
+
+    // Update network history
+    netDownHistory.push(e.net_recv || 0);
+    if(netDownHistory.length > MAX_HISTORY) netDownHistory.shift();
+    updateNetDownChart();
+
+    netUpHistory.push(e.net_send || 0);
+    if(netUpHistory.length > MAX_HISTORY) netUpHistory.shift();
+    updateNetUpChart();
 
     // Show RX and TX stats with errors/drops
     const rxErrors = e.net_recv_errors || 0;
