@@ -32,6 +32,7 @@ pub async fn index() -> HttpResponse {
 </head>
 <body class="bg-gray-50 min-h-screen">
 <div class="max-w mx-auto px-4 py-5vh">
+    <div id="mainContent" style="display:none;">
     <div class="flex justify-between items-center">
         <div class="text-gray-900 font-semibold">Black Box</div>
         <span id="wsStatus" class="text-red-500 font-semibold" style="display:none;">Disconnected</span>
@@ -40,7 +41,6 @@ pub async fn index() -> HttpResponse {
         <span id="datetime"></span>
         <span id="uptime"></span>
     </div>
-
     <div></div>
     <div class="flex items-center text-gray-900 font-semibold">
         <span class="pr-2">System</span>
@@ -173,6 +173,7 @@ pub async fn index() -> HttpResponse {
         </div>
     </div>
     <div id="eventsContainer" class="font-mono max-h-96 p-2 overflow-y-auto bg-white border border-gray-200" style="font-size:12px"></div>
+    </div>
 </div>
 
 <script>
@@ -206,8 +207,8 @@ function updateBar(id, pct, container, labelText, rightLabel){
             <span id="lbl_${id}">${labelText}</span>
             <span class="flex items-center">
                 <span id="rlbl_${id}" class="${rightLabel ? '' : 'hidden'}">${rightLabel || ''}</span>
-                <span class="inline-block w-32 h-3 bg-gray-200 rounded-sm overflow-hidden align-middle ml-1">
-                    <span id="${id}" class="block h-full transition-all duration-300" style="width:0%"></span>
+                <span class="inline-block w-32 h-3 bg-gray-200 overflow-hidden align-middle ml-1" style="border-radius:1px">
+                    <span id="${id}" class="block h-full transition-all duration-300" style="width:0%;border-radius:1px"></span>
                 </span>
             </span>
         </div>`);
@@ -216,6 +217,7 @@ function updateBar(id, pct, container, labelText, rightLabel){
     const color = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-yellow-500' : 'bg-green-500';
     el.style.width = Math.min(100, pct) + '%';
     el.className = `block h-full transition-all duration-300 ${color}`;
+    el.style.borderRadius = '1px';
     const lbl = document.getElementById('lbl_'+id);
     if(lbl) lbl.textContent = labelText;
     const rlbl = document.getElementById('rlbl_'+id);
@@ -227,8 +229,8 @@ function updateCoreBar(id, pct, container, coreNum){
     if(!el){
         container.insertAdjacentHTML('beforeend', `<div class="text-gray-500 flex items-center gap-4" id="row_${id}">
             <span class="w-10">CPU${coreNum}</span>
-            <span class="relative flex-1 bg-gray-200 rounded-sm" style="height:10px">
-                <span id="${id}" class="block h-full transition-all duration-300" style="width:0%"></span>
+            <span class="relative flex-1 bg-gray-200" style="height:10px;border-radius:1px">
+                <span id="${id}" class="block h-full transition-all duration-300" style="width:0%;border-radius:1px"></span>
                 <span id="pct_${id}" class="absolute inset-0 flex items-center justify-center text-gray-500/60 overflow-visible"></span>
             </span>
         </div>`);
@@ -237,6 +239,7 @@ function updateCoreBar(id, pct, container, coreNum){
     const color = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-yellow-500' : 'bg-green-500';
     el.style.width = Math.min(100, pct) + '%';
     el.className = `block h-full transition-all duration-300 ${color}`;
+    el.style.borderRadius = '1px';
     document.getElementById('pct_'+id).textContent = pct.toFixed(1) + '%';
 }
 
@@ -245,8 +248,8 @@ function updateRamBar(pct, used, container){
     if(!el){
         container.innerHTML = `<div class="text-gray-500 flex items-center gap-4">
             <span id="ramLabel">RAM Used ${fmt(used)}</span>
-            <span class="relative flex-1 bg-gray-200 rounded-sm" style="height:10px">
-                <span id="ramBar" class="block h-full transition-all duration-300" style="width:0%"></span>
+            <span class="relative flex-1 bg-gray-200" style="height:10px;border-radius:1px">
+                <span id="ramBar" class="block h-full transition-all duration-300" style="width:0%;border-radius:1px"></span>
                 <span id="ramPct" class="absolute inset-0 flex items-center justify-center text-gray-500/60 overflow-visible"></span>
             </span>
         </div>`;
@@ -255,6 +258,7 @@ function updateRamBar(pct, used, container){
     const color = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-yellow-500' : 'bg-green-500';
     el.style.width = Math.min(100, pct) + '%';
     el.className = `block h-full transition-all duration-300 ${color}`;
+    el.style.borderRadius = '1px';
     document.getElementById('ramLabel').textContent = `RAM Used ${fmt(used)}`;
     document.getElementById('ramPct').textContent = pct.toFixed(1) + '%';
 }
@@ -357,8 +361,8 @@ function updateDiskBar(id, pct, container, mount, used, total){
         container.insertAdjacentHTML('beforeend', `<div class="text-gray-500 flex items-center gap-4" id="row_${id}">
             <span id="lbl_${id}" class="flex-1">${mount}</span>
             <span><span id="used_${id}" class="text-gray-400">${fmt(used)}</span>/<span id="total_${id}">${fmt(total)}</span></span>
-            <span class="relative bg-gray-200 rounded-sm" style="height:10px;width:128px">
-                <span id="${id}" class="block h-full transition-all duration-300" style="width:0%"></span>
+            <span class="relative bg-gray-200" style="height:10px;width:128px;border-radius:1px">
+                <span id="${id}" class="block h-full transition-all duration-300" style="width:0%;border-radius:1px"></span>
                 <span id="pct_${id}" class="absolute inset-0 flex items-center justify-center text-gray-500/60 overflow-visible"></span>
             </span>
         </div>`);
@@ -367,6 +371,7 @@ function updateDiskBar(id, pct, container, mount, used, total){
     const color = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-yellow-500' : 'bg-green-500';
     el.style.width = Math.min(100, pct) + '%';
     el.className = `block h-full transition-all duration-300 ${color}`;
+    el.style.borderRadius = '1px';
     document.getElementById('lbl_'+id).textContent = mount;
     document.getElementById('pct_'+id).textContent = pct + '%';
     document.getElementById('used_'+id).textContent = fmt(used);
@@ -387,6 +392,13 @@ function updateProcTable(tableId, procs, memTotal){
 function render(){
     if(!lastStats)return;
     const e=lastStats;
+
+    // Show content on first data load
+    const mainContent = document.getElementById('mainContent');
+    if(mainContent.style.display === 'none'){
+        mainContent.style.display = 'block';
+    }
+
     document.getElementById('datetime').textContent = formatDate(new Date());
     document.getElementById('uptime').textContent = e.system_uptime_seconds ? `Uptime: ${formatUptime(e.system_uptime_seconds)}` : '';
     updateConnectionStatus();

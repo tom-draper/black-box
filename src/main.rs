@@ -50,6 +50,9 @@ const COLLECTION_INTERVAL_SECS: u64 = 1;
 const TOP_PROCESSES_COUNT: usize = 10;
 const PROCESS_SNAPSHOT_INTERVAL: u64 = 5; // Snapshot top processes every 5 seconds
 const SECURITY_CHECK_INTERVAL: u64 = 5; // Check security events every 5 seconds
+const TEMPERATURE_CHECK_INTERVAL: u64 = 10; // Check temperatures every 10 seconds
+const FILESYSTEM_CHECK_INTERVAL: u64 = 30; // Check filesystems every 30 seconds
+const NETWORK_CONFIG_CHECK_INTERVAL: u64 = 30; // Check network config every 30 seconds
 
 /// Format current time as HH:MM:SS.mmm
 fn now_timestamp() -> String {
@@ -292,6 +295,16 @@ fn run_recorder(cli: Cli) -> Result<()> {
     let mut prev_process_cpu: std::collections::HashMap<u32, (u64, std::time::Instant)> =
         std::collections::HashMap::new();
 
+    // Cached values for less frequent checks
+    let mut cached_temps = read_temperatures();
+    let mut cached_per_core_temps = Vec::new();
+    let mut cached_disk_temps = std::collections::HashMap::new();
+    let mut cached_fans = Vec::new();
+    let mut cached_filesystems = read_all_filesystems().unwrap_or_default();
+    let mut cached_net_ip = get_primary_ip_address();
+    let mut cached_net_gateway = get_default_gateway();
+    let mut cached_net_dns = get_dns_server();
+
     // Thresholds for anomaly detection
     let cpu_spike_threshold = 80.0;
     let mem_spike_threshold = 90.0;
@@ -329,11 +342,15 @@ fn run_recorder(cli: Cli) -> Result<()> {
         let tcp_stats = read_tcp_stats()?;
         let current_processes = read_processes()?;
 
-        // Temperature and fans
-        let temps = read_temperatures();
-        let per_core_temps = read_per_core_temperatures(per_core_usage.len());
-        let disk_temps = read_disk_temperatures();
-        let fans = read_fan_speeds();
+        // Update temperatures and fans periodically (less frequent)
+        static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+        let temp_count = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed) + 1;
+        if temp_count % TEMPERATURE_CHECK_INTERVAL == 0 {
+            cached_temps = read_temperatures();
+            cached_per_core_temps = read_per_core_temperatures(per_core_usage.len());
+            cached_disk_temps = read_disk_temperatures();
+            cached_fans = read_fan_speeds();
+        }
 
         // Calculate throughput
         let (net_recv_per_sec, net_send_per_sec) =
@@ -343,10 +360,24 @@ fn run_recorder(cli: Cli) -> Result<()> {
         let (net_recv_drops_per_sec, net_send_drops_per_sec) =
             network_stats.drops_per_sec(&prev_network, COLLECTION_INTERVAL_SECS as f32);
         let net_interface = network_stats.primary_interface.clone();
-        let net_ip_address = get_primary_ip_address();
-        let net_gateway = get_default_gateway();
-        let net_dns = get_dns_server();
+
+        // Update network config periodically (less frequent)
+        static NET_CONFIG_COUNTER: AtomicU64 = AtomicU64::new(0);
+        let net_config_count = NET_CONFIG_COUNTER.fetch_add(1, Ordering::Relaxed) + 1;
+        if net_config_count % NETWORK_CONFIG_CHECK_INTERVAL == 0 {
+            cached_net_ip = get_primary_ip_address();
+            cached_net_gateway = get_default_gateway();
+            cached_net_dns = get_dns_server();
+        }
+
         let ctxt_per_sec = ctxt_stats.per_sec(&prev_ctxt, COLLECTION_INTERVAL_SECS as f32);
+
+        // Update filesystems periodically (less frequent)
+        static FS_COUNTER: AtomicU64 = AtomicU64::new(0);
+        let fs_count = FS_COUNTER.fetch_add(1, Ordering::Relaxed) + 1;
+        if fs_count % FILESYSTEM_CHECK_INTERVAL == 0 {
+            cached_filesystems = read_all_filesystems().unwrap_or_default();
+        }
 
         // Build per-disk metrics with temperatures
         let per_disk_metrics: Vec<PerDiskMetrics> = per_disk_throughput
@@ -356,7 +387,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
                     device_name: dev_name.clone(),
                     read_bytes_per_sec: read_ps,
                     write_bytes_per_sec: write_ps,
-                    temp_celsius: disk_temps.get(&dev_name).and_then(|t| *t),
+                    temp_celsius: cached_disk_temps.get(&dev_name).and_then(|t| *t),
                 }
             })
             .collect();
@@ -383,12 +414,11 @@ fn run_recorder(cli: Cli) -> Result<()> {
             disk_used_bytes: disk_space.used_bytes,
             disk_total_bytes: disk_space.total_bytes,
             per_disk_metrics,
-            filesystems: read_all_filesystems()
-                .unwrap_or_default()
-                .into_iter()
+            filesystems: cached_filesystems
+                .iter()
                 .map(|fs| FilesystemInfo {
-                    filesystem: fs.filesystem,
-                    mount_point: fs.mount_point,
+                    filesystem: fs.filesystem.clone(),
+                    mount_point: fs.mount_point.clone(),
                     total_bytes: fs.total_bytes,
                     used_bytes: fs.used_bytes,
                     available_bytes: fs.available_bytes,
@@ -401,19 +431,19 @@ fn run_recorder(cli: Cli) -> Result<()> {
             net_recv_drops_per_sec,
             net_send_drops_per_sec,
             net_interface,
-            net_ip_address,
-            net_gateway,
-            net_dns,
+            net_ip_address: cached_net_ip.clone(),
+            net_gateway: cached_net_gateway.clone(),
+            net_dns: cached_net_dns.clone(),
             tcp_connections: tcp_stats.total_connections,
             tcp_time_wait: tcp_stats.time_wait,
             context_switches_per_sec: ctxt_per_sec,
             temps: TemperatureReadings {
-                cpu_temp_celsius: temps.cpu_temp_celsius,
-                per_core_temps,
-                gpu_temp_celsius: temps.gpu_temp_celsius,
-                motherboard_temp_celsius: temps.motherboard_temp_celsius,
+                cpu_temp_celsius: cached_temps.cpu_temp_celsius,
+                per_core_temps: cached_per_core_temps.clone(),
+                gpu_temp_celsius: cached_temps.gpu_temp_celsius,
+                motherboard_temp_celsius: cached_temps.motherboard_temp_celsius,
             },
-            fans,
+            fans: cached_fans.clone(),
             gpu: collector::read_gpu_info(),
             logged_in_users: read_logged_in_users()
                 .unwrap_or_default()
@@ -921,7 +951,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
             let disk_usage_percent = (disk_space.used_bytes as f32 / disk_space.total_bytes as f32) * 100.0;
 
             // Format temperature string if available
-            let temp_str = if let Some(cpu_temp) = temps.cpu_temp_celsius {
+            let temp_str = if let Some(cpu_temp) = cached_temps.cpu_temp_celsius {
                 format!("  Temp:{:.0}°C", cpu_temp)
             } else {
                 String::new()
