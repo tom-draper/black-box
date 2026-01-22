@@ -23,18 +23,18 @@ pub async fn index() -> HttpResponse {
     <link rel="icon" type="image/svg+xml"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect x='10' y='10' width='80' height='80' fill='black'/%3E%3C/svg%3E">
     <style>
-        * { line-height: 1.5; font-size: 13px; }
-        body { font-family: system-ui, -apple-system, sans-serif; }
-        .max-w-42 { max-width: 42rem; }
+        * { line-height: 1.5; }
+        body { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; }
+        .max-w { max-width: 32rem; }
         .py-5vh { padding-top: 5vh; padding-bottom: 5vh; }
         th, td { padding: 0; }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
-<div class="max-w-42 mx-auto px-4 py-5vh">
+<div class="max-w mx-auto px-4 py-5vh">
     <div class="flex justify-between items-center">
-        <div class="text-gray-900 font-semibold">Black Box</div>
-        <span id="wsStatus" class="text-red-600" style="display:none;">Disconnected</span>
+        <div class="text-gray-900 font-semibold">■ Black Box</div>
+        <span id="wsStatus" class="text-red-500 font-semibold" style="display:none;">■ Disconnected</span>
     </div>
     <div class="flex justify-between text-gray-500">
         <span id="datetime"></span>
@@ -81,10 +81,19 @@ pub async fn index() -> HttpResponse {
         <span class="pr-2">Network</span>
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
-    <div class="text-gray-500" id="netRx"></div>
-    <div class="text-gray-500" id="netTx"></div>
-    <div class="text-gray-500" id="tcpConns"></div>
-    <div class="text-gray-500" id="tcpWait"></div>
+    <div class="text-gray-500 flex gap-4">
+        <span class="flex-1">
+            <span id="netName"></span>
+            <span id="netSpeedDown"></span>
+        </span>
+        <span id="netSpeedUp" class="flex-1"></span>
+    </div>
+    <div class="grid grid-cols-2 gap-x-4 text-gray-500">
+        <div id="netAddress"></div>
+        <div id="netTcp"></div>
+        <div id="netGateway"></div>
+        <div id="netDns"></div>
+    </div>
 
     <div></div>
     <div class="flex items-center text-gray-900 font-semibold">
@@ -225,15 +234,15 @@ function updateRamBar(pct, used, container){
     document.getElementById('ramPct').textContent = pct.toFixed(1) + '%';
 }
 
-function updateDiskBar(id, pct, container, mount, sizeText){
+function updateDiskBar(id, pct, container, mount, used, total){
     let el = document.getElementById(id);
     if(!el){
         container.insertAdjacentHTML('beforeend', `<div class="text-gray-500 flex items-center gap-4" id="row_${id}">
             <span id="lbl_${id}" class="flex-1">${mount}</span>
-            <span id="size_${id}">${sizeText}</span>
+            <span><span id="used_${id}" class="text-gray-400">${fmt(used)}</span>/<span id="total_${id}">${fmt(total)}</span></span>
             <span class="relative bg-gray-200 rounded-sm" style="height:10px;width:128px">
                 <span id="${id}" class="block h-full transition-all duration-300" style="width:0%"></span>
-                <span id="pct_${id}" class="absolute inset-0 flex items-center justify-center text-gray-400 overflow-visible"></span>
+                <span id="pct_${id}" class="absolute inset-0 flex items-center justify-center text-gray-500/60 overflow-visible"></span>
             </span>
         </div>`);
         el = document.getElementById(id);
@@ -243,7 +252,8 @@ function updateDiskBar(id, pct, container, mount, sizeText){
     el.className = `block h-full transition-all duration-300 ${color}`;
     document.getElementById('lbl_'+id).textContent = mount;
     document.getElementById('pct_'+id).textContent = pct + '%';
-    document.getElementById('size_'+id).textContent = sizeText;
+    document.getElementById('used_'+id).textContent = fmt(used);
+    document.getElementById('total_'+id).textContent = fmt(total);
 }
 
 function updateProcTable(tableId, procs, memTotal){
@@ -262,6 +272,7 @@ function render(){
     const e=lastStats;
     document.getElementById('datetime').textContent = formatDate(new Date());
     document.getElementById('uptime').textContent = e.system_uptime_seconds ? `Uptime: ${formatUptime(e.system_uptime_seconds)}` : '';
+    console.log(ws, ws.readyState);
     document.getElementById('wsStatus').style.display = (ws && ws.readyState===1) ? 'none' : 'inline';
 
     if(e.kernel) document.getElementById('kernelRow').textContent = `Linux Kernel: ${e.kernel}`;
@@ -307,13 +318,18 @@ function render(){
         document.getElementById('memFreq').textContent = e.gpu_mem_freq ? `Mem Freq ${e.gpu_mem_freq}MHz` : '';
         document.getElementById('imgQuality').textContent = e.gpu_power ? `Power ${e.gpu_power.toFixed(0)}W` : '';
     }
-    document.getElementById('netRx').textContent = `RX ${fmtRate(e.net_recv || 0)}`;
-    document.getElementById('netTx').textContent = `TX ${fmtRate(e.net_send || 0)}`;
-    document.getElementById('tcpConns').textContent = `TCP ${e.tcp || '--'}`;
-    document.getElementById('tcpWait').textContent = `TIME_WAIT ${e.tcp_wait || '--'}`;
+    const netInterface = e.net_interface || 'net';
+
+    document.getElementById('netName').textContent = `${netInterface}:`;
+    document.getElementById('netSpeedDown').textContent = `Down ${fmtRate(e.net_recv || 0)}`;
+    document.getElementById('netSpeedUp').textContent = `Up ${fmtRate(e.net_send || 0)}`;
+    document.getElementById('netAddress').textContent = `Address: ${e.net_ip || '--'}`;
+    document.getElementById('netTcp').textContent = `TCP Connections: ${e.tcp || '--'}`;
+    document.getElementById('netGateway').textContent = `Gateway: ${e.net_gateway || '--'}`;
+    document.getElementById('netDns').textContent = `DNS: ${e.net_dns || '--'}`;
     (e.filesystems || []).forEach((fs, i) => {
         const pct = fs.total > 0 ? Math.round((fs.used/fs.total)*100) : 0;
-        updateDiskBar(`disk_${i}`, pct, document.getElementById('diskContainer'), fs.mount, `${fmt(fs.used)}/${fmt(fs.total)}`);
+        updateDiskBar(`disk_${i}`, pct, document.getElementById('diskContainer'), fs.mount, fs.used, fs.total);
     });
     // Users section
     const users = e.users || [];
@@ -508,6 +524,10 @@ fn event_to_json(
                 "tcp_wait": m.tcp_time_wait,
                 "net_recv": m.net_recv_bytes_per_sec,
                 "net_send": m.net_send_bytes_per_sec,
+                "net_interface": m.net_interface,
+                "net_ip": m.net_ip_address,
+                "net_gateway": m.net_gateway,
+                "net_dns": m.net_dns,
                 "cpu_temp": m.temps.cpu_temp_celsius,
                 "per_core_temps": m.temps.per_core_temps,
                 "gpu_temp": m.temps.gpu_temp_celsius,

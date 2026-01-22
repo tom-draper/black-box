@@ -522,6 +522,7 @@ pub fn read_all_filesystems() -> Result<Vec<FilesystemStats>> {
 pub struct NetworkStats {
     pub recv_bytes: u64,
     pub send_bytes: u64,
+    pub primary_interface: String,
 }
 
 pub fn read_network_stats() -> Result<NetworkStats> {
@@ -529,6 +530,8 @@ pub fn read_network_stats() -> Result<NetworkStats> {
 
     let mut total_recv = 0u64;
     let mut total_send = 0u64;
+    let mut primary_interface = String::from("net");
+    let mut max_bytes = 0u64;
 
     for line in content.lines().skip(2) {
         // Skip header lines
@@ -546,12 +549,20 @@ pub fn read_network_stats() -> Result<NetworkStats> {
         if let (Ok(recv), Ok(send)) = (parts[1].parse::<u64>(), parts[9].parse::<u64>()) {
             total_recv += recv;
             total_send += send;
+
+            // Track the interface with the most traffic as primary
+            let total_bytes = recv + send;
+            if total_bytes > max_bytes {
+                max_bytes = total_bytes;
+                primary_interface = parts[0].trim_end_matches(':').to_string();
+            }
         }
     }
 
     Ok(NetworkStats {
         recv_bytes: total_recv,
         send_bytes: total_send,
+        primary_interface,
     })
 }
 
@@ -565,6 +576,80 @@ impl NetworkStats {
 
         (recv_per_sec, send_per_sec)
     }
+}
+
+// ===== Network Configuration =====
+
+pub fn get_primary_ip_address() -> Option<String> {
+    // Try to get IP address using ip command
+    let output = std::process::Command::new("ip")
+        .args(["route", "get", "1.1.1.1"])
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // Parse output like: "1.1.1.1 via 192.168.1.1 dev eth0 src 192.168.1.100"
+        for line in stdout.lines() {
+            if let Some(src_pos) = line.find("src ") {
+                let after_src = &line[src_pos + 4..];
+                if let Some(ip) = after_src.split_whitespace().next() {
+                    return Some(ip.to_string());
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_default_gateway() -> Option<String> {
+    // Try to read from /proc/net/route
+    let content = fs::read_to_string("/proc/net/route").ok()?;
+
+    for line in content.lines().skip(1) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 3 {
+            // Check if destination is 00000000 (default route)
+            if parts[1] == "00000000" {
+                // Gateway is in hex format (reversed bytes)
+                let gateway_hex = parts[2];
+                if gateway_hex.len() == 8 {
+                    if let Ok(gw_num) = u32::from_str_radix(gateway_hex, 16) {
+                        return Some(format!(
+                            "{}.{}.{}.{}",
+                            gw_num & 0xFF,
+                            (gw_num >> 8) & 0xFF,
+                            (gw_num >> 16) & 0xFF,
+                            (gw_num >> 24) & 0xFF
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn get_dns_server() -> Option<String> {
+    // Read from /etc/resolv.conf
+    let content = fs::read_to_string("/etc/resolv.conf").ok()?;
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.starts_with("nameserver ") {
+            if let Some(dns) = line.strip_prefix("nameserver ") {
+                let dns = dns.trim();
+                // Skip localhost addresses
+                if dns != "127.0.0.1" && dns != "::1" && dns != "127.0.0.53" {
+                    return Some(dns.to_string());
+                }
+            }
+        }
+    }
+
+    None
 }
 
 // ===== Context Switch Stats =====

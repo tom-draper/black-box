@@ -30,12 +30,13 @@ use protection::ProtectionManager;
 
 use collector::{
     check_group_changes, check_kernel_module_changes, check_listening_port_changes,
-    check_passwd_changes, check_sudoers_changes, diff_processes, get_top_processes,
-    read_all_cpu_stats, read_all_filesystems, read_context_switches, read_disk_space,
-    read_disk_stats_per_device, read_disk_temperatures, read_fan_speeds, read_load_avg,
-    read_logged_in_users, read_memory_stats, read_network_stats, read_per_core_temperatures,
-    read_processes, read_swap_stats, read_tcp_stats, read_temperatures, tail_auth_log,
-    AuthEventType, ConnectionTracker,
+    check_passwd_changes, check_sudoers_changes, diff_processes, get_default_gateway,
+    get_dns_server, get_primary_ip_address, get_top_processes, read_all_cpu_stats,
+    read_all_filesystems, read_context_switches, read_disk_space, read_disk_stats_per_device,
+    read_disk_temperatures, read_fan_speeds, read_load_avg, read_logged_in_users,
+    read_memory_stats, read_network_stats, read_per_core_temperatures, read_processes,
+    read_swap_stats, read_tcp_stats, read_temperatures, tail_auth_log, AuthEventType,
+    ConnectionTracker,
 };
 use event::{
     Anomaly, AnomalyKind, AnomalySeverity, Event, FilesystemInfo, LoggedInUserInfo, PerDiskMetrics,
@@ -336,6 +337,10 @@ fn run_recorder(cli: Cli) -> Result<()> {
         // Calculate throughput
         let (net_recv_per_sec, net_send_per_sec) =
             network_stats.bytes_per_sec(&prev_network, COLLECTION_INTERVAL_SECS as f32);
+        let net_interface = network_stats.primary_interface.clone();
+        let net_ip_address = get_primary_ip_address();
+        let net_gateway = get_default_gateway();
+        let net_dns = get_dns_server();
         let ctxt_per_sec = ctxt_stats.per_sec(&prev_ctxt, COLLECTION_INTERVAL_SECS as f32);
 
         // Build per-disk metrics with temperatures
@@ -386,6 +391,10 @@ fn run_recorder(cli: Cli) -> Result<()> {
                 .collect(),
             net_recv_bytes_per_sec: net_recv_per_sec,
             net_send_bytes_per_sec: net_send_per_sec,
+            net_interface,
+            net_ip_address,
+            net_gateway,
+            net_dns,
             tcp_connections: tcp_stats.total_connections,
             tcp_time_wait: tcp_stats.time_wait,
             context_switches_per_sec: ctxt_per_sec,
