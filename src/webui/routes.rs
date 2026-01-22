@@ -32,6 +32,27 @@ pub async fn index() -> HttpResponse {
 </head>
 <body class="bg-gray-50 min-h-screen">
 <div class="max-w mx-auto px-4 py-5vh">
+    <div class="fixed z-10 top-0 right-0">
+        <div class="flex gap-4 px-5 py-4 text-gray-400">
+
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 hover:text-gray-600 transition duration-100 cursor-pointer">
+  <path d="M7.712 4.818A1.5 1.5 0 0 1 10 6.095v2.972c.104-.13.234-.248.389-.343l6.323-3.906A1.5 1.5 0 0 1 19 6.095v7.81a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.505 1.505 0 0 1-.389-.344v2.973a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.5 1.5 0 0 1 0-2.552l6.323-3.906Z" />
+</svg>
+
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 hover:text-gray-600 transition duration-100 cursor-pointer">
+  <path d="M3.288 4.818A1.5 1.5 0 0 0 1 6.095v7.81a1.5 1.5 0 0 0 2.288 1.276l6.323-3.905c.155-.096.285-.213.389-.344v2.973a1.5 1.5 0 0 0 2.288 1.276l6.323-3.905a1.5 1.5 0 0 0 0-2.552l-6.323-3.906A1.5 1.5 0 0 0 10 6.095v2.972a1.506 1.506 0 0 0-.389-.343L3.288 4.818Z" />
+</svg>
+
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 hover:text-gray-600 transition duration-100 cursor-pointer">
+  <path d="M5.75 3a.75.75 0 0 0-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 0 0 .75-.75V3.75A.75.75 0 0 0 7.25 3h-1.5ZM12.75 3a.75.75 0 0 0-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 0 0 .75-.75V3.75a.75.75 0 0 0-.75-.75h-1.5Z" />
+</svg>
+
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 hover:text-gray-600 transition duration-100 cursor-pointer">
+              <path d="M6.3 2.84A1.5 1.5 0 0 0 4 4.11v11.78a1.5 1.5 0 0 0 2.3 1.27l9.344-5.891a1.5 1.5 0 0 0 0-2.538L6.3 2.841Z" />
+            </svg>
+
+        </div>
+    </div>
     <div id="mainContent" style="display:none;">
     <div class="flex justify-between items-center">
         <div class="text-gray-900 font-semibold">Black Box</div>
@@ -56,7 +77,7 @@ pub async fn index() -> HttpResponse {
                 <span id="cpuPct" class="absolute inset-0 flex items-center justify-center text-gray-500/60 overflow-visible"></span>
             </span>
         </div>
-        <span id="loadVal" class="flex-1 text-right text-gray-500">Load -- -- --</span>
+        <span id="loadVal" class="flex-1 text-right text-gray-500">Load average: --% --% --%</span>
     </div>
     <div id="cpuCoresContainer" class="grid grid-cols-2 gap-x-4"></div>
     <div class="flex items-center" style="height:19.5px;width:100%;">
@@ -422,7 +443,7 @@ function render(){
         cpuBar.style.borderRadius = '1px';
         cpuPct.textContent = e.cpu.toFixed(1) + '%';
 
-        document.getElementById('loadVal').textContent = `Load average: ${e.load?.toFixed(2) || '--'} ${e.load5?.toFixed(2) || '--'} ${e.load15?.toFixed(2) || '--'}`;
+        document.getElementById('loadVal').textContent = `Load average: ${e.load?.toFixed(2) || '--'}% ${e.load5?.toFixed(2) || '--'}% ${e.load15?.toFixed(2) || '--'}%`;
         // Update CPU history
         cpuHistory.push(e.cpu);
         if(cpuHistory.length > MAX_HISTORY) cpuHistory.shift();
