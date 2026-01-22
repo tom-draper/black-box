@@ -48,9 +48,15 @@ pub async fn index() -> HttpResponse {
     </div>
     <div id="kernelRow" class="text-gray-500"></div>
     <div id="cpuDetailsRow" class="text-gray-500"></div>
-    <div id="cpuRow" class="text-gray-500 flex justify-between">
-        <span id="cpuVal">CPU --%</span>
-        <span id="loadVal">Load -- -- --</span>
+    <div class="text-gray-500 flex items-center gap-4">
+        <div class="flex-1 flex items-center gap-4">
+            <span class="w-10">CPU</span>
+            <span class="relative flex-1 bg-gray-200" style="height:10px;border-radius:1px">
+                <span id="cpuBar" class="block h-full transition-all duration-300" style="width:0%;border-radius:1px"></span>
+                <span id="cpuPct" class="absolute inset-0 flex items-center justify-center text-gray-500/60 overflow-visible"></span>
+            </span>
+        </div>
+        <span id="loadVal" class="flex-1 text-right text-gray-500">Load -- -- --</span>
     </div>
     <div id="cpuCoresContainer" class="grid grid-cols-2 gap-x-4"></div>
     <div class="flex items-center" style="height:19.5px;width:100%;">
@@ -247,7 +253,7 @@ function updateRamBar(pct, used, container){
     let el = document.getElementById('ramBar');
     if(!el){
         container.innerHTML = `<div class="text-gray-500 flex items-center gap-4">
-            <span id="ramLabel">RAM Used ${fmt(used)}</span>
+            <span id="ramLabel">RAM Used: ${fmt(used)}</span>
             <span class="relative flex-1 bg-gray-200" style="height:10px;border-radius:1px">
                 <span id="ramBar" class="block h-full transition-all duration-300" style="width:0%;border-radius:1px"></span>
                 <span id="ramPct" class="absolute inset-0 flex items-center justify-center text-gray-500/60 overflow-visible"></span>
@@ -259,7 +265,7 @@ function updateRamBar(pct, used, container){
     el.style.width = Math.min(100, pct) + '%';
     el.className = `block h-full transition-all duration-300 ${color}`;
     el.style.borderRadius = '1px';
-    document.getElementById('ramLabel').textContent = `RAM Used ${fmt(used)}`;
+    document.getElementById('ramLabel').textContent = `RAM Used: ${fmt(used)}`;
     document.getElementById('ramPct').textContent = pct.toFixed(1) + '%';
 }
 
@@ -407,8 +413,16 @@ function render(){
     if(e.cpu_model) document.getElementById('cpuDetailsRow').textContent = `CPU Details: ${e.cpu_model}${e.cpu_mhz ? `, ${e.cpu_mhz}MHz` : ''}`;
 
     if(e.cpu !== undefined){
-        document.getElementById('cpuVal').textContent = `CPU ${e.cpu.toFixed(1)}%`;
-        document.getElementById('loadVal').textContent = `Load ${e.load?.toFixed(2) || '--'} ${e.load5?.toFixed(2) || '--'} ${e.load15?.toFixed(2) || '--'}`;
+        // Update CPU bar
+        const cpuBar = document.getElementById('cpuBar');
+        const cpuPct = document.getElementById('cpuPct');
+        const color = e.cpu >= 90 ? 'bg-red-500' : e.cpu >= 70 ? 'bg-yellow-500' : 'bg-green-500';
+        cpuBar.style.width = Math.min(100, e.cpu) + '%';
+        cpuBar.className = `block h-full transition-all duration-300 ${color}`;
+        cpuBar.style.borderRadius = '1px';
+        cpuPct.textContent = e.cpu.toFixed(1) + '%';
+
+        document.getElementById('loadVal').textContent = `Load average: ${e.load?.toFixed(2) || '--'} ${e.load5?.toFixed(2) || '--'} ${e.load15?.toFixed(2) || '--'}`;
         // Update CPU history
         cpuHistory.push(e.cpu);
         if(cpuHistory.length > MAX_HISTORY) cpuHistory.shift();
@@ -417,7 +431,7 @@ function render(){
     (e.per_core_cpu || []).forEach((v, i) => updateCoreBar(`core_${i}`, v, document.getElementById('cpuCoresContainer'), i));
     if(e.mem !== undefined){
         updateRamBar(e.mem, e.mem_used, document.getElementById('ramUsed'));
-        document.getElementById('ramAvail').textContent = `Available RAM ${fmt(e.mem_total - e.mem_used)}`;
+        document.getElementById('ramAvail').textContent = `Available RAM: ${fmt(e.mem_total - e.mem_used)}`;
         // Update memory history
         memoryHistory.push(e.mem);
         if(memoryHistory.length > MAX_HISTORY) memoryHistory.shift();
@@ -457,8 +471,8 @@ function render(){
     const netInterface = e.net_interface || 'net';
 
     document.getElementById('netName').textContent = `${netInterface}:`;
-    document.getElementById('netSpeedDown').textContent = `Down ${fmtRate(e.net_recv || 0)}`;
-    document.getElementById('netSpeedUp').textContent = `Up ${fmtRate(e.net_send || 0)}`;
+    document.getElementById('netSpeedDown').textContent = `Down: ${fmtRate(e.net_recv || 0)}`;
+    document.getElementById('netSpeedUp').textContent = `Up: ${fmtRate(e.net_send || 0)}`;
 
     // Update network history
     netDownHistory.push(e.net_recv || 0);
