@@ -24,6 +24,13 @@ impl IndexedReader {
         Ok(Self { indexes })
     }
 
+    /// Rebuild the index (call this periodically to pick up new segments)
+    pub fn refresh(&mut self, dir: impl AsRef<Path>) -> Result<()> {
+        let builder = IndexBuilder::new(&dir);
+        self.indexes = builder.build_index()?;
+        Ok(())
+    }
+
     /// Read events in a time range efficiently using indexes
     pub fn read_time_range(
         &self,

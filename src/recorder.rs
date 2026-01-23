@@ -1,6 +1,6 @@
 use std::{
     fs::{File, OpenOptions},
-    io::Write,
+    io::{Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 
@@ -48,10 +48,17 @@ impl Recorder {
             .write(true)
             .open(&path)?;
 
-        let offset = file.metadata()?.len();
+        let mut offset = file.metadata()?.len();
 
         if offset == 0 {
+            eprintln!("Writing magic number to new segment: {:08X}", MAGIC);
             file.write_all(&MAGIC.to_le_bytes())?;
+            file.flush()?;  // Ensure magic number is written to disk
+            offset = 4;  // Update offset after writing magic number
+            eprintln!("Magic number written, offset now: {}", offset);
+        } else {
+            eprintln!("Resuming existing segment at offset: {}", offset);
+            file.seek(SeekFrom::Start(offset))?;  // Seek to end of file before writing
         }
 
         Ok(Self {

@@ -33,19 +33,25 @@ pub async fn index() -> HttpResponse {
 <body class="bg-gray-50 min-h-screen">
 <div class="max-w mx-auto px-4 py-5vh">
     <div class="fixed z-10 top-0 right-0">
-        <div class="flex gap-4 px-5 py-4 text-gray-400">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 hover:text-gray-600 transition duration-100 cursor-pointer">
+        <div class="flex gap-3 px-5 py-4 text-gray-400 items-center">
+            <svg id="rewindBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 hover:text-gray-600 transition duration-100 cursor-pointer" title="Rewind 1 minute">
                 <path d="M7.712 4.818A1.5 1.5 0 0 1 10 6.095v2.972c.104-.13.234-.248.389-.343l6.323-3.906A1.5 1.5 0 0 1 19 6.095v7.81a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.505 1.505 0 0 1-.389-.344v2.973a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.5 1.5 0 0 1 0-2.552l6.323-3.906Z" />
             </svg>
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 hover:text-gray-600 transition duration-100 cursor-pointer">
+            <svg id="fastForwardBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 hover:text-gray-600 transition duration-100 cursor-pointer" title="Fast forward 1 minute">
                 <path d="M3.288 4.818A1.5 1.5 0 0 0 1 6.095v7.81a1.5 1.5 0 0 0 2.288 1.276l6.323-3.905c.155-.096.285-.213.389-.344v2.973a1.5 1.5 0 0 0 2.288 1.276l6.323-3.905a1.5 1.5 0 0 0 0-2.552l-6.323-3.906A1.5 1.5 0 0 0 10 6.095v2.972a1.506 1.506 0 0 0-.389-.343L3.288 4.818Z" />
             </svg>
-            <svg id="pauseBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 hover:text-gray-600 transition duration-100 cursor-pointer">
+            <svg id="pauseBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 hover:text-gray-600 transition duration-100 cursor-pointer" title="Pause (enable time-travel)">
                 <path d="M5.75 3a.75.75 0 0 0-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 0 0 .75-.75V3.75A.75.75 0 0 0 7.25 3h-1.5ZM12.75 3a.75.75 0 0 0-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 0 0 .75-.75V3.75a.75.75 0 0 0-.75-.75h-1.5Z" />
             </svg>
-            <svg id="playBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 text-gray-800 hover:text-gray-600 transition duration-100 cursor-pointer" style="display:none">
+            <svg id="playBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 text-gray-800 hover:text-gray-600 transition duration-100 cursor-pointer" style="display:none" title="Resume live view">
                 <path d="M6.3 2.84A1.5 1.5 0 0 0 4 4.11v11.78a1.5 1.5 0 0 0 2.3 1.27l9.344-5.891a1.5 1.5 0 0 0 0-2.538L6.3 2.841Z" />
             </svg>
+            <div class="border-l border-gray-300 h-4"></div>
+            <div class="flex flex-col text-xs">
+                <input type="datetime-local" id="timePicker" class="px-1 py-0.5 border border-gray-300 rounded text-gray-700 text-xs" style="display:none" />
+                <span id="timeDisplay" class="text-gray-500 cursor-pointer hover:text-gray-700" title="Click to select time, Shift+Click to go Live">Live</span>
+                <span id="timeRange" class="text-gray-400 text-xs"></span>
+            </div>
         </div>
     </div>
     <div id="mainContent" style="display:none;">
@@ -224,18 +230,331 @@ const netUpHistory = []; // Track last 60 seconds of upload speed
 const diskIoHistoryMap = {}; // Track last 60 seconds per disk
 const MAX_HISTORY = 60;
 
-// Play/Pause toggle
-document.getElementById('pauseBtn').addEventListener('click', () => {
+// Time-travel state
+let playbackMode = false; // false = live, true = historical playback
+let currentTimestamp = null; // Current playback timestamp (seconds)
+let firstTimestamp = null; // Earliest available data
+let lastTimestamp = null; // Latest available data
+const REWIND_STEP = 60; // 1 minute
+let playbackInterval = null; // Auto-playback timer
+
+// Fetch available time range on load
+async function fetchPlaybackInfo() {
+    try {
+        const resp = await fetch('/api/playback/info');
+        const data = await resp.json();
+        firstTimestamp = data.first_timestamp;
+        lastTimestamp = data.last_timestamp;
+
+        console.log('Playback info:', data);
+        console.log('firstTimestamp:', firstTimestamp, new Date(firstTimestamp * 1000));
+        console.log('lastTimestamp:', lastTimestamp, new Date(lastTimestamp * 1000));
+        console.log('Current time:', Math.floor(Date.now() / 1000), new Date());
+
+        if(firstTimestamp && lastTimestamp) {
+            const duration = lastTimestamp - firstTimestamp;
+            const hours = Math.floor(duration / 3600);
+            const mins = Math.floor((duration % 3600) / 60);
+
+            // Show when the data is from
+            const lastDate = new Date(lastTimestamp * 1000);
+            const ageSeconds = Math.floor(Date.now() / 1000) - lastTimestamp;
+            const ageHours = Math.floor(ageSeconds / 3600);
+            const ageMins = Math.floor((ageSeconds % 3600) / 60);
+
+            if(ageSeconds < 60) {
+                document.getElementById('timeRange').textContent =
+                    `${hours}h ${mins}m (current)`;
+            } else {
+                document.getElementById('timeRange').textContent =
+                    `${hours}h ${mins}m (${ageHours}h ${ageMins}m old)`;
+            }
+        }
+    } catch(e) {
+        console.error('Failed to fetch playback info:', e);
+    }
+}
+
+// Jump to a specific timestamp and load data
+async function jumpToTimestamp(timestamp) {
+    if(!timestamp) return;
+
+    currentTimestamp = timestamp;
+    playbackMode = true;
+
+    // Update time display - add visual indicator for playback mode
+    const dt = new Date(timestamp * 1000);
+    document.getElementById('timeDisplay').textContent =
+        '⏱ ' + dt.toLocaleTimeString();
+    document.getElementById('timeDisplay').style.color = '#f59e0b'; // amber color
+
+    // Clear history buffers when entering playback mode
+    cpuHistory.length = 0;
+    memoryHistory.length = 0;
+    netDownHistory.length = 0;
+    netUpHistory.length = 0;
+    Object.keys(diskIoHistoryMap).forEach(k => delete diskIoHistoryMap[k]);
+
+    // Fetch historical data for this time point (load 60 seconds for smooth charts)
+    try {
+        const url = `/api/playback/events?start=${timestamp - 60}&end=${timestamp + 1}&limit=200`;
+        console.log('Fetching historical data from:', url);
+        console.log('Requested time range:', new Date((timestamp - 60) * 1000), 'to', new Date((timestamp + 1) * 1000));
+
+        const resp = await fetch(url);
+        const data = await resp.json();
+
+        console.log('API returned', data.count, 'events', data.fallback ? '(fallback)' : '');
+        if(data.events && data.events.length > 0) {
+            console.log('First event timestamp:', data.events[0].timestamp);
+            console.log('Last event timestamp:', data.events[data.events.length - 1].timestamp);
+
+            // If we're using fallback data, show a visual indicator
+            const timeDisplay = document.getElementById('timeDisplay');
+            if(data.fallback) {
+                timeDisplay.title = 'No data at this time, showing most recent available data';
+            } else {
+                timeDisplay.title = 'Click to select time, Shift+Click to go Live';
+            }
+
+            // Process events in order
+            let latestSystemMetrics = null;
+            let latestProcessSnapshot = null;
+
+            data.events.forEach(event => {
+                console.log('Processing event:', event.type, 'timestamp:', event.timestamp);
+                if(event.type === 'SystemMetrics') {
+                    latestSystemMetrics = event;
+
+                    // Build history for charts
+                    if(cpuHistory.length < MAX_HISTORY) {
+                        cpuHistory.push(event.cpu || 0);
+                        memoryHistory.push(event.mem || 0);
+                        netDownHistory.push(event.net_recv || 0);
+                        netUpHistory.push(event.net_send || 0);
+                    }
+                } else if(event.type === 'ProcessSnapshot') {
+                    latestProcessSnapshot = event;
+                } else {
+                    addEventToLog(event);
+                }
+            });
+
+            console.log('Finished processing', data.events.length, 'events');
+            console.log('latestSystemMetrics:', latestSystemMetrics ? 'found' : 'NOT FOUND');
+            console.log('latestProcessSnapshot:', latestProcessSnapshot ? 'found' : 'NOT FOUND');
+
+            // Render the latest state
+            if(latestSystemMetrics) {
+                console.log('About to render with historical data, timestamp:', latestSystemMetrics.timestamp);
+                lastStats = latestSystemMetrics;
+                render();
+            } else {
+                console.log('NO latestSystemMetrics - skipping render!');
+            }
+            if(latestProcessSnapshot) {
+                updateProcs(latestProcessSnapshot);
+            }
+        } else {
+            // No data found at all
+            console.log('No data available');
+            document.getElementById('timeDisplay').title = 'No historical data available';
+        }
+    } catch(e) {
+        console.error('Failed to load historical data:', e);
+    }
+}
+
+// Rewind button
+document.getElementById('rewindBtn').addEventListener('click', () => {
+    // Stop auto-playback
+    if(playbackInterval) {
+        clearTimeout(playbackInterval);
+        playbackInterval = null;
+    }
+
+    if(!playbackMode) {
+        // First click: pause and go back 1 minute from now
+        const now = Math.floor(Date.now() / 1000);
+        jumpToTimestamp(now - REWIND_STEP);
+        isPaused = true;
+        document.getElementById('pauseBtn').style.display = 'none';
+        document.getElementById('playBtn').style.display = 'block';
+    } else {
+        // Go back 1 minute from current position
+        const newTime = Math.max(firstTimestamp || 0, currentTimestamp - REWIND_STEP);
+        jumpToTimestamp(newTime);
+        // Show pause button after seeking
+        isPaused = true;
+        document.getElementById('pauseBtn').style.display = 'none';
+        document.getElementById('playBtn').style.display = 'block';
+    }
+});
+
+// Fast-forward button
+document.getElementById('fastForwardBtn').addEventListener('click', () => {
+    if(!playbackMode) return; // Only works in playback mode
+
+    // Stop auto-playback
+    if(playbackInterval) {
+        clearTimeout(playbackInterval);
+        playbackInterval = null;
+    }
+
+    const newTime = Math.min(lastTimestamp || Date.now()/1000, currentTimestamp + REWIND_STEP);
+    jumpToTimestamp(newTime);
+    // Show pause button after seeking
     isPaused = true;
     document.getElementById('pauseBtn').style.display = 'none';
     document.getElementById('playBtn').style.display = 'block';
 });
 
-document.getElementById('playBtn').addEventListener('click', () => {
+// Pause button
+document.getElementById('pauseBtn').addEventListener('click', () => {
+    isPaused = true;
+    document.getElementById('pauseBtn').style.display = 'none';
+    document.getElementById('playBtn').style.display = 'block';
+
+    // Stop auto-playback if running
+    if(playbackInterval) {
+        clearTimeout(playbackInterval);
+        playbackInterval = null;
+    }
+
+    // Enter playback mode at current time
+    if(!playbackMode) {
+        const now = Math.floor(Date.now() / 1000);
+        currentTimestamp = now;
+        playbackMode = true;
+    }
+});
+
+// Play button - either resume playback or return to live
+document.getElementById('playBtn').addEventListener('click', async () => {
+    console.log('=== PLAY BUTTON CLICKED ===');
+    console.log('playbackMode:', playbackMode, 'currentTimestamp:', currentTimestamp);
+
+    if(playbackMode && currentTimestamp) {
+        console.log('Starting auto-playback from', new Date(currentTimestamp * 1000));
+        // Resume playback: auto-advance through history
+        isPaused = false;
+        document.getElementById('playBtn').style.display = 'none';
+        document.getElementById('pauseBtn').style.display = 'block';
+
+        // Calculate a reasonable "live" threshold - within 10 seconds of now
+        const liveThreshold = Math.floor(Date.now() / 1000) - 10;
+        console.log('Live threshold:', new Date(liveThreshold * 1000));
+
+        // Auto-advance recursively (waits for each fetch to complete)
+        const autoAdvance = async () => {
+            // Check if still in playback mode
+            if(!playbackMode) {
+                console.log('Playback stopped');
+                return;
+            }
+
+            console.log('Auto-tick: currentTimestamp=', currentTimestamp, 'liveThreshold=', liveThreshold, 'diff=', liveThreshold - currentTimestamp);
+
+            if(currentTimestamp >= liveThreshold) {
+                // Reached live time, switch to live mode
+                console.log('*** REACHED LIVE THRESHOLD, SWITCHING TO LIVE ***');
+                goLive();
+            } else {
+                currentTimestamp += 1;
+                await jumpToTimestamp(currentTimestamp);
+
+                // Schedule next tick
+                playbackInterval = setTimeout(autoAdvance, 1000);
+            }
+        };
+
+        // Start first advance immediately
+        await autoAdvance();
+    } else {
+        console.log('Not in playback mode, going straight to live');
+        // Not in playback mode, just unpause
+        goLive();
+    }
+});
+
+// Return to live mode
+function goLive() {
+    console.log('=== GOING LIVE ===');
+    console.log('Before: isPaused=', isPaused, 'playbackMode=', playbackMode, 'currentTimestamp=', currentTimestamp);
+
     isPaused = false;
+    playbackMode = false;
+    currentTimestamp = null;
+
+    if(playbackInterval) {
+        console.log('Clearing playback timeout');
+        clearTimeout(playbackInterval);
+        playbackInterval = null;
+    }
+
     document.getElementById('playBtn').style.display = 'none';
     document.getElementById('pauseBtn').style.display = 'block';
+    document.getElementById('timeDisplay').textContent = 'Live';
+    document.getElementById('timeDisplay').style.color = '';
+    document.getElementById('timeDisplay').title = 'Click to select time, Shift+Click to go Live';
+
+    // Clear history buffers so they rebuild from live data
+    cpuHistory.length = 0;
+    memoryHistory.length = 0;
+    netDownHistory.length = 0;
+    netUpHistory.length = 0;
+    Object.keys(diskIoHistoryMap).forEach(k => delete diskIoHistoryMap[k]);
+
+    console.log('After: isPaused=', isPaused, 'playbackMode=', playbackMode);
+    console.log('=== LIVE MODE ACTIVE ===');
+}
+
+// Time display click - either go live or open picker
+document.getElementById('timeDisplay').addEventListener('click', (e) => {
+    if(e.shiftKey && playbackMode) {
+        // Shift+click: Go live
+        goLive();
+        return;
+    }
+
+    const picker = document.getElementById('timePicker');
+
+    if(firstTimestamp && lastTimestamp) {
+        // Set picker range
+        const firstDate = new Date(firstTimestamp * 1000);
+        const lastDate = new Date(lastTimestamp * 1000);
+
+        picker.min = firstDate.toISOString().slice(0, 16);
+        picker.max = lastDate.toISOString().slice(0, 16);
+
+        // Set current value
+        const current = currentTimestamp || Math.floor(Date.now() / 1000);
+        picker.value = new Date(current * 1000).toISOString().slice(0, 16);
+
+        picker.style.display = 'block';
+        picker.focus();
+    }
 });
+
+document.getElementById('timePicker').addEventListener('change', (e) => {
+    const selectedDate = new Date(e.target.value);
+    const timestamp = Math.floor(selectedDate.getTime() / 1000);
+
+    jumpToTimestamp(timestamp);
+    e.target.style.display = 'none';
+
+    // Enable pause mode
+    isPaused = true;
+    document.getElementById('pauseBtn').style.display = 'none';
+    document.getElementById('playBtn').style.display = 'block';
+});
+
+document.getElementById('timePicker').addEventListener('blur', (e) => {
+    setTimeout(() => e.target.style.display = 'none', 200);
+});
+
+// Fetch playback info on startup
+fetchPlaybackInfo();
 
 const fmt = b => {
     if(!b) return '0B';
@@ -515,7 +834,21 @@ function render(){
         mainContent.style.display = 'block';
     }
 
-    document.getElementById('datetime').textContent = formatDate(new Date());
+    // Always show the timestamp from the event data (whether live or historical)
+    if(e.timestamp) {
+        const eventDate = new Date(e.timestamp);
+        console.log('render() - e.timestamp:', e.timestamp, 'parsed:', eventDate, 'playbackMode:', playbackMode);
+        if(!isNaN(eventDate.getTime())) {
+            document.getElementById('datetime').textContent = formatDate(eventDate);
+        } else {
+            // Fallback if timestamp parsing fails
+            console.log('Timestamp parsing failed!');
+            document.getElementById('datetime').textContent = formatDate(new Date());
+        }
+    } else {
+        console.log('No e.timestamp found');
+        document.getElementById('datetime').textContent = formatDate(new Date());
+    }
     document.getElementById('uptime').textContent = e.system_uptime_seconds ? `Uptime: ${formatUptime(e.system_uptime_seconds)}` : '';
     updateConnectionStatus();
 
@@ -651,7 +984,12 @@ function updateProcs(event){
 
 function updateConnectionStatus(){
     const isConnected = ws && ws.readyState === 1;
-    document.getElementById('wsStatus').style.display = isConnected ? 'none' : 'inline';
+    // Hide connection status in playback mode
+    if(playbackMode) {
+        document.getElementById('wsStatus').style.display = 'none';
+    } else {
+        document.getElementById('wsStatus').style.display = isConnected ? 'none' : 'inline';
+    }
 }
 
 function connectWebSocket(){
@@ -661,9 +999,17 @@ function connectWebSocket(){
         updateConnectionStatus();
     };
     ws.onmessage = (ev) => {
-        if(isPaused) return;
+        if(isPaused) {
+            console.log('WebSocket message ignored (paused)');
+            return;
+        }
+        if(playbackMode) {
+            console.log('WebSocket message ignored (playback mode)');
+            return;
+        }
         try {
             const e = JSON.parse(ev.data);
+            console.log('WebSocket message received:', e.type);
             if(e.type === 'SystemMetrics') { lastStats = e; render(); }
             else if(e.type === 'ProcessSnapshot') { updateProcs(e); }
             else { addEventToLog(e); }
@@ -735,7 +1081,18 @@ function reloadEvents(){
 document.getElementById('filterInput').addEventListener('input', reloadEvents);
 document.getElementById('eventType').addEventListener('change', reloadEvents);
 connectWebSocket();
-setInterval(() => { if(lastStats) document.getElementById('datetime').textContent = formatDate(new Date()); }, 1000);
+// Only update clock in live mode (when not in playback and we have live data)
+setInterval(() => {
+    if(!playbackMode && lastStats && lastStats.timestamp) {
+        // In live mode, update the display using the live timestamp
+        const eventDate = new Date(lastStats.timestamp);
+        if(!isNaN(eventDate.getTime())) {
+            document.getElementById('datetime').textContent = formatDate(eventDate);
+        } else {
+            document.getElementById('datetime').textContent = formatDate(new Date());
+        }
+    }
+}, 1000);
 </script>
 </body>
 </html>
