@@ -6,6 +6,8 @@ mod collector;
 mod commands;
 mod config;
 mod event;
+mod index;
+mod indexed_reader;
 mod protection;
 mod reader;
 mod recorder;
