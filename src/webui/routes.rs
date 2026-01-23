@@ -150,6 +150,22 @@ pub async fn index() -> HttpResponse {
     <div id="diskContainer"></div>
 
     <div></div>
+    <div class="flex items-center text-gray-900 font-semibold" id="diskIoSection" style="display:none">
+        <span class="pr-2">Disk IO</span>
+        <div class="flex-1 border-b border-gray-200"></div>
+    </div>
+    <table class="w-full text-gray-500" id="diskIoTable" style="display:none">
+        <thead><tr class="text-left text-gray-400">
+            <th class="font-normal" style="width:60px">Device</th>
+            <th class="font-normal text-right" style="width:80px">Read</th>
+            <th class="font-normal text-right" style="width:80px">Write</th>
+            <th class="font-normal text-right" style="width:50px">Temp</th>
+            <th style="width:128px"></th>
+        </tr></thead>
+        <tbody id="diskIoTableBody"></tbody>
+    </table>
+
+    <div></div>
     <div class="flex items-center text-gray-900 font-semibold">
         <span class="pr-2">Processes</span>
         <span id="procCount" class="text-gray-500 font-normal pr-2"></span>
@@ -187,7 +203,7 @@ pub async fn index() -> HttpResponse {
         <span class="pr-2">Events</span>
         <div class="flex-1 flex items-center">
             <div class="flex-1 border-b border-gray-200"></div>
-            <div class="flex gap-2 items-center font-normal ml-2">
+            <div class="flex gap-1 items-center font-normal ml-2">
                 <input type="text" id="filterInput" placeholder="Search..."
                     class="px-2 py-0 border border-gray-300 rounded text-gray-700 focus:outline-none focus:ring-1 focus:ring-gray-400" />
                 <select id="eventType" class="px-2 py-0 border border-gray-300 rounded text-gray-700 focus:outline-none">
@@ -210,6 +226,7 @@ const memoryHistory = []; // Track last 60 seconds of memory usage
 const cpuHistory = []; // Track last 60 seconds of CPU usage
 const netDownHistory = []; // Track last 60 seconds of download speed
 const netUpHistory = []; // Track last 60 seconds of upload speed
+const diskIoHistoryMap = {}; // Track last 60 seconds per disk
 const MAX_HISTORY = 60;
 
 const fmt = b => {
@@ -405,6 +422,70 @@ function updateDiskBar(id, pct, container, mount, used, total){
     document.getElementById('total_'+id).textContent = fmt(total);
 }
 
+function updateDiskIo(disks){
+    const section = document.getElementById('diskIoSection');
+    const table = document.getElementById('diskIoTable');
+    const tbody = document.getElementById('diskIoTableBody');
+
+    if(!disks || disks.length === 0){
+        section.style.display = 'none';
+        table.style.display = 'none';
+        tbody.innerHTML = '';
+        return;
+    }
+
+    section.style.display = 'flex';
+    table.style.display = 'table';
+
+    // Max throughput for scaling (100 MB/s = 100%)
+    const maxThroughput = 100 * 1024 * 1024;
+
+    // Update or create rows for each disk
+    disks.forEach((disk, i) => {
+        const deviceKey = disk.device;
+
+        // Initialize history for this disk if needed
+        if(!diskIoHistoryMap[deviceKey]){
+            diskIoHistoryMap[deviceKey] = [];
+        }
+
+        // Calculate throughput percentage
+        const totalThroughput = disk.read + disk.write;
+        const throughputPct = Math.min(100, (totalThroughput / maxThroughput) * 100);
+
+        // Add to history
+        diskIoHistoryMap[deviceKey].push(throughputPct);
+        if(diskIoHistoryMap[deviceKey].length > MAX_HISTORY){
+            diskIoHistoryMap[deviceKey].shift();
+        }
+
+        // Check if row exists
+        let row = document.getElementById(`diskio_row_${i}`);
+        if(!row){
+            const tr = document.createElement('tr');
+            tr.id = `diskio_row_${i}`;
+            const tempText = disk.temp ? disk.temp.toFixed(0) + '°C' : '--';
+            tr.innerHTML = `
+                <td style="width:60px">${disk.device}</td>
+                <td class="text-right" style="width:80px"><span id="diskio_read_${i}">${fmt(disk.read)}/s</span></td>
+                <td class="text-right" style="width:80px"><span id="diskio_write_${i}">${fmt(disk.write)}/s</span></td>
+                <td class="text-right text-gray-400" style="width:50px"><span id="diskio_temp_${i}">${tempText}</span></td>
+                <td style="width:128px;text-align:right;vertical-align:middle"><canvas id="diskio_chart_${i}" style="height:10px;width:128px;" class="ml-auto"></canvas></td>
+            `;
+            tbody.appendChild(tr);
+        } else {
+            // Update existing row
+            document.getElementById(`diskio_read_${i}`).textContent = fmt(disk.read) + '/s';
+            document.getElementById(`diskio_write_${i}`).textContent = fmt(disk.write) + '/s';
+            const tempText = disk.temp ? disk.temp.toFixed(0) + '°C' : '--';
+            document.getElementById(`diskio_temp_${i}`).textContent = tempText;
+        }
+
+        // Draw chart for this disk
+        drawChart(`diskio_chart_${i}`, diskIoHistoryMap[deviceKey]);
+    });
+}
+
 function updateProcTable(tableId, procs, memTotal){
     const tbody = document.getElementById(tableId);
     tbody.innerHTML = '';
@@ -532,6 +613,10 @@ function render(){
         const pct = fs.total > 0 ? Math.round((fs.used/fs.total)*100) : 0;
         updateDiskBar(`disk_${i}`, pct, document.getElementById('diskContainer'), fs.mount, fs.used, fs.total);
     });
+
+    // Disk IO section
+    updateDiskIo(e.per_disk || []);
+
     // Users section
     const users = e.users || [];
     document.getElementById('usersSection').style.display = users.length > 0 ? 'flex' : 'none';
