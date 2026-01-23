@@ -34,23 +34,18 @@ pub async fn index() -> HttpResponse {
 <div class="max-w mx-auto px-4 py-5vh">
     <div class="fixed z-10 top-0 right-0">
         <div class="flex gap-4 px-5 py-4 text-gray-400">
-
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 hover:text-gray-600 transition duration-100 cursor-pointer">
-  <path d="M7.712 4.818A1.5 1.5 0 0 1 10 6.095v2.972c.104-.13.234-.248.389-.343l6.323-3.906A1.5 1.5 0 0 1 19 6.095v7.81a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.505 1.505 0 0 1-.389-.344v2.973a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.5 1.5 0 0 1 0-2.552l6.323-3.906Z" />
-</svg>
-
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 hover:text-gray-600 transition duration-100 cursor-pointer">
-  <path d="M3.288 4.818A1.5 1.5 0 0 0 1 6.095v7.81a1.5 1.5 0 0 0 2.288 1.276l6.323-3.905c.155-.096.285-.213.389-.344v2.973a1.5 1.5 0 0 0 2.288 1.276l6.323-3.905a1.5 1.5 0 0 0 0-2.552l-6.323-3.906A1.5 1.5 0 0 0 10 6.095v2.972a1.506 1.506 0 0 0-.389-.343L3.288 4.818Z" />
-</svg>
-
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 hover:text-gray-600 transition duration-100 cursor-pointer">
-  <path d="M5.75 3a.75.75 0 0 0-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 0 0 .75-.75V3.75A.75.75 0 0 0 7.25 3h-1.5ZM12.75 3a.75.75 0 0 0-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 0 0 .75-.75V3.75a.75.75 0 0 0-.75-.75h-1.5Z" />
-</svg>
-
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 hover:text-gray-600 transition duration-100 cursor-pointer">
-              <path d="M6.3 2.84A1.5 1.5 0 0 0 4 4.11v11.78a1.5 1.5 0 0 0 2.3 1.27l9.344-5.891a1.5 1.5 0 0 0 0-2.538L6.3 2.841Z" />
+                <path d="M7.712 4.818A1.5 1.5 0 0 1 10 6.095v2.972c.104-.13.234-.248.389-.343l6.323-3.906A1.5 1.5 0 0 1 19 6.095v7.81a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.505 1.505 0 0 1-.389-.344v2.973a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.5 1.5 0 0 1 0-2.552l6.323-3.906Z" />
             </svg>
-
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 hover:text-gray-600 transition duration-100 cursor-pointer">
+                <path d="M3.288 4.818A1.5 1.5 0 0 0 1 6.095v7.81a1.5 1.5 0 0 0 2.288 1.276l6.323-3.905c.155-.096.285-.213.389-.344v2.973a1.5 1.5 0 0 0 2.288 1.276l6.323-3.905a1.5 1.5 0 0 0 0-2.552l-6.323-3.906A1.5 1.5 0 0 0 10 6.095v2.972a1.506 1.506 0 0 0-.389-.343L3.288 4.818Z" />
+            </svg>
+            <svg id="pauseBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 hover:text-gray-600 transition duration-100 cursor-pointer">
+                <path d="M5.75 3a.75.75 0 0 0-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 0 0 .75-.75V3.75A.75.75 0 0 0 7.25 3h-1.5ZM12.75 3a.75.75 0 0 0-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 0 0 .75-.75V3.75a.75.75 0 0 0-.75-.75h-1.5Z" />
+            </svg>
+            <svg id="playBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 text-gray-800 hover:text-gray-600 transition duration-100 cursor-pointer" style="display:none">
+                <path d="M6.3 2.84A1.5 1.5 0 0 0 4 4.11v11.78a1.5 1.5 0 0 0 2.3 1.27l9.344-5.891a1.5 1.5 0 0 0 0-2.538L6.3 2.841Z" />
+            </svg>
         </div>
     </div>
     <div id="mainContent" style="display:none;">
@@ -220,7 +215,7 @@ pub async fn index() -> HttpResponse {
 </div>
 
 <script>
-let ws=null, eventBuffer=[], lastStats=null;
+let ws=null, eventBuffer=[], lastStats=null, isPaused=false;
 const MAX_BUFFER=1000;
 const memoryHistory = []; // Track last 60 seconds of memory usage
 const cpuHistory = []; // Track last 60 seconds of CPU usage
@@ -228,6 +223,19 @@ const netDownHistory = []; // Track last 60 seconds of download speed
 const netUpHistory = []; // Track last 60 seconds of upload speed
 const diskIoHistoryMap = {}; // Track last 60 seconds per disk
 const MAX_HISTORY = 60;
+
+// Play/Pause toggle
+document.getElementById('pauseBtn').addEventListener('click', () => {
+    isPaused = true;
+    document.getElementById('pauseBtn').style.display = 'none';
+    document.getElementById('playBtn').style.display = 'block';
+});
+
+document.getElementById('playBtn').addEventListener('click', () => {
+    isPaused = false;
+    document.getElementById('playBtn').style.display = 'none';
+    document.getElementById('pauseBtn').style.display = 'block';
+});
 
 const fmt = b => {
     if(!b) return '0B';
@@ -653,6 +661,7 @@ function connectWebSocket(){
         updateConnectionStatus();
     };
     ws.onmessage = (ev) => {
+        if(isPaused) return;
         try {
             const e = JSON.parse(ev.data);
             if(e.type === 'SystemMetrics') { lastStats = e; render(); }
