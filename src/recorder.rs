@@ -146,6 +146,7 @@ impl Recorder {
             .open(&path)?;
 
         self.file.write_all(&MAGIC.to_le_bytes())?;
+        self.file.flush()?;  // Ensure magic number is written to disk
         self.offset += 4;
 
         Ok(())

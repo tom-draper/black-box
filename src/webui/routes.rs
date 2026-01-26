@@ -326,19 +326,25 @@ async function jumpToTimestamp(timestamp) {
                 if(event.type === 'SystemMetrics') {
                     latestSystemMetrics = event;
 
-                    // Build history for charts
-                    if(cpuHistory.length < MAX_HISTORY) {
-                        cpuHistory.push(event.cpu || 0);
-                        memoryHistory.push(event.mem || 0);
-                        netDownHistory.push(event.net_recv || 0);
-                        netUpHistory.push(event.net_send || 0);
-                    }
+                    // Build history for charts - collect all events first
+                    cpuHistory.push(event.cpu || 0);
+                    memoryHistory.push(event.mem || 0);
+                    netDownHistory.push(event.net_recv || 0);
+                    netUpHistory.push(event.net_send || 0);
                 } else if(event.type === 'ProcessSnapshot') {
                     latestProcessSnapshot = event;
                 } else {
                     addEventToLog(event);
                 }
             });
+
+            // Trim history arrays to keep only the most recent MAX_HISTORY items
+            if(cpuHistory.length > MAX_HISTORY) {
+                cpuHistory = cpuHistory.slice(-MAX_HISTORY);
+                memoryHistory = memoryHistory.slice(-MAX_HISTORY);
+                netDownHistory = netDownHistory.slice(-MAX_HISTORY);
+                netUpHistory = netUpHistory.slice(-MAX_HISTORY);
+            }
 
             console.log('Finished processing', data.events.length, 'events');
             console.log('latestSystemMetrics:', latestSystemMetrics ? 'found' : 'NOT FOUND');
@@ -401,7 +407,10 @@ document.getElementById('fastForwardBtn').addEventListener('click', () => {
         playbackInterval = null;
     }
 
-    const newTime = Math.min(lastTimestamp || Date.now()/1000, currentTimestamp + REWIND_STEP);
+    // Advance forward by REWIND_STEP, but don't go past the latest available timestamp (or now)
+    const target = currentTimestamp + REWIND_STEP;
+    const maxTime = lastTimestamp || Math.floor(Date.now() / 1000);
+    const newTime = Math.min(target, maxTime);
     jumpToTimestamp(newTime);
     // Show pause button after seeking
     isPaused = true;
@@ -1051,7 +1060,8 @@ function createEventEntry(e){
     if(!e.type || e.type === 'ProcessSnapshot') return null;
     const div = document.createElement('div');
     div.className = 'text-gray-600';
-    const time = (e.timestamp || '').substring(11,23);
+    // Format timestamp (now in milliseconds) to HH:MM:SS.mmm
+    const time = e.timestamp ? new Date(e.timestamp).toISOString().substring(11,23) : '--:--:--';
     if(e.type === 'ProcessLifecycle'){
         const color = e.kind === 'Started' ? 'text-green-600' : e.kind === 'Exited' ? 'text-gray-400' : 'text-yellow-600';
         div.innerHTML = `<span class="text-gray-400">${time}</span> <span class="${color}">[${e.kind}]</span> ${e.name} <span class="text-gray-400">(pid ${e.pid})</span>`;

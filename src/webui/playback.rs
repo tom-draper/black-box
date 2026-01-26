@@ -57,17 +57,20 @@ pub async fn api_playback_events(
 
     match reader.read_time_range(start_ns, end_ns) {
         Ok(mut events) => {
+            let mut used_fallback = false;
+
             // If no events found in the requested range, try to fall back to earlier data
-            if events.is_empty() && start_ns.is_some() {
+            if events.is_empty() && end_ns.is_some() {
                 // Try to find the most recent data before the requested time
                 // Go back up to 7 days (604800 seconds)
-                let start_time = start_ns.unwrap();
-                let fallback_start = start_time - (7 * 24 * 3600 * 1_000_000_000i128);
+                let end_time = end_ns.unwrap();
+                let fallback_start = end_time - (7 * 24 * 3600 * 1_000_000_000i128);
 
-                // Read from fallback_start to requested start time
-                if let Ok(fallback_events) = reader.read_time_range(Some(fallback_start), Some(start_time)) {
+                // Read from fallback_start to requested end time
+                if let Ok(fallback_events) = reader.read_time_range(Some(fallback_start), Some(end_time)) {
                     // Take the most recent events before the requested time
                     events = fallback_events;
+                    used_fallback = !events.is_empty();
                 }
             }
 
@@ -124,7 +127,7 @@ pub async fn api_playback_events(
             HttpResponse::Ok().json(serde_json::json!({
                 "count": formatted_events.len(),
                 "events": formatted_events,
-                "fallback": formatted_events.len() > 0 && start_ns.is_some(),
+                "fallback": used_fallback,
             }))
         }
         Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
@@ -156,7 +159,7 @@ fn format_event_for_api(event: &Event) -> serde_json::Value {
 
             serde_json::json!({
                 "type": "SystemMetrics",
-                "timestamp": m.ts.to_string(),
+                "timestamp": m.ts.unix_timestamp_nanos() / 1_000_000,  // Convert to milliseconds
                 "kernel": m.kernel_version,
                 "cpu_model": m.cpu_model,
                 "cpu_mhz": m.cpu_mhz,
@@ -224,14 +227,14 @@ fn format_event_for_api(event: &Event) -> serde_json::Value {
         }
         Event::ProcessLifecycle(p) => serde_json::json!({
             "type": "ProcessLifecycle",
-            "timestamp": p.ts.to_string(),
+            "timestamp": p.ts.unix_timestamp_nanos() / 1_000_000,  // Convert to milliseconds
             "kind": format!("{:?}", p.kind),
             "pid": p.pid,
             "name": p.name,
         }),
         Event::ProcessSnapshot(p) => serde_json::json!({
             "type": "ProcessSnapshot",
-            "timestamp": p.ts.to_string(),
+            "timestamp": p.ts.unix_timestamp_nanos() / 1_000_000,  // Convert to milliseconds
             "total_processes": p.total_processes,
             "running_processes": p.running_processes,
             "processes": p.processes.iter().map(|proc| serde_json::json!({
@@ -243,7 +246,7 @@ fn format_event_for_api(event: &Event) -> serde_json::Value {
         }),
         Event::SecurityEvent(s) => serde_json::json!({
             "type": "SecurityEvent",
-            "timestamp": s.ts.to_string(),
+            "timestamp": s.ts.unix_timestamp_nanos() / 1_000_000,  // Convert to milliseconds
             "kind": format!("{:?}", s.kind),
             "user": s.user,
             "source_ip": s.source_ip,
@@ -251,7 +254,7 @@ fn format_event_for_api(event: &Event) -> serde_json::Value {
         }),
         Event::Anomaly(a) => serde_json::json!({
             "type": "Anomaly",
-            "timestamp": a.ts.to_string(),
+            "timestamp": a.ts.unix_timestamp_nanos() / 1_000_000,  // Convert to milliseconds
             "severity": format!("{:?}", a.severity),
             "kind": format!("{:?}", a.kind),
             "message": a.message,
