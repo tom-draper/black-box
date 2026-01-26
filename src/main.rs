@@ -307,6 +307,26 @@ fn run_recorder(cli: Cli) -> Result<()> {
     let mut cached_net_gateway = get_default_gateway();
     let mut cached_net_dns = get_dns_server();
 
+    // Track static/semi-static field values for change detection
+    let mut last_kernel_version = String::new();
+    let mut last_cpu_model = String::new();
+    let mut last_cpu_mhz = 0u32;
+    let mut last_mem_total = 0u64;
+    let mut last_swap_total = 0u64;
+    let mut last_disk_total = 0u64;
+    let mut last_net_interface = String::new();
+    let mut last_logged_in_users: Vec<String> = Vec::new();
+
+    // Cache for calculating percentages every second (even when totals aren't sent)
+    let mut cached_mem_total_for_pct = 0u64;
+    let mut cached_swap_total_for_pct = 0u64;
+    let mut cached_disk_total_for_pct = 0u64;
+
+    // Collection interval counters
+    let mut tick_count = 0u64;
+    const STATIC_FIELDS_INTERVAL: u64 = 60;       // 1 minute for static fields (ensures clients get them quickly)
+    const SEMI_STATIC_FIELDS_INTERVAL: u64 = 60;  // 1 minute for semi-static fields
+
     // Thresholds for anomaly detection
     let cpu_spike_threshold = 80.0;
     let mem_spike_threshold = 90.0;
@@ -318,6 +338,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
 
     loop {
         thread::sleep(Duration::from_secs(COLLECTION_INTERVAL_SECS));
+        tick_count += 1;
 
         // CPU stats
         let cpu_snapshot = read_all_cpu_stats()?;
@@ -394,29 +415,77 @@ fn run_recorder(cli: Cli) -> Result<()> {
             })
             .collect();
 
-        // Record system metrics
+        // Determine which static/semi-static fields to include
+        // Always include in first 30 seconds to ensure any client connecting gets them
+        let include_static = tick_count <= 30 || tick_count % STATIC_FIELDS_INTERVAL == 0;
+        let include_semi_static = tick_count <= 30 || tick_count % SEMI_STATIC_FIELDS_INTERVAL == 0;
+
+        // Collect static fields (hourly or on change)
         let cpu_info = collector::read_cpu_info();
-        let system_metrics = SystemMetrics {
-            ts: OffsetDateTime::now_utc(),
-            kernel_version: collector::read_kernel_version(),
-            cpu_model: cpu_info.model,
-            cpu_mhz: cpu_info.mhz,
-            system_uptime_seconds: collector::read_system_uptime().unwrap_or(0),
-            cpu_usage_percent: cpu_usage,
-            per_core_usage,
-            mem_used_bytes: mem_stats.used_kb() * 1024,
-            mem_total_bytes: mem_stats.total_kb * 1024,
-            swap_used_bytes: swap_stats.used_kb() * 1024,
-            swap_total_bytes: swap_stats.total_kb * 1024,
-            load_avg_1m: load_avg.load_1m,
-            load_avg_5m: load_avg.load_5m,
-            load_avg_15m: load_avg.load_15m,
-            disk_read_bytes_per_sec: disk_read_per_sec,
-            disk_write_bytes_per_sec: disk_write_per_sec,
-            disk_used_bytes: disk_space.used_bytes,
-            disk_total_bytes: disk_space.total_bytes,
-            per_disk_metrics,
-            filesystems: cached_filesystems
+        let kernel_version = collector::read_kernel_version();
+        let mem_total = mem_stats.total_kb * 1024;
+        let swap_total = swap_stats.total_kb * 1024;
+        let disk_total = disk_space.total_bytes;
+
+        // Always update cached values for percentage calculations
+        cached_mem_total_for_pct = mem_total;
+        cached_swap_total_for_pct = swap_total;
+        cached_disk_total_for_pct = disk_total;
+
+        let kernel_changed = kernel_version != last_kernel_version;
+        let cpu_model_changed = cpu_info.model != last_cpu_model;
+        let cpu_mhz_changed = cpu_info.mhz != last_cpu_mhz;
+        let mem_total_changed = mem_total != last_mem_total;
+        let swap_total_changed = swap_total != last_swap_total;
+        let disk_total_changed = disk_total != last_disk_total;
+
+        let opt_kernel_version = if include_static || kernel_changed {
+            last_kernel_version = kernel_version.clone();
+            Some(kernel_version)
+        } else {
+            None
+        };
+
+        let opt_cpu_model = if include_static || cpu_model_changed {
+            last_cpu_model = cpu_info.model.clone();
+            Some(cpu_info.model.clone())
+        } else {
+            None
+        };
+
+        let opt_cpu_mhz = if include_static || cpu_mhz_changed {
+            last_cpu_mhz = cpu_info.mhz;
+            Some(cpu_info.mhz)
+        } else {
+            None
+        };
+
+        let opt_mem_total = if include_static || mem_total_changed {
+            last_mem_total = mem_total;
+            Some(mem_total)
+        } else {
+            None
+        };
+
+        let opt_swap_total = if include_static || swap_total_changed {
+            last_swap_total = swap_total;
+            Some(swap_total)
+        } else {
+            None
+        };
+
+        let opt_disk_total = if include_static || disk_total_changed {
+            last_disk_total = disk_total;
+            Some(disk_total)
+        } else {
+            None
+        };
+
+        // Collect semi-static fields (every 5 minutes or on change)
+        let net_interface_changed = net_interface != last_net_interface;
+
+        let opt_filesystems = if include_semi_static {
+            Some(cached_filesystems
                 .iter()
                 .map(|fs| FilesystemInfo {
                     filesystem: fs.filesystem.clone(),
@@ -425,17 +494,102 @@ fn run_recorder(cli: Cli) -> Result<()> {
                     used_bytes: fs.used_bytes,
                     available_bytes: fs.available_bytes,
                 })
-                .collect(),
+                .collect())
+        } else {
+            None
+        };
+
+        let opt_net_interface = if include_semi_static || net_interface_changed {
+            last_net_interface = net_interface.clone();
+            Some(net_interface.clone())
+        } else {
+            None
+        };
+
+        let opt_fans = if include_semi_static {
+            Some(cached_fans.clone())
+        } else {
+            None
+        };
+
+        // Logged in users - only include on change
+        let current_user_list: Vec<String> = read_logged_in_users()
+            .unwrap_or_default()
+            .iter()
+            .map(|u| format!("{}@{}", u.username, u.terminal))
+            .collect();
+        let users_changed = current_user_list != last_logged_in_users;
+
+        let opt_logged_in_users = if users_changed || include_semi_static {
+            last_logged_in_users = current_user_list;
+            Some(read_logged_in_users()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|u| LoggedInUserInfo {
+                    username: u.username,
+                    terminal: u.terminal,
+                    remote_host: u.remote_host,
+                })
+                .collect())
+        } else {
+            None
+        };
+
+        // Record system metrics
+        let system_metrics = SystemMetrics {
+            ts: OffsetDateTime::now_utc(),
+
+            // Static fields (Optional - only included hourly or on change)
+            kernel_version: opt_kernel_version,
+            cpu_model: opt_cpu_model,
+            cpu_mhz: opt_cpu_mhz,
+            mem_total_bytes: opt_mem_total,
+            swap_total_bytes: opt_swap_total,
+            disk_total_bytes: opt_disk_total,
+
+            // Semi-static fields (Optional - every 5 min or on change)
+            filesystems: opt_filesystems,
+            net_interface: opt_net_interface,
+            net_ip_address: if include_semi_static { cached_net_ip.clone() } else { None },
+            net_gateway: if include_semi_static { cached_net_gateway.clone() } else { None },
+            net_dns: if include_semi_static { cached_net_dns.clone() } else { None },
+            fans: opt_fans,
+            logged_in_users: opt_logged_in_users,
+
+            // Dynamic fields (always included)
+            system_uptime_seconds: collector::read_system_uptime().unwrap_or(0),
+            cpu_usage_percent: cpu_usage,
+            per_core_usage,
+            mem_used_bytes: mem_stats.used_kb() * 1024,
+            mem_usage_percent: if cached_mem_total_for_pct > 0 {
+                ((mem_stats.used_kb() * 1024) as f64 / cached_mem_total_for_pct as f64 * 100.0) as f32
+            } else {
+                0.0
+            },
+            swap_used_bytes: swap_stats.used_kb() * 1024,
+            swap_usage_percent: if cached_swap_total_for_pct > 0 {
+                ((swap_stats.used_kb() * 1024) as f64 / cached_swap_total_for_pct as f64 * 100.0) as f32
+            } else {
+                0.0
+            },
+            load_avg_1m: load_avg.load_1m,
+            load_avg_5m: load_avg.load_5m,
+            load_avg_15m: load_avg.load_15m,
+            disk_read_bytes_per_sec: disk_read_per_sec,
+            disk_write_bytes_per_sec: disk_write_per_sec,
+            disk_used_bytes: disk_space.used_bytes,
+            disk_usage_percent: if cached_disk_total_for_pct > 0 {
+                (disk_space.used_bytes as f64 / cached_disk_total_for_pct as f64 * 100.0) as f32
+            } else {
+                0.0
+            },
+            per_disk_metrics,
             net_recv_bytes_per_sec: net_recv_per_sec,
             net_send_bytes_per_sec: net_send_per_sec,
             net_recv_errors_per_sec,
             net_send_errors_per_sec,
             net_recv_drops_per_sec,
             net_send_drops_per_sec,
-            net_interface,
-            net_ip_address: cached_net_ip.clone(),
-            net_gateway: cached_net_gateway.clone(),
-            net_dns: cached_net_dns.clone(),
             tcp_connections: tcp_stats.total_connections,
             tcp_time_wait: tcp_stats.time_wait,
             context_switches_per_sec: ctxt_per_sec,
@@ -445,18 +599,9 @@ fn run_recorder(cli: Cli) -> Result<()> {
                 gpu_temp_celsius: cached_temps.gpu_temp_celsius,
                 motherboard_temp_celsius: cached_temps.motherboard_temp_celsius,
             },
-            fans: cached_fans.clone(),
             gpu: collector::read_gpu_info(),
-            logged_in_users: read_logged_in_users()
-                .unwrap_or_default()
-                .into_iter()
-                .map(|u| LoggedInUserInfo {
-                    username: u.username,
-                    terminal: u.terminal,
-                    remote_host: u.remote_host,
-                })
-                .collect(),
         };
+
         recorder.append(&Event::SystemMetrics(system_metrics))?;
 
         // Track process lifecycle changes

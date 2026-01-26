@@ -129,8 +129,8 @@ fn export_csv(events: &[Event], writer: &mut dyn Write) -> Result<()> {
                 format!(
                     "CPU:{:.1}% Mem:{:.1}% Disk:{:.0}% Load:{:.2}",
                     m.cpu_usage_percent,
-                    (m.mem_used_bytes as f64 / m.mem_total_bytes as f64) * 100.0,
-                    (m.disk_used_bytes as f64 / m.disk_total_bytes as f64) * 100.0,
+                    m.mem_usage_percent,
+                    m.disk_usage_percent,
                     m.load_avg_1m
                 ),
             ),

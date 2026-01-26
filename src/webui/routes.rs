@@ -230,6 +230,12 @@ const netUpHistory = []; // Track last 60 seconds of upload speed
 const diskIoHistoryMap = {}; // Track last 60 seconds per disk
 const MAX_HISTORY = 60;
 
+// Cache for static/semi-static fields (these may not be in every event)
+let cachedMemTotal = null;
+let cachedSwapTotal = null;
+let cachedDiskTotal = null;
+let cachedFilesystems = [];
+
 // Time-travel state
 let playbackMode = false; // false = live, true = historical playback
 let currentTimestamp = null; // Current playback timestamp (seconds)
@@ -353,6 +359,23 @@ async function jumpToTimestamp(timestamp) {
             // Render the latest state
             if(latestSystemMetrics) {
                 console.log('About to render with historical data, timestamp:', latestSystemMetrics.timestamp);
+
+                // Merge metadata (missing static/semi-static fields) into the latest metrics
+                if(data.metadata) {
+                    for(const key in data.metadata) {
+                        if(!latestSystemMetrics[key] || latestSystemMetrics[key] === null) {
+                            latestSystemMetrics[key] = data.metadata[key];
+                            console.log('Merged metadata field:', key, '=', data.metadata[key]);
+                        }
+                    }
+
+                    // Update caches from metadata
+                    if(data.metadata.mem_total_bytes) cachedMemTotal = data.metadata.mem_total_bytes;
+                    if(data.metadata.swap_total_bytes) cachedSwapTotal = data.metadata.swap_total_bytes;
+                    if(data.metadata.disk_total_bytes) cachedDiskTotal = data.metadata.disk_total_bytes;
+                    if(data.metadata.filesystems) cachedFilesystems = data.metadata.filesystems;
+                }
+
                 lastStats = latestSystemMetrics;
                 render();
             } else {
@@ -881,9 +904,20 @@ function render(){
         updateCpuChart();
     }
     (e.per_core_cpu || []).forEach((v, i) => updateCoreBar(`core_${i}`, v, document.getElementById('cpuCoresContainer'), i));
-    if(e.mem !== undefined){
+
+    // Update cached total values when present
+    if(e.mem_total != null) cachedMemTotal = e.mem_total;
+    if(e.swap_total != null) cachedSwapTotal = e.swap_total;
+    if(e.disk_total != null) cachedDiskTotal = e.disk_total;
+    if(e.filesystems && e.filesystems.length > 0) cachedFilesystems = e.filesystems;
+
+    // Memory display - percentage is always calculated by backend
+    if(e.mem !== undefined && e.mem_used !== undefined){
+        const memTotal = e.mem_total ?? cachedMemTotal ?? 0;
         updateRamBar(e.mem, e.mem_used, document.getElementById('ramUsed'));
-        document.getElementById('ramAvail').textContent = `Available RAM: ${fmt(e.mem_total - e.mem_used)}`;
+        if(memTotal > 0) {
+            document.getElementById('ramAvail').textContent = `Available RAM: ${fmt(memTotal - e.mem_used)}`;
+        }
         // Update memory history
         memoryHistory.push(e.mem);
         if(memoryHistory.length > MAX_HISTORY) memoryHistory.shift();
@@ -958,8 +992,9 @@ function render(){
     document.getElementById('netGateway').textContent = `Gateway: ${e.net_gateway || '--'}`;
     document.getElementById('netDns').textContent = `DNS: ${e.net_dns || '--'}`;
 
-    // Storage section
-    (e.filesystems || []).forEach((fs, i) => {
+    // Storage section - use cached filesystems if not in current event
+    const filesystems = e.filesystems || cachedFilesystems;
+    filesystems.forEach((fs, i) => {
         const pct = fs.total > 0 ? Math.round((fs.used/fs.total)*100) : 0;
         updateDiskBar(`disk_${i}`, pct, document.getElementById('diskContainer'), fs.mount, fs.used, fs.total);
     });
@@ -1018,7 +1053,6 @@ function connectWebSocket(){
         }
         try {
             const e = JSON.parse(ev.data);
-            console.log('WebSocket message received:', e.type);
             if(e.type === 'SystemMetrics') { lastStats = e; render(); }
             else if(e.type === 'ProcessSnapshot') { updateProcs(e); }
             else { addEventToLog(e); }
@@ -1153,17 +1187,7 @@ fn event_to_json(
                 return None;
             }
 
-            let disk_pct = if m.disk_total_bytes > 0 {
-                (m.disk_used_bytes as f64 / m.disk_total_bytes as f64) * 100.0
-            } else {
-                0.0
-            };
-
-            let mem_pct = if m.mem_total_bytes > 0 {
-                (m.mem_used_bytes as f64 / m.mem_total_bytes as f64) * 100.0
-            } else {
-                0.0
-            };
+            // Percentages are now calculated every second in main.rs using cached totals
 
             Some(serde_json::json!({
                 "type": "SystemMetrics",
@@ -1174,13 +1198,13 @@ fn event_to_json(
                 "system_uptime_seconds": m.system_uptime_seconds,
                 "cpu": m.cpu_usage_percent,
                 "per_core_cpu": m.per_core_usage,
-                "mem": mem_pct,
+                "mem": m.mem_usage_percent,
                 "mem_used": m.mem_used_bytes,
                 "mem_total": m.mem_total_bytes,
                 "load": m.load_avg_1m,
                 "load5": m.load_avg_5m,
                 "load15": m.load_avg_15m,
-                "disk": disk_pct.round(),
+                "disk": m.disk_usage_percent.round(),
                 "disk_used": m.disk_used_bytes,
                 "disk_total": m.disk_total_bytes,
                 "per_disk": m.per_disk_metrics.iter().map(|d| serde_json::json!({
@@ -1189,13 +1213,13 @@ fn event_to_json(
                     "write": d.write_bytes_per_sec,
                     "temp": d.temp_celsius,
                 })).collect::<Vec<_>>(),
-                "filesystems": m.filesystems.iter().map(|fs| serde_json::json!({
+                "filesystems": m.filesystems.as_ref().map(|fs_list| fs_list.iter().map(|fs| serde_json::json!({
                     "filesystem": fs.filesystem,
                     "mount": fs.mount_point,
                     "total": fs.total_bytes,
                     "used": fs.used_bytes,
                     "available": fs.available_bytes,
-                })).collect::<Vec<_>>(),
+                })).collect::<Vec<_>>()).unwrap_or_default(),
                 "tcp": m.tcp_connections,
                 "tcp_wait": m.tcp_time_wait,
                 "net_recv": m.net_recv_bytes_per_sec,
@@ -1216,15 +1240,15 @@ fn event_to_json(
                 "gpu_mem_freq": m.gpu.mem_freq_mhz,
                 "gpu_temp2": m.gpu.gpu_temp_celsius,
                 "gpu_power": m.gpu.power_watts,
-                "fans": m.fans.iter().map(|f| serde_json::json!({
+                "fans": m.fans.as_ref().map(|fan_list| fan_list.iter().map(|f| serde_json::json!({
                     "label": f.label,
                     "rpm": f.rpm,
-                })).collect::<Vec<_>>(),
-                "users": m.logged_in_users.iter().map(|u| serde_json::json!({
+                })).collect::<Vec<_>>()).unwrap_or_default(),
+                "users": m.logged_in_users.as_ref().map(|user_list| user_list.iter().map(|u| serde_json::json!({
                     "username": u.username,
                     "terminal": u.terminal,
                     "remote_host": u.remote_host,
-                })).collect::<Vec<_>>(),
+                })).collect::<Vec<_>>()).unwrap_or_default(),
             }))
         }
         Event::ProcessLifecycle(p) => {

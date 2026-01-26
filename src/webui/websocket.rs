@@ -124,47 +124,30 @@ pub async fn ws_handler(
 // Convert Event to JSON format (same as API)
 fn event_to_json(event: &crate::event::Event) -> serde_json::Value {
     use crate::event::Event;
-    use time::format_description::well_known::Rfc3339;
 
     match event {
         Event::SystemMetrics(m) => {
-            let disk_pct = if m.disk_total_bytes > 0 {
-                (m.disk_used_bytes as f64 / m.disk_total_bytes as f64) * 100.0
-            } else {
-                0.0
-            };
+            // Percentages are now calculated every second in main.rs using cached totals
 
-            let mem_pct = if m.mem_total_bytes > 0 {
-                (m.mem_used_bytes as f64 / m.mem_total_bytes as f64) * 100.0
-            } else {
-                0.0
-            };
-
-            let swap_pct = if m.swap_total_bytes > 0 {
-                (m.swap_used_bytes as f64 / m.swap_total_bytes as f64) * 100.0
-            } else {
-                0.0
-            };
-
-            serde_json::json!({
+            let json_value = serde_json::json!({
                 "type": "SystemMetrics",
-                "timestamp": m.ts.format(&Rfc3339).unwrap_or_default(),
+                "timestamp": m.ts.unix_timestamp_nanos() / 1_000_000,  // Milliseconds for consistency with playback
                 "kernel": m.kernel_version,
                 "cpu_model": m.cpu_model,
                 "cpu_mhz": m.cpu_mhz,
                 "system_uptime_seconds": m.system_uptime_seconds,
                 "cpu": m.cpu_usage_percent,
                 "per_core_cpu": m.per_core_usage,
-                "mem": mem_pct,
+                "mem": m.mem_usage_percent,
                 "mem_used": m.mem_used_bytes,
                 "mem_total": m.mem_total_bytes,
-                "swap": swap_pct,
+                "swap": m.swap_usage_percent,
                 "swap_used": m.swap_used_bytes,
                 "swap_total": m.swap_total_bytes,
                 "load": m.load_avg_1m,
                 "load5": m.load_avg_5m,
                 "load15": m.load_avg_15m,
-                "disk": disk_pct.round(),
+                "disk": m.disk_usage_percent.round(),
                 "disk_used": m.disk_used_bytes,
                 "disk_total": m.disk_total_bytes,
                 "disk_read": m.disk_read_bytes_per_sec,
@@ -175,18 +158,22 @@ fn event_to_json(event: &crate::event::Event) -> serde_json::Value {
                     "write": d.write_bytes_per_sec,
                     "temp": d.temp_celsius,
                 })).collect::<Vec<_>>(),
-                "filesystems": m.filesystems.iter().map(|fs| serde_json::json!({
+                "filesystems": m.filesystems.as_ref().map(|fs_list| fs_list.iter().map(|fs| serde_json::json!({
                     "filesystem": fs.filesystem,
                     "mount": fs.mount_point,
                     "total": fs.total_bytes,
                     "used": fs.used_bytes,
                     "available": fs.available_bytes,
-                })).collect::<Vec<_>>(),
-                "users": m.logged_in_users.iter().map(|u| serde_json::json!({
+                })).collect::<Vec<_>>()).unwrap_or_default(),
+                "users": m.logged_in_users.as_ref().map(|user_list| user_list.iter().map(|u| serde_json::json!({
                     "username": u.username,
                     "terminal": u.terminal,
                     "remote_host": u.remote_host,
-                })).collect::<Vec<_>>(),
+                })).collect::<Vec<_>>()).unwrap_or_default(),
+                "net_interface": m.net_interface,
+                "net_ip": m.net_ip_address,
+                "net_gateway": m.net_gateway,
+                "net_dns": m.net_dns,
                 "net_recv": m.net_recv_bytes_per_sec,
                 "net_send": m.net_send_bytes_per_sec,
                 "tcp": m.tcp_connections,
@@ -200,22 +187,24 @@ fn event_to_json(event: &crate::event::Event) -> serde_json::Value {
                 "gpu_mem_freq": m.gpu.mem_freq_mhz,
                 "gpu_temp2": m.gpu.gpu_temp_celsius,
                 "gpu_power": m.gpu.power_watts,
-                "fans": m.fans.iter().map(|f| serde_json::json!({
+                "fans": m.fans.as_ref().map(|fan_list| fan_list.iter().map(|f| serde_json::json!({
                     "label": f.label,
                     "rpm": f.rpm,
-                })).collect::<Vec<_>>(),
-            })
+                })).collect::<Vec<_>>()).unwrap_or_default(),
+            });
+
+            json_value
         }
         Event::ProcessLifecycle(p) => serde_json::json!({
             "type": "ProcessLifecycle",
-            "timestamp": p.ts.format(&Rfc3339).unwrap_or_default(),
+            "timestamp": p.ts.unix_timestamp_nanos() / 1_000_000,
             "kind": format!("{:?}", p.kind),
             "pid": p.pid,
             "name": p.name,
         }),
         Event::SecurityEvent(s) => serde_json::json!({
             "type": "SecurityEvent",
-            "timestamp": s.ts.format(&Rfc3339).unwrap_or_default(),
+            "timestamp": s.ts.unix_timestamp_nanos() / 1_000_000,
             "kind": format!("{:?}", s.kind),
             "user": s.user,
             "source_ip": s.source_ip,
@@ -223,14 +212,14 @@ fn event_to_json(event: &crate::event::Event) -> serde_json::Value {
         }),
         Event::Anomaly(a) => serde_json::json!({
             "type": "Anomaly",
-            "timestamp": a.ts.format(&Rfc3339).unwrap_or_default(),
+            "timestamp": a.ts.unix_timestamp_nanos() / 1_000_000,
             "severity": format!("{:?}", a.severity),
             "kind": format!("{:?}", a.kind),
             "message": a.message,
         }),
         Event::ProcessSnapshot(p) => serde_json::json!({
             "type": "ProcessSnapshot",
-            "timestamp": p.ts.format(&Rfc3339).unwrap_or_default(),
+            "timestamp": p.ts.unix_timestamp_nanos() / 1_000_000,
             "count": p.processes.len(),
             "total_processes": p.total_processes,
             "running_processes": p.running_processes,

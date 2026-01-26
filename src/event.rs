@@ -11,45 +11,55 @@ pub enum Event {
 }
 
 // System-wide metrics collected each interval
+// Fields marked Option<T> are collected less frequently (static/semi-static data)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemMetrics {
     pub ts: OffsetDateTime,
-    pub kernel_version: String,
-    pub cpu_model: String,
-    pub cpu_mhz: u32,
+
+    // Static fields (collected hourly or on change) - reduce storage by ~50-70%
+    pub kernel_version: Option<String>,  // Changes on kernel upgrade
+    pub cpu_model: Option<String>,        // Never changes
+    pub cpu_mhz: Option<u32>,             // Mostly static
+    pub mem_total_bytes: Option<u64>,     // Changes if RAM added/removed
+    pub swap_total_bytes: Option<u64>,    // Changes if swap reconfigured
+    pub disk_total_bytes: Option<u64>,    // Changes on disk resize
+
+    // Semi-static fields (collected every 5 minutes or on change)
+    pub filesystems: Option<Vec<FilesystemInfo>>,  // Mount points change infrequently
+    pub net_interface: Option<String>,             // Rarely changes
+    pub net_ip_address: Option<String>,            // Already was Option
+    pub net_gateway: Option<String>,               // Already was Option
+    pub net_dns: Option<String>,                   // Already was Option
+    pub fans: Option<Vec<FanReading>>,             // Fan config rarely changes
+    pub logged_in_users: Option<Vec<LoggedInUserInfo>>, // Emit on change
+
+    // Dynamic fields (collected every second)
     pub system_uptime_seconds: u64,
     pub cpu_usage_percent: f32,
     pub per_core_usage: Vec<f32>,
     pub mem_used_bytes: u64,
-    pub mem_total_bytes: u64,
+    pub mem_usage_percent: f32,  // Calculated using cached total
     pub swap_used_bytes: u64,
-    pub swap_total_bytes: u64,
+    pub swap_usage_percent: f32,  // Calculated using cached total
     pub load_avg_1m: f32,
     pub load_avg_5m: f32,
     pub load_avg_15m: f32,
     pub disk_read_bytes_per_sec: u64,
     pub disk_write_bytes_per_sec: u64,
     pub disk_used_bytes: u64,
-    pub disk_total_bytes: u64,
+    pub disk_usage_percent: f32,  // Calculated using cached total
     pub per_disk_metrics: Vec<PerDiskMetrics>,
-    pub filesystems: Vec<FilesystemInfo>,
     pub net_recv_bytes_per_sec: u64,
     pub net_send_bytes_per_sec: u64,
     pub net_recv_errors_per_sec: u64,
     pub net_send_errors_per_sec: u64,
     pub net_recv_drops_per_sec: u64,
     pub net_send_drops_per_sec: u64,
-    pub net_interface: String,
-    pub net_ip_address: Option<String>,
-    pub net_gateway: Option<String>,
-    pub net_dns: Option<String>,
     pub tcp_connections: u32,
     pub tcp_time_wait: u32,
     pub context_switches_per_sec: u64,
     pub temps: TemperatureReadings,
-    pub fans: Vec<FanReading>,
     pub gpu: GpuInfo,
-    pub logged_in_users: Vec<LoggedInUserInfo>,
 }
 
 // Logged in user info
