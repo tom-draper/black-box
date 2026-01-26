@@ -217,3 +217,16 @@ pub enum AnomalyKind {
     UnauthorizedAccess,
 }
 
+impl Event {
+    /// Get the timestamp from any event variant
+    pub fn timestamp(&self) -> OffsetDateTime {
+        match self {
+            Event::SystemMetrics(e) => e.ts,
+            Event::ProcessLifecycle(e) => e.ts,
+            Event::ProcessSnapshot(e) => e.ts,
+            Event::SecurityEvent(e) => e.ts,
+            Event::Anomaly(e) => e.ts,
+        }
+    }
+}
+

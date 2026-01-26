@@ -73,6 +73,73 @@ pub async fn api_playback_info(
     }
 }
 
+/// Get event density timeline (events per minute) for visualization
+pub async fn api_timeline(
+    reader: web::Data<Arc<IndexedReader>>,
+) -> HttpResponse {
+    if let Some((first_ns, last_ns)) = reader.get_time_range() {
+        // Read all events (this might be expensive for very large datasets)
+        match reader.read_time_range(Some(first_ns), Some(last_ns)) {
+            Ok(events) => {
+                // Bucket events by minute
+                let first_minute = (first_ns / 60_000_000_000) as i64; // Convert ns to minutes
+                let last_minute = (last_ns / 60_000_000_000) as i64;
+
+                let mut buckets = std::collections::HashMap::new();
+
+                // Count events per minute
+                for event in events.iter() {
+                    let ts_ns = event.timestamp().unix_timestamp_nanos();
+                    let minute = (ts_ns / 60_000_000_000) as i64;
+                    *buckets.entry(minute).or_insert(0u32) += 1;
+                }
+
+                // Build timeline array with all minutes (including empty ones for smooth visualization)
+                let mut timeline = Vec::new();
+                let total_minutes = (last_minute - first_minute + 1) as usize;
+
+                // If we have too many minutes (>500), downsample to keep response size reasonable
+                let step = if total_minutes > 500 {
+                    (total_minutes / 500).max(1)
+                } else {
+                    1
+                };
+
+                for minute in (first_minute..=last_minute).step_by(step) {
+                    // When downsampling, aggregate counts for the step range
+                    let mut count = 0u32;
+                    for m in minute..(minute + step as i64).min(last_minute + 1) {
+                        count += buckets.get(&m).copied().unwrap_or(0);
+                    }
+
+                    timeline.push(serde_json::json!({
+                        "timestamp": minute * 60, // Convert back to seconds
+                        "count": count,
+                    }));
+                }
+
+                HttpResponse::Ok().json(serde_json::json!({
+                    "timeline": timeline,
+                    "first_timestamp": (first_ns / 1_000_000_000) as i64,
+                    "last_timestamp": (last_ns / 1_000_000_000) as i64,
+                }))
+            }
+            Err(e) => {
+                eprintln!("Failed to read timeline: {}", e);
+                HttpResponse::InternalServerError().json(serde_json::json!({
+                    "error": "Failed to read timeline"
+                }))
+            }
+        }
+    } else {
+        HttpResponse::Ok().json(serde_json::json!({
+            "timeline": [],
+            "first_timestamp": null,
+            "last_timestamp": null,
+        }))
+    }
+}
+
 /// Get events in a time range for playback
 pub async fn api_playback_events(
     reader: web::Data<Arc<IndexedReader>>,

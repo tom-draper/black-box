@@ -57,6 +57,7 @@ pub async fn start_server(
             .route("/api/playback/info", web::get().to(playback::api_playback_info))
             .route("/api/playback/events", web::get().to(playback::api_playback_events))
             .route("/api/initial-state", web::get().to(playback::api_initial_state))
+            .route("/api/timeline", web::get().to(playback::api_timeline))
             .route("/ws", web::get().to(websocket::ws_handler))
             .route("/health", web::get().to(health::health_check))
     })

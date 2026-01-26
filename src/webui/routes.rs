@@ -53,6 +53,9 @@ pub async fn index() -> HttpResponse {
                 <span id="timeRange" class="text-gray-400 text-xs"></span>
             </div>
         </div>
+        <div class="px-5 pb-3">
+            <canvas id="timelineChart" width="280" height="48" class="cursor-pointer bg-gray-50 rounded" style="display:none;" title="Click to jump to time"></canvas>
+        </div>
     </div>
     <div id="mainContent" style="display:none;">
     <div class="flex justify-between items-center">
@@ -242,6 +245,44 @@ let cachedKernel = null;
 let cachedCpuModel = null;
 let cachedCpuMhz = null;
 
+// Previous values cache for change detection (optimization to avoid unnecessary DOM updates)
+const prevValues = {};
+
+// Helper function to update DOM element only if value changed
+function updateIfChanged(id, value, updateFn) {
+    if (prevValues[id] !== value) {
+        prevValues[id] = value;
+        updateFn(value);
+    }
+}
+
+// Helper function to update text content only if changed
+function updateTextIfChanged(id, text) {
+    const key = `${id}_text`;
+    if (prevValues[key] !== text) {
+        prevValues[key] = text;
+        document.getElementById(id).textContent = text;
+    }
+}
+
+// Helper function to update innerHTML only if changed
+function updateHtmlIfChanged(id, html) {
+    const key = `${id}_html`;
+    if (prevValues[key] !== html) {
+        prevValues[key] = html;
+        document.getElementById(id).innerHTML = html;
+    }
+}
+
+// Helper function to update style only if changed
+function updateStyleIfChanged(id, prop, value) {
+    const key = `${id}_style_${prop}`;
+    if (prevValues[key] !== value) {
+        prevValues[key] = value;
+        document.getElementById(id).style[prop] = value;
+    }
+}
+
 // Time-travel state
 let playbackMode = false; // false = live, true = historical playback
 let currentTimestamp = null; // Current playback timestamp (seconds)
@@ -304,6 +345,143 @@ async function fetchInitialState() {
         console.error('Failed to load initial state:', e);
     }
 }
+
+// Timeline visualization
+let timelineData = null;
+
+async function fetchTimeline() {
+    try {
+        const resp = await fetch('/api/timeline');
+        const data = await resp.json();
+        timelineData = data;
+
+        if(data.timeline && data.timeline.length > 0) {
+            document.getElementById('timelineChart').style.display = 'block';
+            drawTimeline();
+        }
+    } catch(e) {
+        console.error('Failed to load timeline:', e);
+    }
+}
+
+function drawTimeline() {
+    if(!timelineData || !timelineData.timeline || timelineData.timeline.length === 0) return;
+
+    const canvas = document.getElementById('timelineChart');
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+
+    // Clear canvas and draw background
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = 'rgba(249, 250, 251, 1)'; // gray-50
+    ctx.fillRect(0, 0, width, height);
+
+    const timeline = timelineData.timeline;
+    const firstTs = timelineData.first_timestamp;
+    const lastTs = timelineData.last_timestamp;
+    const timeRange = lastTs - firstTs;
+
+    if(timeRange <= 0 || timeline.length === 0) return;
+
+    // Find max count for scaling
+    const maxCount = Math.max(...timeline.map(p => p.count), 1);
+
+    // Map data points to canvas coordinates
+    const points = timeline.map(p => {
+        const x = ((p.timestamp - firstTs) / timeRange) * width;
+        const y = height - ((p.count / maxCount) * (height - 8)) - 4; // Leave 4px padding at top/bottom
+        return { x, y, timestamp: p.timestamp };
+    });
+
+    // Draw smooth curve using cubic Bezier curves
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(156, 163, 175, 0.8)'; // gray-400
+    ctx.lineWidth = 1.5;
+
+    if(points.length > 0) {
+        ctx.moveTo(points[0].x, points[0].y);
+
+        if(points.length === 2) {
+            // Just draw a line for 2 points
+            ctx.lineTo(points[1].x, points[1].y);
+        } else if(points.length > 2) {
+            // Use cubic Bezier curves for smooth interpolation
+            for(let i = 0; i < points.length - 1; i++) {
+                const curr = points[i];
+                const next = points[i + 1];
+
+                // Calculate control points for smooth curve
+                // Use neighboring points to determine tangent direction
+                const prev = i > 0 ? points[i - 1] : curr;
+                const after = i < points.length - 2 ? points[i + 2] : next;
+
+                const cp1x = curr.x + (next.x - prev.x) / 6;
+                const cp1y = curr.y + (next.y - prev.y) / 6;
+                const cp2x = next.x - (after.x - curr.x) / 6;
+                const cp2y = next.y - (after.y - curr.y) / 6;
+
+                ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, next.x, next.y);
+            }
+        }
+    }
+
+    ctx.stroke();
+
+    // Draw vertical line for current playback position
+    if(playbackMode && currentTimestamp) {
+        const currentX = ((currentTimestamp - firstTs) / timeRange) * width;
+        if(currentX >= 0 && currentX <= width) {
+            ctx.beginPath();
+            ctx.strokeStyle = 'rgba(59, 130, 246, 0.8)'; // blue-500
+            ctx.lineWidth = 1.5;
+            ctx.moveTo(currentX, 0);
+            ctx.lineTo(currentX, height);
+            ctx.stroke();
+        }
+    }
+}
+
+// Handle timeline click to jump to timestamp
+document.getElementById('timelineChart').addEventListener('click', (e) => {
+    if(!timelineData || !timelineData.timeline || timelineData.timeline.length === 0) return;
+
+    const canvas = document.getElementById('timelineChart');
+    const rect = canvas.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const width = canvas.width;
+
+    const firstTs = timelineData.first_timestamp;
+    const lastTs = timelineData.last_timestamp;
+    const timeRange = lastTs - firstTs;
+
+    // Calculate timestamp from click position
+    const clickRatio = clickX / width;
+    const targetTimestamp = firstTs + (clickRatio * timeRange);
+
+    console.log('Timeline click:', targetTimestamp);
+    jumpToTimestamp(Math.floor(targetTimestamp));
+});
+
+// Handle timeline hover to show timestamp
+document.getElementById('timelineChart').addEventListener('mousemove', (e) => {
+    if(!timelineData || !timelineData.timeline || timelineData.timeline.length === 0) return;
+
+    const canvas = document.getElementById('timelineChart');
+    const rect = canvas.getBoundingClientRect();
+    const hoverX = e.clientX - rect.left;
+    const width = canvas.width;
+
+    const firstTs = timelineData.first_timestamp;
+    const lastTs = timelineData.last_timestamp;
+    const timeRange = lastTs - firstTs;
+
+    const hoverRatio = hoverX / width;
+    const hoverTimestamp = firstTs + (hoverRatio * timeRange);
+
+    const date = new Date(hoverTimestamp * 1000);
+    canvas.title = `Jump to ${date.toLocaleString()}`;
+});
 
 // Fetch available time range on load
 async function fetchPlaybackInfo() {
@@ -459,6 +637,9 @@ async function jumpToTimestamp(timestamp) {
     } catch(e) {
         console.error('Failed to load historical data:', e);
     }
+
+    // Update timeline visualization
+    drawTimeline();
 }
 
 // Rewind button
@@ -606,6 +787,9 @@ function goLive() {
 
     console.log('After: isPaused=', isPaused, 'playbackMode=', playbackMode);
     console.log('=== LIVE MODE ACTIVE ===');
+
+    // Update timeline visualization (clears vertical line)
+    drawTimeline();
 }
 
 // Time display click - either go live or open picker
@@ -655,6 +839,7 @@ document.getElementById('timePicker').addEventListener('blur', (e) => {
 // Fetch playback info and initial state on startup
 fetchPlaybackInfo();
 fetchInitialState();
+fetchTimeline();
 
 const fmt = b => {
     if(!b) return '0B';
@@ -708,10 +893,12 @@ function updateCoreBar(id, pct, container, coreNum){
         el = document.getElementById(id);
     }
     const color = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-yellow-500' : 'bg-green-500';
-    el.style.width = Math.min(100, pct) + '%';
-    el.className = `block h-full transition-all duration-300 ${color}`;
-    el.style.borderRadius = '1px';
-    document.getElementById('pct_'+id).textContent = pct.toFixed(1) + '%';
+    const widthValue = Math.min(100, pct) + '%';
+    updateStyleIfChanged(id, 'width', widthValue);
+    updateIfChanged(`${id}_class`, color, () => {
+        el.className = `block h-full transition-all duration-300 ${color}`;
+    });
+    updateTextIfChanged(`pct_${id}`, pct.toFixed(1) + '%');
 }
 
 function updateRamBar(pct, used, container){
@@ -727,11 +914,13 @@ function updateRamBar(pct, used, container){
         el = document.getElementById('ramBar');
     }
     const color = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-yellow-500' : 'bg-green-500';
-    el.style.width = Math.min(100, pct) + '%';
-    el.className = `block h-full transition-all duration-300 ${color}`;
-    el.style.borderRadius = '1px';
-    document.getElementById('ramLabel').textContent = `RAM Used: ${fmt(used)}`;
-    document.getElementById('ramPct').textContent = pct.toFixed(1) + '%';
+    const widthValue = Math.min(100, pct) + '%';
+    updateStyleIfChanged('ramBar', 'width', widthValue);
+    updateIfChanged('ramBar_class', color, () => {
+        el.className = `block h-full transition-all duration-300 ${color}`;
+    });
+    updateTextIfChanged('ramLabel', `RAM Used: ${fmt(used)}`);
+    updateTextIfChanged('ramPct', pct.toFixed(1) + '%');
 }
 
 function getUsageColor(pct){
@@ -840,13 +1029,15 @@ function updateDiskBar(id, pct, container, mount, used, total){
         el = document.getElementById(id);
     }
     const color = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-yellow-500' : 'bg-green-500';
-    el.style.width = Math.min(100, pct) + '%';
-    el.className = `block h-full transition-all duration-300 ${color}`;
-    el.style.borderRadius = '1px';
-    document.getElementById('lbl_'+id).textContent = mount;
-    document.getElementById('pct_'+id).textContent = pct + '%';
-    document.getElementById('used_'+id).textContent = fmt(used);
-    document.getElementById('total_'+id).textContent = fmt(total);
+    const widthValue = Math.min(100, pct) + '%';
+    updateStyleIfChanged(id, 'width', widthValue);
+    updateIfChanged(`${id}_class`, color, () => {
+        el.className = `block h-full transition-all duration-300 ${color}`;
+    });
+    updateTextIfChanged(`lbl_${id}`, mount);
+    updateTextIfChanged(`pct_${id}`, pct + '%');
+    updateTextIfChanged(`used_${id}`, fmt(used));
+    updateTextIfChanged(`total_${id}`, fmt(total));
 }
 
 function updateDiskIo(disks){
@@ -855,14 +1046,18 @@ function updateDiskIo(disks){
     const tbody = document.getElementById('diskIoTableBody');
 
     if(!disks || disks.length === 0){
-        section.style.display = 'none';
-        table.style.display = 'none';
-        tbody.innerHTML = '';
+        updateStyleIfChanged('diskIoSection', 'display', 'none');
+        updateStyleIfChanged('diskIoTable', 'display', 'none');
+        if(prevValues['diskIoTableBody_cleared'] !== true) {
+            prevValues['diskIoTableBody_cleared'] = true;
+            tbody.innerHTML = '';
+        }
         return;
     }
 
-    section.style.display = 'flex';
-    table.style.display = 'table';
+    updateStyleIfChanged('diskIoSection', 'display', 'flex');
+    updateStyleIfChanged('diskIoTable', 'display', 'table');
+    prevValues['diskIoTableBody_cleared'] = false;
 
     // Max throughput for scaling (100 MB/s = 100%)
     const maxThroughput = 100 * 1024 * 1024;
@@ -901,11 +1096,13 @@ function updateDiskIo(disks){
             `;
             tbody.appendChild(tr);
         } else {
-            // Update existing row
-            document.getElementById(`diskio_read_${i}`).textContent = fmt(disk.read) + '/s';
-            document.getElementById(`diskio_write_${i}`).textContent = fmt(disk.write) + '/s';
+            // Update existing row (only if changed)
+            const readText = fmt(disk.read) + '/s';
+            const writeText = fmt(disk.write) + '/s';
             const tempText = disk.temp ? disk.temp.toFixed(0) + '°C' : '--';
-            document.getElementById(`diskio_temp_${i}`).textContent = tempText;
+            updateTextIfChanged(`diskio_read_${i}`, readText);
+            updateTextIfChanged(`diskio_write_${i}`, writeText);
+            updateTextIfChanged(`diskio_temp_${i}`, tempText);
         }
 
         // Draw chart for this disk
@@ -939,37 +1136,42 @@ function render(){
         const eventDate = new Date(e.timestamp);
         console.log('render() - e.timestamp:', e.timestamp, 'parsed:', eventDate, 'playbackMode:', playbackMode);
         if(!isNaN(eventDate.getTime())) {
-            document.getElementById('datetime').textContent = formatDate(eventDate);
+            updateTextIfChanged('datetime', formatDate(eventDate));
         } else {
             // Fallback if timestamp parsing fails
             console.log('Timestamp parsing failed!');
-            document.getElementById('datetime').textContent = formatDate(new Date());
+            updateTextIfChanged('datetime', formatDate(new Date()));
         }
     } else {
         console.log('No e.timestamp found');
-        document.getElementById('datetime').textContent = formatDate(new Date());
+        updateTextIfChanged('datetime', formatDate(new Date()));
     }
-    document.getElementById('uptime').textContent = e.system_uptime_seconds ? `Uptime: ${formatUptime(e.system_uptime_seconds)}` : '';
+    const uptimeText = e.system_uptime_seconds ? `Uptime: ${formatUptime(e.system_uptime_seconds)}` : '';
+    updateTextIfChanged('uptime', uptimeText);
     updateConnectionStatus();
 
     const kernel = e.kernel ?? cachedKernel;
     const cpuModel = e.cpu_model ?? cachedCpuModel;
     const cpuMhz = e.cpu_mhz ?? cachedCpuMhz;
 
-    if(kernel) document.getElementById('kernelRow').textContent = `Linux Kernel: ${kernel}`;
-    if(cpuModel) document.getElementById('cpuDetailsRow').textContent = `CPU Details: ${cpuModel}${cpuMhz ? `, ${cpuMhz}MHz` : ''}`;
+    if(kernel) updateTextIfChanged('kernelRow', `Linux Kernel: ${kernel}`);
+    if(cpuModel) updateTextIfChanged('cpuDetailsRow', `CPU Details: ${cpuModel}${cpuMhz ? `, ${cpuMhz}MHz` : ''}`);
 
     if(e.cpu !== undefined){
         // Update CPU bar
         const cpuBar = document.getElementById('cpuBar');
         const cpuPct = document.getElementById('cpuPct');
         const color = e.cpu >= 90 ? 'bg-red-500' : e.cpu >= 70 ? 'bg-yellow-500' : 'bg-green-500';
-        cpuBar.style.width = Math.min(100, e.cpu) + '%';
-        cpuBar.className = `block h-full transition-all duration-300 ${color}`;
-        cpuBar.style.borderRadius = '1px';
-        cpuPct.textContent = e.cpu.toFixed(1) + '%';
+        const widthValue = Math.min(100, e.cpu) + '%';
+        updateStyleIfChanged('cpuBar', 'width', widthValue);
+        updateIfChanged('cpuBar_class', color, () => {
+            cpuBar.className = `block h-full transition-all duration-300 ${color}`;
+        });
+        updateTextIfChanged('cpuPct', e.cpu.toFixed(1) + '%');
 
-        document.getElementById('loadVal').textContent = `Load average: ${e.load?.toFixed(2) || '--'}% ${e.load5?.toFixed(2) || '--'}% ${e.load15?.toFixed(2) || '--'}%`;
+        const loadText = `Load average: ${e.load?.toFixed(2) || '--'}% ${e.load5?.toFixed(2) || '--'}% ${e.load15?.toFixed(2) || '--'}%`;
+        updateTextIfChanged('loadVal', loadText);
+
         // Update CPU history
         cpuHistory.push(e.cpu);
         if(cpuHistory.length > MAX_HISTORY) cpuHistory.shift();
@@ -991,7 +1193,8 @@ function render(){
         const memTotal = e.mem_total ?? cachedMemTotal ?? 0;
         updateRamBar(e.mem, e.mem_used, document.getElementById('ramUsed'));
         if(memTotal > 0) {
-            document.getElementById('ramAvail').textContent = `Available RAM: ${fmt(memTotal - e.mem_used)}`;
+            const availText = `Available RAM: ${fmt(memTotal - e.mem_used)}`;
+            updateTextIfChanged('ramAvail', availText);
         }
         // Update memory history
         memoryHistory.push(e.mem);
@@ -999,41 +1202,47 @@ function render(){
         updateMemoryChart();
     }
     if(e.cpu_temp){
-        const el = document.getElementById('cpuTemp');
         const color = e.cpu_temp >= 80 ? 'text-red-600' : e.cpu_temp >= 60 ? 'text-yellow-600' : 'text-green-600';
-        el.innerHTML = `CPU Temp <span class="${color}">${Math.round(e.cpu_temp)}°C</span>`;
+        const cpuTempHtml = `CPU Temp <span class="${color}">${Math.round(e.cpu_temp)}°C</span>`;
+        updateHtmlIfChanged('cpuTemp', cpuTempHtml);
     } else {
-        document.getElementById('cpuTemp').textContent = '';
+        updateTextIfChanged('cpuTemp', '');
     }
     if(e.mobo_temp){
-        const el = document.getElementById('moboTemp');
         const color = e.mobo_temp >= 80 ? 'text-red-600' : e.mobo_temp >= 60 ? 'text-yellow-600' : 'text-green-600';
-        el.innerHTML = `MB Temp <span class="${color}">${Math.round(e.mobo_temp)}°C</span>`;
+        const moboTempHtml = `MB Temp <span class="${color}">${Math.round(e.mobo_temp)}°C</span>`;
+        updateHtmlIfChanged('moboTemp', moboTempHtml);
     } else if(e.fans && e.fans.length > 0){
         const fan = e.fans[0];
-        document.getElementById('moboTemp').textContent = `${fan.label || 'Fan'} ${fan.rpm}RPM`;
+        const fanText = `${fan.label || 'Fan'} ${fan.rpm}RPM`;
+        updateTextIfChanged('moboTemp', fanText);
     } else {
-        document.getElementById('moboTemp').textContent = '';
+        updateTextIfChanged('moboTemp', '');
     }
     // Graphics section - only show if GPU data available
     const hasGpu = e.gpu_freq || e.gpu_temp2 || e.gpu_mem_freq || e.gpu_power;
-    document.getElementById('graphicsSection').style.display = hasGpu ? 'flex' : 'none';
-    document.getElementById('graphicsRow1').style.display = hasGpu ? 'flex' : 'none';
-    document.getElementById('graphicsRow2').style.display = hasGpu ? 'flex' : 'none';
+    const gpuDisplay = hasGpu ? 'flex' : 'none';
+    updateStyleIfChanged('graphicsSection', 'display', gpuDisplay);
+    updateStyleIfChanged('graphicsRow1', 'display', gpuDisplay);
+    updateStyleIfChanged('graphicsRow2', 'display', gpuDisplay);
     if(hasGpu){
-        document.getElementById('gpuFreq').textContent = e.gpu_freq ? `GPU Freq ${e.gpu_freq}MHz` : '';
+        const gpuFreqText = e.gpu_freq ? `GPU Freq ${e.gpu_freq}MHz` : '';
+        updateTextIfChanged('gpuFreq', gpuFreqText);
         if(e.gpu_temp2){
             const color = e.gpu_temp2 >= 80 ? 'text-red-600' : e.gpu_temp2 >= 60 ? 'text-yellow-600' : 'text-green-600';
-            document.getElementById('gpuTemp').innerHTML = `GPU Temp <span class="${color}">${Math.round(e.gpu_temp2)}°C</span>`;
+            const gpuTempHtml = `GPU Temp <span class="${color}">${Math.round(e.gpu_temp2)}°C</span>`;
+            updateHtmlIfChanged('gpuTemp', gpuTempHtml);
         }
-        document.getElementById('memFreq').textContent = e.gpu_mem_freq ? `Mem Freq ${e.gpu_mem_freq}MHz` : '';
-        document.getElementById('imgQuality').textContent = e.gpu_power ? `Power ${e.gpu_power.toFixed(0)}W` : '';
+        const memFreqText = e.gpu_mem_freq ? `Mem Freq ${e.gpu_mem_freq}MHz` : '';
+        updateTextIfChanged('memFreq', memFreqText);
+        const powerText = e.gpu_power ? `Power ${e.gpu_power.toFixed(0)}W` : '';
+        updateTextIfChanged('imgQuality', powerText);
     }
     const netInterface = e.net_interface || 'net';
 
-    document.getElementById('netName').textContent = `${netInterface}:`;
-    document.getElementById('netSpeedDown').textContent = `Down: ${fmtRate(e.net_recv || 0)}`;
-    document.getElementById('netSpeedUp').textContent = `Up: ${fmtRate(e.net_send || 0)}`;
+    updateTextIfChanged('netName', `${netInterface}:`);
+    updateTextIfChanged('netSpeedDown', `Down: ${fmtRate(e.net_recv || 0)}`);
+    updateTextIfChanged('netSpeedUp', `Up: ${fmtRate(e.net_send || 0)}`);
 
     // Update network history
     netDownHistory.push(e.net_recv || 0);
@@ -1055,17 +1264,19 @@ function render(){
     const rxColor = (rxErrors > 0 || rxDrops > 0) ? 'text-red-600' : 'text-gray-500';
     const txColor = (txErrors > 0 || txDrops > 0) ? 'text-red-600' : 'text-gray-500';
 
-    const rxEl = document.getElementById('netRxStats');
-    const txEl = document.getElementById('netTxStats');
-    rxEl.textContent = rxText;
-    txEl.textContent = txText;
-    rxEl.className = `flex-1 ${rxColor}`;
-    txEl.className = `flex-1 ${txColor}`;
+    updateTextIfChanged('netRxStats', rxText);
+    updateTextIfChanged('netTxStats', txText);
+    updateIfChanged('netRxStats_class', rxColor, () => {
+        document.getElementById('netRxStats').className = `flex-1 ${rxColor}`;
+    });
+    updateIfChanged('netTxStats_class', txColor, () => {
+        document.getElementById('netTxStats').className = `flex-1 ${txColor}`;
+    });
 
-    document.getElementById('netAddress').textContent = `Address: ${e.net_ip ?? cachedNetIp ?? '--'}`;
-    document.getElementById('netTcp').textContent = `TCP Connections: ${e.tcp || '--'}`;
-    document.getElementById('netGateway').textContent = `Gateway: ${e.net_gateway ?? cachedNetGateway ?? '--'}`;
-    document.getElementById('netDns').textContent = `DNS: ${e.net_dns ?? cachedNetDns ?? '--'}`;
+    updateTextIfChanged('netAddress', `Address: ${e.net_ip ?? cachedNetIp ?? '--'}`);
+    updateTextIfChanged('netTcp', `TCP Connections: ${e.tcp || '--'}`);
+    updateTextIfChanged('netGateway', `Gateway: ${e.net_gateway ?? cachedNetGateway ?? '--'}`);
+    updateTextIfChanged('netDns', `DNS: ${e.net_dns ?? cachedNetDns ?? '--'}`);
 
     // Storage section - use cached filesystems if not in current event
     const filesystems = e.filesystems || cachedFilesystems;
@@ -1079,26 +1290,48 @@ function render(){
 
     // Users section
     const users = e.users || [];
-    document.getElementById('usersSection').style.display = users.length > 0 ? 'flex' : 'none';
-    document.getElementById('userCount').textContent = users.length > 0 ? `${users.length} logged in` : '';
-    const usersContainer = document.getElementById('usersContainer');
-    usersContainer.innerHTML = '';
-    users.forEach(u => {
-        const isRemote = u.remote_host && u.remote_host !== '';
-        const div = document.createElement('div');
-        div.className = 'text-gray-500 flex justify-between';
-        div.innerHTML = `<span>${u.username} <span class="text-gray-400">(${u.terminal})</span></span>${isRemote ? `<span class="text-gray-400">from ${u.remote_host}</span>` : ''}`;
-        usersContainer.appendChild(div);
-    });
+    const usersDisplay = users.length > 0 ? 'flex' : 'none';
+    updateStyleIfChanged('usersSection', 'display', usersDisplay);
+    const userCountText = users.length > 0 ? `${users.length} logged in` : '';
+    updateTextIfChanged('userCount', userCountText);
+
+    // Only update users container if the list actually changed
+    const usersKey = JSON.stringify(users);
+    if(prevValues['usersContainer_data'] !== usersKey) {
+        prevValues['usersContainer_data'] = usersKey;
+        const usersContainer = document.getElementById('usersContainer');
+        usersContainer.innerHTML = '';
+        users.forEach(u => {
+            const isRemote = u.remote_host && u.remote_host !== '';
+            const div = document.createElement('div');
+            div.className = 'text-gray-500 flex justify-between';
+            div.innerHTML = `<span>${u.username} <span class="text-gray-400">(${u.terminal})</span></span>${isRemote ? `<span class="text-gray-400">from ${u.remote_host}</span>` : ''}`;
+            usersContainer.appendChild(div);
+        });
+    }
 }
 
 function updateProcs(event){
-    document.getElementById('procCount').textContent = `${event.total_processes || 0} total ${event.running_processes || 0} running`;
+    const procCountText = `${event.total_processes || 0} total ${event.running_processes || 0} running`;
+    updateTextIfChanged('procCount', procCountText);
+
     const memTotal = lastStats?.mem_total || 0;
     const topCpu = (event.processes || []).slice().sort((a,b) => b.cpu_percent - a.cpu_percent).slice(0,5);
     const topMem = (event.processes || []).slice().sort((a,b) => b.mem_bytes - a.mem_bytes).slice(0,5);
-    updateProcTable('topCpuTable', topCpu, memTotal);
-    updateProcTable('topMemTable', topMem, memTotal);
+
+    // Only update tables if process lists actually changed
+    const topCpuKey = JSON.stringify(topCpu.map(p => `${p.pid}_${p.cpu_percent}`));
+    const topMemKey = JSON.stringify(topMem.map(p => `${p.pid}_${p.mem_bytes}`));
+
+    if(prevValues['topCpuTable_data'] !== topCpuKey) {
+        prevValues['topCpuTable_data'] = topCpuKey;
+        updateProcTable('topCpuTable', topCpu, memTotal);
+    }
+
+    if(prevValues['topMemTable_data'] !== topMemKey) {
+        prevValues['topMemTable_data'] = topMemKey;
+        updateProcTable('topMemTable', topMem, memTotal);
+    }
 }
 
 function updateConnectionStatus(){
