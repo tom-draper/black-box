@@ -16,6 +16,32 @@ pub struct PlaybackQuery {
     limit: Option<usize>,
 }
 
+/// Get the most recent complete SystemMetrics (with static/semi-static fields) for page initialization
+pub async fn api_initial_state(
+    reader: web::Data<Arc<IndexedReader>>,
+) -> HttpResponse {
+    // Look back up to 5 minutes to find a complete SystemMetrics event
+    let now_ns = OffsetDateTime::now_utc().unix_timestamp_nanos();
+    let lookback_ns = now_ns - (5 * 60 * 1_000_000_000i128); // 5 minutes
+
+    match reader.read_time_range(Some(lookback_ns), Some(now_ns)) {
+        Ok(events) => {
+            // Find the most recent SystemMetrics with filesystems
+            for event in events.iter().rev() {
+                if let Event::SystemMetrics(m) = event {
+                    if m.filesystems.is_some() {
+                        // Found a complete event, return it formatted
+                        return HttpResponse::Ok().json(format_event_for_api(event));
+                    }
+                }
+            }
+            // No complete event found
+            HttpResponse::Ok().json(serde_json::json!({}))
+        }
+        Err(_) => HttpResponse::Ok().json(serde_json::json!({})),
+    }
+}
+
 /// Get time range metadata
 pub async fn api_playback_info(
     reader: web::Data<Arc<IndexedReader>>,

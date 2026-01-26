@@ -235,6 +235,12 @@ let cachedMemTotal = null;
 let cachedSwapTotal = null;
 let cachedDiskTotal = null;
 let cachedFilesystems = [];
+let cachedNetIp = null;
+let cachedNetGateway = null;
+let cachedNetDns = null;
+let cachedKernel = null;
+let cachedCpuModel = null;
+let cachedCpuMhz = null;
 
 // Time-travel state
 let playbackMode = false; // false = live, true = historical playback
@@ -243,6 +249,61 @@ let firstTimestamp = null; // Earliest available data
 let lastTimestamp = null; // Latest available data
 const REWIND_STEP = 60; // 1 minute
 let playbackInterval = null; // Auto-playback timer
+
+// Fetch the most recent complete system state on load to initialize caches
+async function fetchInitialState() {
+    try {
+        const resp = await fetch('/api/initial-state');
+        const data = await resp.json();
+
+        if(data.type === 'SystemMetrics') {
+            // Populate caches with static/semi-static fields
+            if(data.mem_total != null) cachedMemTotal = data.mem_total;
+            if(data.swap_total != null) cachedSwapTotal = data.swap_total;
+            if(data.disk_total != null) cachedDiskTotal = data.disk_total;
+            if(data.net_ip != null) cachedNetIp = data.net_ip;
+            if(data.net_gateway != null) cachedNetGateway = data.net_gateway;
+            if(data.net_dns != null) cachedNetDns = data.net_dns;
+            if(data.kernel != null) cachedKernel = data.kernel;
+            if(data.cpu_model != null) cachedCpuModel = data.cpu_model;
+            if(data.cpu_mhz != null) cachedCpuMhz = data.cpu_mhz;
+
+            if(data.filesystems && data.filesystems.length > 0) {
+                cachedFilesystems = data.filesystems;
+                // Render filesystems immediately
+                const filesystems = data.filesystems;
+                filesystems.forEach((fs, i) => {
+                    const pct = fs.total > 0 ? Math.round((fs.used/fs.total)*100) : 0;
+                    updateDiskBar(`disk_${i}`, pct, document.getElementById('diskContainer'), fs.mount, fs.used, fs.total);
+                });
+            }
+
+            // Render network info immediately
+            if(cachedNetIp) document.getElementById('netAddress').textContent = `Address: ${cachedNetIp}`;
+            if(cachedNetGateway) document.getElementById('netGateway').textContent = `Gateway: ${cachedNetGateway}`;
+            if(cachedNetDns) document.getElementById('netDns').textContent = `DNS: ${cachedNetDns}`;
+
+            // Render kernel and CPU info immediately
+            if(cachedKernel) document.getElementById('kernelRow').textContent = `Linux Kernel: ${cachedKernel}`;
+            if(cachedCpuModel) document.getElementById('cpuDetailsRow').textContent = `CPU Details: ${cachedCpuModel}${cachedCpuMhz ? `, ${cachedCpuMhz}MHz` : ''}`;
+
+            console.log('Initial state loaded:', {
+                mem_total: cachedMemTotal,
+                swap_total: cachedSwapTotal,
+                disk_total: cachedDiskTotal,
+                filesystems: cachedFilesystems.length,
+                net_ip: cachedNetIp,
+                net_gateway: cachedNetGateway,
+                net_dns: cachedNetDns,
+                kernel: cachedKernel,
+                cpu_model: cachedCpuModel,
+                cpu_mhz: cachedCpuMhz
+            });
+        }
+    } catch(e) {
+        console.error('Failed to load initial state:', e);
+    }
+}
 
 // Fetch available time range on load
 async function fetchPlaybackInfo() {
@@ -374,6 +435,12 @@ async function jumpToTimestamp(timestamp) {
                     if(data.metadata.swap_total_bytes) cachedSwapTotal = data.metadata.swap_total_bytes;
                     if(data.metadata.disk_total_bytes) cachedDiskTotal = data.metadata.disk_total_bytes;
                     if(data.metadata.filesystems) cachedFilesystems = data.metadata.filesystems;
+                    if(data.metadata.net_ip_address) cachedNetIp = data.metadata.net_ip_address;
+                    if(data.metadata.net_gateway) cachedNetGateway = data.metadata.net_gateway;
+                    if(data.metadata.net_dns) cachedNetDns = data.metadata.net_dns;
+                    if(data.metadata.kernel_version) cachedKernel = data.metadata.kernel_version;
+                    if(data.metadata.cpu_model) cachedCpuModel = data.metadata.cpu_model;
+                    if(data.metadata.cpu_mhz) cachedCpuMhz = data.metadata.cpu_mhz;
                 }
 
                 lastStats = latestSystemMetrics;
@@ -585,8 +652,9 @@ document.getElementById('timePicker').addEventListener('blur', (e) => {
     setTimeout(() => e.target.style.display = 'none', 200);
 });
 
-// Fetch playback info on startup
+// Fetch playback info and initial state on startup
 fetchPlaybackInfo();
+fetchInitialState();
 
 const fmt = b => {
     if(!b) return '0B';
@@ -884,8 +952,12 @@ function render(){
     document.getElementById('uptime').textContent = e.system_uptime_seconds ? `Uptime: ${formatUptime(e.system_uptime_seconds)}` : '';
     updateConnectionStatus();
 
-    if(e.kernel) document.getElementById('kernelRow').textContent = `Linux Kernel: ${e.kernel}`;
-    if(e.cpu_model) document.getElementById('cpuDetailsRow').textContent = `CPU Details: ${e.cpu_model}${e.cpu_mhz ? `, ${e.cpu_mhz}MHz` : ''}`;
+    const kernel = e.kernel ?? cachedKernel;
+    const cpuModel = e.cpu_model ?? cachedCpuModel;
+    const cpuMhz = e.cpu_mhz ?? cachedCpuMhz;
+
+    if(kernel) document.getElementById('kernelRow').textContent = `Linux Kernel: ${kernel}`;
+    if(cpuModel) document.getElementById('cpuDetailsRow').textContent = `CPU Details: ${cpuModel}${cpuMhz ? `, ${cpuMhz}MHz` : ''}`;
 
     if(e.cpu !== undefined){
         // Update CPU bar
@@ -910,6 +982,9 @@ function render(){
     if(e.swap_total != null) cachedSwapTotal = e.swap_total;
     if(e.disk_total != null) cachedDiskTotal = e.disk_total;
     if(e.filesystems && e.filesystems.length > 0) cachedFilesystems = e.filesystems;
+    if(e.net_ip != null) cachedNetIp = e.net_ip;
+    if(e.net_gateway != null) cachedNetGateway = e.net_gateway;
+    if(e.net_dns != null) cachedNetDns = e.net_dns;
 
     // Memory display - percentage is always calculated by backend
     if(e.mem !== undefined && e.mem_used !== undefined){
@@ -987,10 +1062,10 @@ function render(){
     rxEl.className = `flex-1 ${rxColor}`;
     txEl.className = `flex-1 ${txColor}`;
 
-    document.getElementById('netAddress').textContent = `Address: ${e.net_ip || '--'}`;
+    document.getElementById('netAddress').textContent = `Address: ${e.net_ip ?? cachedNetIp ?? '--'}`;
     document.getElementById('netTcp').textContent = `TCP Connections: ${e.tcp || '--'}`;
-    document.getElementById('netGateway').textContent = `Gateway: ${e.net_gateway || '--'}`;
-    document.getElementById('netDns').textContent = `DNS: ${e.net_dns || '--'}`;
+    document.getElementById('netGateway').textContent = `Gateway: ${e.net_gateway ?? cachedNetGateway ?? '--'}`;
+    document.getElementById('netDns').textContent = `DNS: ${e.net_dns ?? cachedNetDns ?? '--'}`;
 
     // Storage section - use cached filesystems if not in current event
     const filesystems = e.filesystems || cachedFilesystems;
