@@ -48,69 +48,69 @@ pub async fn index() -> HttpResponse {
             </svg>
             <div class="border-l border-gray-300 h-4"></div>
             <div class="flex flex-col text-xs">
-                <input type="datetime-local" id="timePicker" class="px-1 py-0.5 border border-gray-300 rounded text-gray-700 text-xs" style="display:none" />
+                <input type="datetime-local" id="timePicker" class="px-1 py-0.5 border border-gray-300 rounded text-gray-700 text-xs" style="display:none" title="Select a specific date and time to view" />
                 <span id="timeDisplay" class="text-gray-500 cursor-pointer hover:text-gray-700" title="Click to select time, Shift+Click to go Live">Live</span>
-                <span id="timeRange" class="text-gray-400 text-xs"></span>
+                <span id="timeRange" class="text-gray-400 text-xs" title="Total time range of available historical data"></span>
             </div>
         </div>
         <div class="px-5 pb-3">
-            <canvas id="timelineChart" width="280" height="48" class="cursor-pointer bg-gray-50 rounded" style="display:none;" title="Click to jump to time"></canvas>
+            <canvas id="timelineChart" width="280" height="48" class="cursor-pointer bg-gray-50 rounded" style="display:none;" title="Event density timeline - Click to jump to any time. Blue line shows current playback position."></canvas>
         </div>
     </div>
     <div id="mainContent" style="display:none;">
     <div class="flex justify-between items-center">
-        <div class="text-gray-900 font-semibold">Black Box</div>
-        <span id="wsStatus" class="text-red-500 font-semibold" style="display:none;">Disconnected</span>
+        <div class="text-gray-900 font-semibold" title="Black Box - Linux System Monitor">Black Box</div>
+        <span id="wsStatus" class="text-red-500 font-semibold" style="display:none;" title="WebSocket connection to server lost">Disconnected</span>
     </div>
     <div class="flex justify-between text-gray-500">
-        <span id="datetime"></span>
-        <span id="uptime"></span>
+        <span id="datetime" title="Current system date and time"></span>
+        <span id="uptime" title="Time since system boot"></span>
     </div>
     <div></div>
     <div class="flex items-center text-gray-900 font-semibold">
         <span class="pr-2">System</span>
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
-    <div id="kernelRow" class="text-gray-500"></div>
-    <div id="cpuDetailsRow" class="text-gray-500"></div>
+    <div id="kernelRow" class="text-gray-500" title="Linux kernel version"></div>
+    <div id="cpuDetailsRow" class="text-gray-500" title="CPU model and frequency"></div>
     <div class="text-gray-500 flex items-center gap-4">
         <div class="flex-1 flex items-center gap-4">
-            <span class="w-10">CPU</span>
+            <span class="w-10" title="Overall CPU usage across all cores">CPU</span>
             <span class="relative flex-1 bg-gray-200" style="height:10px;border-radius:1px">
                 <span id="cpuBar" class="block h-full transition-all duration-300" style="width:0%;border-radius:1px"></span>
                 <span id="cpuPct" class="absolute inset-0 flex items-center justify-center text-gray-500/60 overflow-visible"></span>
             </span>
         </div>
-        <span id="loadVal" class="flex-1 text-right text-gray-500">Load average: --% --% --%</span>
+        <span id="loadVal" class="flex-1 text-right text-gray-500" title="System load average over 1, 5, and 15 minutes">Load average: --% --% --%</span>
     </div>
-    <div id="cpuCoresContainer" class="grid grid-cols-2 gap-x-4"></div>
+    <div id="cpuCoresContainer" class="grid grid-cols-2 gap-x-4" title="Per-core CPU usage"></div>
     <div class="flex items-center" style="height:19.5px;width:100%;">
-        <canvas id="cpuChart" style="height:10px;width:100%;"></canvas>
+        <canvas id="cpuChart" style="height:10px;width:100%;" title="CPU usage over last 60 seconds"></canvas>
     </div>
     <div class="flex justify-between gap-4">
-        <div class="text-gray-500 flex-1" id="ramUsed"></div>
-        <div class="text-gray-500 flex-1 text-right" id="cpuTemp"></div>
+        <div class="text-gray-500 flex-1" id="ramUsed" title="Amount of RAM currently in use"></div>
+        <div class="text-gray-500 flex-1 text-right" id="cpuTemp" title="CPU temperature sensor reading"></div>
     </div>
     <div class="flex justify-between gap-4">
-        <div class="text-gray-500 flex-1" id="ramAvail"></div>
-        <div class="text-gray-500 flex-1 text-right" id="moboTemp"></div>
+        <div class="text-gray-500 flex-1" id="ramAvail" title="Amount of RAM available for use"></div>
+        <div class="text-gray-500 flex-1 text-right" id="moboTemp" title="Motherboard temperature or fan speed"></div>
     </div>
     <div class="flex items-center" style="height:19.5px;width:100%;">
-        <canvas id="memoryChart" style="height:10px;width:100%;"></canvas>
+        <canvas id="memoryChart" style="height:10px;width:100%;" title="Memory usage over last 60 seconds"></canvas>
     </div>
 
     <div></div>
-    <div class="flex items-center text-gray-900 font-semibold" id="graphicsSection" style="display:none">
+    <div class="flex items-center text-gray-900 font-semibold" id="graphicsSection" style="display:none" title="GPU metrics (only shown if GPU detected)">
         <span class="pr-2">Graphics</span>
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
     <div class="flex justify-between gap-4" id="graphicsRow1" style="display:none">
-        <div class="text-gray-500" id="gpuFreq"></div>
-        <div class="text-gray-500 text-right" id="gpuTemp"></div>
+        <div class="text-gray-500" id="gpuFreq" title="GPU core frequency"></div>
+        <div class="text-gray-500 text-right" id="gpuTemp" title="GPU temperature"></div>
     </div>
     <div class="flex justify-between gap-4" id="graphicsRow2" style="display:none">
-        <div class="text-gray-500" id="memFreq"></div>
-        <div class="text-gray-500 text-right" id="imgQuality"></div>
+        <div class="text-gray-500" id="memFreq" title="GPU memory frequency"></div>
+        <div class="text-gray-500 text-right" id="imgQuality" title="GPU power consumption"></div>
     </div>
 
     <div></div>
@@ -121,50 +121,50 @@ pub async fn index() -> HttpResponse {
     <div class="text-gray-500 flex gap-4">
         <div class="flex-1">
             <div>
-                <span id="netName"></span>
-                <span id="netSpeedDown"></span>
+                <span id="netName" title="Primary network interface"></span>
+                <span id="netSpeedDown" title="Download speed in bytes per second"></span>
             </div>
             <div class="flex items-center" style="height:19.5px;width:100%;">
-                <canvas id="netDownChart" style="height:10px;width:100%;"></canvas>
+                <canvas id="netDownChart" style="height:10px;width:100%;" title="Download speed over last 60 seconds"></canvas>
             </div>
         </div>
         <div class="flex-1">
-            <div id="netSpeedUp"></div>
+            <div id="netSpeedUp" title="Upload speed in bytes per second"></div>
             <div class="flex items-center" style="height:19.5px;width:100%;">
-                <canvas id="netUpChart" style="height:10px;width:100%;"></canvas>
+                <canvas id="netUpChart" style="height:10px;width:100%;" title="Upload speed over last 60 seconds"></canvas>
             </div>
         </div>
     </div>
     <div class="text-gray-500 flex gap-4">
-        <span class="flex-1" id="netRxStats"></span>
-        <span class="flex-1" id="netTxStats"></span>
+        <span class="flex-1" id="netRxStats" title="Receive errors and dropped packets per second"></span>
+        <span class="flex-1" id="netTxStats" title="Transmit errors and dropped packets per second"></span>
     </div>
     <div class="grid grid-cols-2 gap-x-4 text-gray-500">
-        <div id="netAddress"></div>
-        <div id="netTcp"></div>
-        <div id="netGateway"></div>
-        <div id="netDns"></div>
+        <div id="netAddress" title="IP address of primary interface"></div>
+        <div id="netTcp" title="Number of active TCP connections"></div>
+        <div id="netGateway" title="Default gateway IP address"></div>
+        <div id="netDns" title="DNS server IP address"></div>
     </div>
 
     <div></div>
     <div class="flex items-center text-gray-900 font-semibold">
-        <span class="pr-2">Storage</span>
+        <span class="pr-2" title="Mounted filesystems and their usage">Storage</span>
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
-    <div id="diskContainer"></div>
+    <div id="diskContainer" title="Filesystem mount points with usage bars"></div>
 
     <div></div>
-    <div class="flex items-center text-gray-900 font-semibold" id="diskIoSection" style="display:none">
+    <div class="flex items-center text-gray-900 font-semibold" id="diskIoSection" style="display:none" title="Per-device disk I/O statistics">
         <span class="pr-2">Disk IO</span>
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
     <table class="w-full text-gray-500" id="diskIoTable" style="display:none">
         <thead><tr class="text-left text-gray-400">
-            <th class="font-normal" style="width:60px">Device</th>
-            <th class="font-normal text-right" style="width:80px">Read</th>
-            <th class="font-normal text-right" style="width:80px">Write</th>
-            <th class="font-normal text-right" style="width:50px">Temp</th>
-            <th style="width:128px"></th>
+            <th class="font-normal" style="width:60px" title="Block device name">Device</th>
+            <th class="font-normal text-right" style="width:80px" title="Read speed in bytes per second">Read</th>
+            <th class="font-normal text-right" style="width:80px" title="Write speed in bytes per second">Write</th>
+            <th class="font-normal text-right" style="width:50px" title="Disk temperature in Celsius">Temp</th>
+            <th style="width:128px" title="I/O activity over last 60 seconds"></th>
         </tr></thead>
         <tbody id="diskIoTableBody"></tbody>
     </table>
@@ -172,45 +172,45 @@ pub async fn index() -> HttpResponse {
     <div></div>
     <div class="flex items-center text-gray-900 font-semibold">
         <span class="pr-2">Processes</span>
-        <span id="procCount" class="text-gray-500 font-normal pr-2"></span>
+        <span id="procCount" class="text-gray-500 font-normal pr-2" title="Total process count and running count"></span>
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
-    <table class="w-full text-gray-500">
+    <table class="w-full text-gray-500" title="Top 5 processes by CPU usage">
         <thead><tr class="text-left text-gray-400">
             <th class="font-medium text-gray-700">Top CPU</th>
-            <th class="font-normal w-16">PID</th>
-            <th class="font-normal w-16 text-right">CPU%</th>
-            <th class="font-normal w-16 text-right">MEM%</th>
+            <th class="font-normal w-16" title="Process ID">PID</th>
+            <th class="font-normal w-16 text-right" title="CPU usage percentage">CPU%</th>
+            <th class="font-normal w-16 text-right" title="Memory usage percentage">MEM%</th>
         </tr></thead>
         <tbody id="topCpuTable"></tbody>
     </table>
-    <table class="w-full text-gray-500">
+    <table class="w-full text-gray-500" title="Top 5 processes by memory usage">
         <thead><tr class="text-left text-gray-400">
             <th class="font-medium text-gray-700">Top Memory</th>
-            <th class="font-normal w-16">PID</th>
-            <th class="font-normal w-16 text-right">CPU%</th>
-            <th class="font-normal w-16 text-right">MEM%</th>
+            <th class="font-normal w-16" title="Process ID">PID</th>
+            <th class="font-normal w-16 text-right" title="CPU usage percentage">CPU%</th>
+            <th class="font-normal w-16 text-right" title="Memory usage percentage">MEM%</th>
         </tr></thead>
         <tbody id="topMemTable"></tbody>
     </table>
 
     <div></div>
-    <div class="flex items-center text-gray-900 font-semibold" id="usersSection" style="display:none">
+    <div class="flex items-center text-gray-900 font-semibold" id="usersSection" style="display:none" title="Currently logged in users">
         <span class="pr-2">Users</span>
-        <span id="userCount" class="text-gray-500 font-normal pr-2"></span>
+        <span id="userCount" class="text-gray-500 font-normal pr-2" title="Number of logged in users"></span>
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
     <div id="usersContainer"></div>
 
     <div></div>
     <div class="flex items-center text-gray-900 font-semibold">
-        <span class="pr-2">Events</span>
+        <span class="pr-2" title="Real-time event log for processes, security events, and anomalies">Events</span>
         <div class="flex-1 flex items-center">
             <div class="flex-1 border-b border-gray-200"></div>
             <div class="flex gap-1 items-center font-normal ml-2">
-                <input type="text" id="filterInput" placeholder="Search..."
+                <input type="text" id="filterInput" placeholder="Search..." title="Filter events by text search"
                     class="px-2 py-0 border border-gray-300 rounded text-gray-700 focus:outline-none focus:ring-1 focus:ring-gray-400" />
-                <select id="eventType" class="px-2 py-0 border border-gray-300 rounded text-gray-700 focus:outline-none">
+                <select id="eventType" class="px-2 py-0 border border-gray-300 rounded text-gray-700 focus:outline-none" title="Filter by event type">
                     <option value="">All</option>
                     <option value="process">Process</option>
                     <option value="security">Security</option>
@@ -219,7 +219,7 @@ pub async fn index() -> HttpResponse {
             </div>
         </div>
     </div>
-    <div id="eventsContainer" class="font-mono max-h-96 p-2 overflow-y-auto bg-white border border-gray-200" style="font-size:12px"></div>
+    <div id="eventsContainer" class="font-mono max-h-96 p-2 overflow-y-auto bg-white border border-gray-200" style="font-size:12px" title="Scrollable event log (last 1000 events)"></div>
     </div>
 </div>
 
@@ -297,6 +297,8 @@ async function fetchInitialState() {
         const resp = await fetch('/api/initial-state');
         const data = await resp.json();
 
+        console.log('initial state', data);
+
         if(data.type === 'SystemMetrics') {
             // Populate caches with static/semi-static fields
             if(data.mem_total != null) cachedMemTotal = data.mem_total;
@@ -327,19 +329,6 @@ async function fetchInitialState() {
             // Render kernel and CPU info immediately
             if(cachedKernel) document.getElementById('kernelRow').textContent = `Linux Kernel: ${cachedKernel}`;
             if(cachedCpuModel) document.getElementById('cpuDetailsRow').textContent = `CPU Details: ${cachedCpuModel}${cachedCpuMhz ? `, ${cachedCpuMhz}MHz` : ''}`;
-
-            console.log('Initial state loaded:', {
-                mem_total: cachedMemTotal,
-                swap_total: cachedSwapTotal,
-                disk_total: cachedDiskTotal,
-                filesystems: cachedFilesystems.length,
-                net_ip: cachedNetIp,
-                net_gateway: cachedNetGateway,
-                net_dns: cachedNetDns,
-                kernel: cachedKernel,
-                cpu_model: cachedCpuModel,
-                cpu_mhz: cachedCpuMhz
-            });
         }
     } catch(e) {
         console.error('Failed to load initial state:', e);
@@ -459,7 +448,6 @@ document.getElementById('timelineChart').addEventListener('click', (e) => {
     const clickRatio = clickX / width;
     const targetTimestamp = firstTs + (clickRatio * timeRange);
 
-    console.log('Timeline click:', targetTimestamp);
     jumpToTimestamp(Math.floor(targetTimestamp));
 });
 
@@ -490,11 +478,6 @@ async function fetchPlaybackInfo() {
         const data = await resp.json();
         firstTimestamp = data.first_timestamp;
         lastTimestamp = data.last_timestamp;
-
-        console.log('Playback info:', data);
-        console.log('firstTimestamp:', firstTimestamp, new Date(firstTimestamp * 1000));
-        console.log('lastTimestamp:', lastTimestamp, new Date(lastTimestamp * 1000));
-        console.log('Current time:', Math.floor(Date.now() / 1000), new Date());
 
         if(firstTimestamp && lastTimestamp) {
             const duration = lastTimestamp - firstTimestamp;
@@ -543,17 +526,11 @@ async function jumpToTimestamp(timestamp) {
     // Fetch historical data for this time point (load 60 seconds for smooth charts)
     try {
         const url = `/api/playback/events?start=${timestamp - 60}&end=${timestamp + 1}&limit=200`;
-        console.log('Fetching historical data from:', url);
-        console.log('Requested time range:', new Date((timestamp - 60) * 1000), 'to', new Date((timestamp + 1) * 1000));
 
         const resp = await fetch(url);
         const data = await resp.json();
 
-        console.log('API returned', data.count, 'events', data.fallback ? '(fallback)' : '');
         if(data.events && data.events.length > 0) {
-            console.log('First event timestamp:', data.events[0].timestamp);
-            console.log('Last event timestamp:', data.events[data.events.length - 1].timestamp);
-
             // If we're using fallback data, show a visual indicator
             const timeDisplay = document.getElementById('timeDisplay');
             if(data.fallback) {
@@ -567,7 +544,6 @@ async function jumpToTimestamp(timestamp) {
             let latestProcessSnapshot = null;
 
             data.events.forEach(event => {
-                console.log('Processing event:', event.type, 'timestamp:', event.timestamp);
                 if(event.type === 'SystemMetrics') {
                     latestSystemMetrics = event;
 
@@ -585,26 +561,19 @@ async function jumpToTimestamp(timestamp) {
 
             // Trim history arrays to keep only the most recent MAX_HISTORY items
             if(cpuHistory.length > MAX_HISTORY) {
-                cpuHistory = cpuHistory.slice(-MAX_HISTORY);
-                memoryHistory = memoryHistory.slice(-MAX_HISTORY);
-                netDownHistory = netDownHistory.slice(-MAX_HISTORY);
-                netUpHistory = netUpHistory.slice(-MAX_HISTORY);
+                cpuHistory.splice(0, cpuHistory.length - MAX_HISTORY);
+                memoryHistory.splice(0, memoryHistory.length - MAX_HISTORY);
+                netDownHistory.splice(0, netDownHistory.length - MAX_HISTORY);
+                netUpHistory.splice(0, netUpHistory.length - MAX_HISTORY);
             }
-
-            console.log('Finished processing', data.events.length, 'events');
-            console.log('latestSystemMetrics:', latestSystemMetrics ? 'found' : 'NOT FOUND');
-            console.log('latestProcessSnapshot:', latestProcessSnapshot ? 'found' : 'NOT FOUND');
 
             // Render the latest state
             if(latestSystemMetrics) {
-                console.log('About to render with historical data, timestamp:', latestSystemMetrics.timestamp);
-
                 // Merge metadata (missing static/semi-static fields) into the latest metrics
                 if(data.metadata) {
                     for(const key in data.metadata) {
                         if(!latestSystemMetrics[key] || latestSystemMetrics[key] === null) {
                             latestSystemMetrics[key] = data.metadata[key];
-                            console.log('Merged metadata field:', key, '=', data.metadata[key]);
                         }
                     }
 
@@ -711,9 +680,6 @@ document.getElementById('pauseBtn').addEventListener('click', () => {
 
 // Play button - either resume playback or return to live
 document.getElementById('playBtn').addEventListener('click', async () => {
-    console.log('=== PLAY BUTTON CLICKED ===');
-    console.log('playbackMode:', playbackMode, 'currentTimestamp:', currentTimestamp);
-
     if(playbackMode && currentTimestamp) {
         console.log('Starting auto-playback from', new Date(currentTimestamp * 1000));
         // Resume playback: auto-advance through history
@@ -723,7 +689,6 @@ document.getElementById('playBtn').addEventListener('click', async () => {
 
         // Calculate a reasonable "live" threshold - within 10 seconds of now
         const liveThreshold = Math.floor(Date.now() / 1000) - 10;
-        console.log('Live threshold:', new Date(liveThreshold * 1000));
 
         // Auto-advance recursively (waits for each fetch to complete)
         const autoAdvance = async () => {
@@ -733,11 +698,8 @@ document.getElementById('playBtn').addEventListener('click', async () => {
                 return;
             }
 
-            console.log('Auto-tick: currentTimestamp=', currentTimestamp, 'liveThreshold=', liveThreshold, 'diff=', liveThreshold - currentTimestamp);
-
             if(currentTimestamp >= liveThreshold) {
                 // Reached live time, switch to live mode
-                console.log('*** REACHED LIVE THRESHOLD, SWITCHING TO LIVE ***');
                 goLive();
             } else {
                 currentTimestamp += 1;
@@ -759,15 +721,11 @@ document.getElementById('playBtn').addEventListener('click', async () => {
 
 // Return to live mode
 function goLive() {
-    console.log('=== GOING LIVE ===');
-    console.log('Before: isPaused=', isPaused, 'playbackMode=', playbackMode, 'currentTimestamp=', currentTimestamp);
-
     isPaused = false;
     playbackMode = false;
     currentTimestamp = null;
 
     if(playbackInterval) {
-        console.log('Clearing playback timeout');
         clearTimeout(playbackInterval);
         playbackInterval = null;
     }
@@ -784,9 +742,6 @@ function goLive() {
     netDownHistory.length = 0;
     netUpHistory.length = 0;
     Object.keys(diskIoHistoryMap).forEach(k => delete diskIoHistoryMap[k]);
-
-    console.log('After: isPaused=', isPaused, 'playbackMode=', playbackMode);
-    console.log('=== LIVE MODE ACTIVE ===');
 
     // Update timeline visualization (clears vertical line)
     drawTimeline();
@@ -1134,7 +1089,6 @@ function render(){
     // Always show the timestamp from the event data (whether live or historical)
     if(e.timestamp) {
         const eventDate = new Date(e.timestamp);
-        console.log('render() - e.timestamp:', e.timestamp, 'parsed:', eventDate, 'playbackMode:', playbackMode);
         if(!isNaN(eventDate.getTime())) {
             updateTextIfChanged('datetime', formatDate(eventDate));
         } else {
