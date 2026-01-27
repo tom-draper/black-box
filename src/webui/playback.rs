@@ -27,6 +27,8 @@ pub struct PlaybackQuery {
     timestamp: Option<i64>,  // Unix seconds - the playback position
     #[serde(rename = "count")]
     count: Option<usize>,    // Number of SystemMetrics to return (default: 60)
+    #[serde(rename = "before")]
+    before: Option<bool>,    // If true, fetch events BEFORE timestamp (for progressive loading)
 
     // Mode 2: Get all events in a time range
     // Usage: ?start=1234567890&end=1234567950&limit=200
@@ -86,15 +88,21 @@ pub async fn api_initial_state(
 }
 
 /// Mode 1: Fetch last N SystemMetrics before a timestamp
+/// If `before` is true, fetch events strictly BEFORE the timestamp (for progressive loading)
 async fn fetch_events_by_count(
     log_reader: &LogReader,
     indexed_reader: &Arc<IndexedReader>,
     timestamp: i64,
     target_count: usize,
+    before: bool,
 ) -> HttpResponse {
-    // Add 1 second to ensure we include events AT the requested timestamp
-    // (accounts for sub-second timing and collection overhead)
-    let end_ns = ((timestamp + 1) as i128) * 1_000_000_000;
+    // For normal mode: include events AT the requested timestamp
+    // For before mode: get events strictly before the timestamp
+    let end_ns = if before {
+        (timestamp as i128) * 1_000_000_000  // Strictly before
+    } else {
+        ((timestamp + 1) as i128) * 1_000_000_000  // Include events at timestamp
+    };
 
     // Determine if this is recent data (use LogReader) or historical (use IndexedReader)
     let now_ns = OffsetDateTime::now_utc().unix_timestamp_nanos();
@@ -303,6 +311,7 @@ pub async fn api_timeline(
 ///
 /// Two modes supported:
 /// 1. Count mode: ?timestamp=T&count=N - Get last N SystemMetrics before timestamp T
+///    Add &before=true to get events BEFORE timestamp (for progressive loading)
 /// 2. Range mode: ?start=S&end=E&limit=L - Get all events between S and E (up to L events)
 pub async fn api_playback_events(
     log_reader: web::Data<LogReader>,
@@ -312,7 +321,8 @@ pub async fn api_playback_events(
     // Mode 1: Count-based query (timestamp + count)
     if let Some(timestamp) = query.timestamp {
         let target_count = query.count.unwrap_or(60);
-        return fetch_events_by_count(&log_reader, &indexed_reader, timestamp, target_count).await;
+        let before = query.before.unwrap_or(false);
+        return fetch_events_by_count(&log_reader, &indexed_reader, timestamp, target_count, before).await;
     }
 
     // Mode 2: Range-based query (start + end)

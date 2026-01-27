@@ -1082,6 +1082,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
                         name: p.name.clone(),
                         cmdline: p.cmdline.clone(),
                         state: p.state.clone(),
+                        user: p.user.clone(),
                         cpu_percent,
                         mem_bytes: p.mem_bytes,
                         read_bytes: p.read_bytes,

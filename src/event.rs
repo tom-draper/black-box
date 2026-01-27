@@ -148,6 +148,7 @@ pub struct ProcessInfo {
     pub name: String,
     pub cmdline: String,
     pub state: String,
+    pub user: String,
     pub cpu_percent: f32,
     pub mem_bytes: u64,
     pub read_bytes: u64,

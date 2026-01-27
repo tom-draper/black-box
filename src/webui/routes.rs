@@ -12,13 +12,14 @@ pub struct EventQueryParams {
 }
 
 pub async fn index() -> HttpResponse {
-    let html = r#"
+    let html = r##"
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8">
     <title>Black Box</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#ffffff">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="icon" type="image/svg+xml"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect x='10' y='10' width='80' height='80' fill='black'/%3E%3C/svg%3E">
@@ -26,14 +27,13 @@ pub async fn index() -> HttpResponse {
         * { line-height: 1.5; }
         body { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; }
         .max-w { max-width: 32rem; }
-        .py-5vh { padding-top: 5vh; padding-bottom: 5vh; }
         th, td { padding: 0; }
-        .backdrop-blur-[1000px] { backdrop-filter: blur(1000px); }
+        .backdrop-blur-10xl { -webkit-backdrop-filter: blur(1000px); backdrop-filter: blur(1000px); }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
-<div class="max-w mx-auto px-4 py-5vh">
-    <div class="fixed w-full z-10 left-0 top-0 flex backdrop-blur-[1000px]">
+<div class="max-w mx-auto px-4 py-[50px]">
+    <div class="fixed w-full z-10 left-0 top-0 flex backdrop-blur-10xl">
         <div class="grow">
             <canvas id="timelineChart" class="w-full h-12 cursor-pointer rounded" style="opacity:0;background:transparent;transition:opacity 0.3s ease-in;" title="Event density timeline"></canvas>
         </div>
@@ -178,6 +178,7 @@ pub async fn index() -> HttpResponse {
     <table class="w-full text-gray-500" title="Top 5 processes by CPU usage">
         <thead><tr class="text-left text-gray-400">
             <th class="font-medium text-gray-700">Top CPU</th>
+            <th class="font-normal w-16" title="Process owner">User</th>
             <th class="font-normal w-16" title="Process ID">PID</th>
             <th class="font-normal w-16 text-right" title="CPU usage percentage">CPU%</th>
             <th class="font-normal w-16 text-right" title="Memory usage percentage">MEM%</th>
@@ -187,6 +188,7 @@ pub async fn index() -> HttpResponse {
     <table class="w-full text-gray-500" title="Top 5 processes by memory usage">
         <thead><tr class="text-left text-gray-400">
             <th class="font-medium text-gray-700">Top Memory</th>
+            <th class="font-normal w-16" title="Process owner">User</th>
             <th class="font-normal w-16" title="Process ID">PID</th>
             <th class="font-normal w-16 text-right" title="CPU usage percentage">CPU%</th>
             <th class="font-normal w-16 text-right" title="Memory usage percentage">MEM%</th>
@@ -487,7 +489,7 @@ document.getElementById('timelineChart').addEventListener('click', (e) => {
     const canvas = document.getElementById('timelineChart');
     const rect = canvas.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
-    const width = canvas.width;
+    const width = rect.width;
 
     const firstTs = timelineData.first_timestamp;
     const lastTs = timelineData.last_timestamp;
@@ -519,7 +521,7 @@ document.getElementById('timelineChart').addEventListener('mousemove', (e) => {
     const canvas = document.getElementById('timelineChart');
     const rect = canvas.getBoundingClientRect();
     const hoverX = e.clientX - rect.left;
-    const width = canvas.width;
+    const width = rect.width;
 
     const firstTs = timelineData.first_timestamp;
     const lastTs = timelineData.last_timestamp;
@@ -565,10 +567,11 @@ async function fetchPlaybackInfo() {
 }
 
 // Jump to a specific timestamp and load data
-async function jumpToTimestamp(timestamp) {
-    console.log('DEBUG: jump to', new Date(timestamp));
+// If incremental=true, don't clear buffers (used for auto-playback advancing 1 second at a time)
+async function jumpToTimestamp(timestamp, incremental = false) {
     if(!timestamp) return;
 
+    const prevTimestamp = currentTimestamp;
     currentTimestamp = timestamp;
     playbackMode = true;
 
@@ -578,12 +581,52 @@ async function jumpToTimestamp(timestamp) {
         '⏱ ' + dt.toLocaleTimeString();
     document.getElementById('timeDisplay').style.color = '#f59e0b'; // amber color
 
-    // Clear history buffers when entering playback mode
+    // For incremental updates (auto-playback), just fetch new data without clearing
+    if(incremental && prevTimestamp) {
+        // Fetch only the new second of data
+        try {
+            const url = `/api/playback/events?start=${prevTimestamp}&end=${timestamp}&limit=100`;
+            const resp = await fetch(url);
+            const data = await resp.json();
+
+            if(data.events && data.events.length > 0) {
+                data.events.forEach(event => {
+                    if(event.type === 'SystemMetrics') {
+                        lastStats = event;
+                        // Update charts incrementally
+                        cpuHistory.push(event.cpu || 0);
+                        memoryHistory.push(event.mem || 0);
+                        netDownHistory.push(event.net_recv || 0);
+                        netUpHistory.push(event.net_send || 0);
+                        if(cpuHistory.length > MAX_HISTORY) cpuHistory.shift();
+                        if(memoryHistory.length > MAX_HISTORY) memoryHistory.shift();
+                        if(netDownHistory.length > MAX_HISTORY) netDownHistory.shift();
+                        if(netUpHistory.length > MAX_HISTORY) netUpHistory.shift();
+                        render();
+                    } else if(event.type === 'ProcessSnapshot') {
+                        updateProcs(event);
+                    } else {
+                        addEventToLog(event);
+                    }
+                });
+            }
+        } catch(e) {
+            console.error('Failed to load incremental data:', e);
+        }
+        drawTimeline();
+        return;
+    }
+
+    // Full jump - clear everything and reload
     cpuHistory.length = 0;
     memoryHistory.length = 0;
     netDownHistory.length = 0;
     netUpHistory.length = 0;
     Object.keys(diskIoHistoryMap).forEach(k => delete diskIoHistoryMap[k]);
+
+    // Clear event buffer and container
+    eventBuffer.length = 0;
+    document.getElementById('eventsContainer').innerHTML = '';
 
     // Fetch historical data for this time point
     // Use new simplified API: just pass timestamp, server finds last 60 SystemMetrics
@@ -769,8 +812,8 @@ document.getElementById('playBtn').addEventListener('click', async () => {
                 // Reached live time, switch to live mode
                 goLive();
             } else {
-                currentTimestamp += 1;
-                await jumpToTimestamp(currentTimestamp);
+                const nextTimestamp = currentTimestamp + 1;
+                await jumpToTimestamp(nextTimestamp, true);  // incremental=true
 
                 // Schedule next tick
                 playbackInterval = setTimeout(autoAdvance, 1000);
@@ -813,6 +856,10 @@ function goLive() {
     netDownHistory.length = 0;
     netUpHistory.length = 0;
     Object.keys(diskIoHistoryMap).forEach(k => delete diskIoHistoryMap[k]);
+
+    // Clear event buffer and container
+    eventBuffer.length = 0;
+    document.getElementById('eventsContainer').innerHTML = '';
 
     // Update timeline visualization (clears vertical line)
     drawTimeline();
@@ -1085,9 +1132,6 @@ function updateDiskIo(disks){
     updateStyleIfChanged('diskIoTable', 'display', 'table');
     prevValues['diskIoTableBody_cleared'] = false;
 
-    // Max throughput for scaling (100 MB/s = 100%)
-    const maxThroughput = 100 * 1024 * 1024;
-
     // Update or create rows for each disk
     disks.forEach((disk, i) => {
         const deviceKey = disk.device;
@@ -1097,12 +1141,11 @@ function updateDiskIo(disks){
             diskIoHistoryMap[deviceKey] = [];
         }
 
-        // Calculate throughput percentage
+        // Store raw throughput bytes for dynamic scaling
         const totalThroughput = disk.read + disk.write;
-        const throughputPct = Math.min(100, (totalThroughput / maxThroughput) * 100);
 
         // Add to history
-        diskIoHistoryMap[deviceKey].push(throughputPct);
+        diskIoHistoryMap[deviceKey].push(totalThroughput);
         if(diskIoHistoryMap[deviceKey].length > MAX_HISTORY){
             diskIoHistoryMap[deviceKey].shift();
         }
@@ -1131,8 +1174,8 @@ function updateDiskIo(disks){
             updateTextIfChanged(`diskio_temp_${i}`, tempText);
         }
 
-        // Draw chart for this disk
-        drawChart(`diskio_chart_${i}`, diskIoHistoryMap[deviceKey]);
+        // Draw chart for this disk (use dynamic scaling like network charts)
+        drawNetworkChart(`diskio_chart_${i}`, diskIoHistoryMap[deviceKey]);
     });
 }
 
@@ -1142,7 +1185,7 @@ function updateProcTable(tableId, procs, memTotal){
     procs.forEach(p => {
         const memPct = memTotal > 0 ? (p.mem_bytes / memTotal) * 100 : 0;
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${p.name}</td><td>${p.pid}</td><td class="text-right">${p.cpu_percent.toFixed(1)}%</td><td class="text-right">${memPct.toFixed(1)}%</td>`;
+        tr.innerHTML = `<td>${p.name}</td><td class="text-gray-400">${p.user || '-'}</td><td>${p.pid}</td><td class="text-right">${p.cpu_percent.toFixed(1)}%</td><td class="text-right">${memPct.toFixed(1)}%</td>`;
         tbody.appendChild(tr);
     });
 }
@@ -1340,7 +1383,7 @@ function updateProcs(event){
     const procCountText = `${event.total_processes || 0} total ${event.running_processes || 0} running`;
     updateTextIfChanged('procCount', procCountText);
 
-    const memTotal = lastStats?.mem_total || 0;
+    const memTotal = cachedMemTotal || lastStats?.mem_total || 0;
     const topCpu = (event.processes || []).slice().sort((a,b) => b.cpu_percent - a.cpu_percent).slice(0,5);
     const topMem = (event.processes || []).slice().sort((a,b) => b.mem_bytes - a.mem_bytes).slice(0,5);
 
@@ -1410,18 +1453,21 @@ function connectWebSocket(){
 function addEventToLog(event){
     eventBuffer.push(event);
     if(eventBuffer.length > MAX_BUFFER) eventBuffer.shift();
+
     const filter = document.getElementById('filterInput').value.toLowerCase();
     const evType = document.getElementById('eventType').value;
     if(matchesFilter(event, filter, evType)){
         const container = document.getElementById('eventsContainer');
+        // Check if user is near bottom before adding (within 50px)
+        const wasNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
         const entry = createEventEntry(event);
         if(entry){
             // Add new events at the bottom (terminal-style)
             container.appendChild(entry);
             // Remove old events from the top
             if(container.children.length > 200) container.removeChild(container.firstChild);
-            // Auto-scroll to bottom to follow new events
-            container.scrollTop = container.scrollHeight;
+            // Only auto-scroll if user was already near bottom
+            if(wasNearBottom) container.scrollTop = container.scrollHeight;
         }
     }
 }
@@ -1437,7 +1483,7 @@ function matchesFilter(e, filter, evType){
 function createEventEntry(e){
     if(!e.type || e.type === 'ProcessSnapshot') return null;
     const div = document.createElement('div');
-    div.className = 'text-gray-600';
+    div.className = 'text-gray-600 break-all';
     // Format timestamp (now in milliseconds) to HH:MM:SS.mmm
     const time = e.timestamp ? new Date(e.timestamp).toISOString().substring(11,23) : '--:--:--';
     if(e.type === 'ProcessLifecycle'){
@@ -1460,16 +1506,21 @@ function createEventEntry(e){
 
 function reloadEvents(){
     const container = document.getElementById('eventsContainer');
-    container.innerHTML = '';
     const filter = document.getElementById('filterInput').value.toLowerCase();
     const evType = document.getElementById('eventType').value;
-    // Show events in chronological order (oldest to newest, like a terminal)
+
+    // Use document fragment for smoother batch update
+    const fragment = document.createDocumentFragment();
     eventBuffer.forEach(event => {
         if(matchesFilter(event, filter, evType)){
             const entry = createEventEntry(event);
-            if(entry) container.appendChild(entry);
+            if(entry) fragment.appendChild(entry);
         }
     });
+
+    // Replace content in one operation
+    container.innerHTML = '';
+    container.appendChild(fragment);
     // Scroll to bottom after reload
     container.scrollTop = container.scrollHeight;
 }
@@ -1495,10 +1546,11 @@ setInterval(() => {
         }
     }
 }, 1000);
+
 </script>
 </body>
 </html>
-"#;
+"##;
     HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html)
 }
 
@@ -1687,6 +1739,7 @@ fn event_to_json(
                     "name": proc.name,
                     "cmdline": proc.cmdline,
                     "state": proc.state,
+                    "user": proc.user,
                     "cpu_percent": proc.cpu_percent,
                     "mem_bytes": proc.mem_bytes,
                     "num_threads": proc.num_threads,

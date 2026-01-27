@@ -778,6 +778,7 @@ pub struct ProcessDetail {
     pub name: String,
     pub cmdline: String,
     pub state: String,
+    pub user: String,
     #[allow(dead_code)]
     pub cpu_time_jiffies: u64, // Total CPU time (user + system)
     pub mem_bytes: u64,
@@ -794,12 +795,14 @@ pub fn read_process_details(pid: u32) -> Result<ProcessDetail> {
     let io = read_process_io(pid).unwrap_or_default();
     let num_fds = count_process_fds(pid).unwrap_or(0);
     let num_threads = stat.num_threads;
+    let user = read_process_user(pid).unwrap_or_else(|_| String::from("unknown"));
 
     Ok(ProcessDetail {
         pid,
         name,
         cmdline,
         state: stat.state,
+        user,
         cpu_time_jiffies: stat.utime + stat.stime,
         mem_bytes: stat.rss_bytes,
         read_bytes: io.read_bytes,
@@ -833,6 +836,47 @@ fn read_process_cmdline(pid: u32) -> Result<String> {
     }
 
     Ok(cmdline)
+}
+
+fn read_process_user(pid: u32) -> Result<String> {
+    let status_path = format!("/proc/{}/status", pid);
+    let content = fs::read_to_string(&status_path).context("Failed to read status")?;
+
+    // Find Uid line: "Uid:\t1000\t1000\t1000\t1000"
+    for line in content.lines() {
+        if line.starts_with("Uid:") {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 2 {
+                if let Ok(uid) = parts[1].parse::<u32>() {
+                    return Ok(resolve_uid_to_username(uid));
+                }
+            }
+        }
+    }
+
+    Ok("unknown".to_string())
+}
+
+fn resolve_uid_to_username(uid: u32) -> String {
+    // Cache for UID -> username mappings
+    static UID_CACHE: OnceLock<std::collections::HashMap<u32, String>> = OnceLock::new();
+
+    let cache = UID_CACHE.get_or_init(|| {
+        let mut map = std::collections::HashMap::new();
+        if let Ok(content) = fs::read_to_string("/etc/passwd") {
+            for line in content.lines() {
+                let parts: Vec<&str> = line.split(':').collect();
+                if parts.len() >= 3 {
+                    if let Ok(id) = parts[2].parse::<u32>() {
+                        map.insert(id, parts[0].to_string());
+                    }
+                }
+            }
+        }
+        map
+    });
+
+    cache.get(&uid).cloned().unwrap_or_else(|| uid.to_string())
 }
 
 struct ProcessStat {
