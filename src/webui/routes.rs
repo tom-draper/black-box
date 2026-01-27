@@ -53,7 +53,7 @@ pub async fn index() -> HttpResponse {
             <div class="border-l border-gray-300 h-4"></div>
             <div class="flex flex-col text-xs">
                 <input type="datetime-local" id="timePicker" class="px-1 py-0.5 border border-gray-300 rounded text-gray-700 text-xs" style="display:none" title="Select a specific date and time to view" />
-                <span id="timeDisplay" class="text-gray-500 cursor-pointer hover:text-gray-700" title="Click to select time, Shift+Click to go Live">Live</span>
+                <span id="timeDisplay" class="cursor-pointer hover:text-gray-700" style="color:#ef4444;" title="Click to select time, Shift+Click to go Live">Disconnected</span>
                 <span id="timeRange" class="text-gray-400 text-xs whitespace-nowrap" title="Total time range of available historical data"></span>
             </div>
         </div>
@@ -61,7 +61,6 @@ pub async fn index() -> HttpResponse {
     <div id="mainContent" style="display:none;">
     <div class="flex justify-between items-center">
         <div class="text-gray-900 font-semibold" title="Black Box - Linux System Monitor">Black Box</div>
-        <span id="wsStatus" class="text-red-500 font-semibold" style="display:none;" title="WebSocket connection to server lost">Disconnected</span>
     </div>
     <div class="flex justify-between text-gray-500">
         <span id="datetime" title="Current system date and time"></span>
@@ -216,6 +215,7 @@ pub async fn index() -> HttpResponse {
                     <option value="process">Process</option>
                     <option value="security">Security</option>
                     <option value="anomaly">Anomaly</option>
+                    <option value="filesystem">File System</option>
                 </select>
             </div>
         </div>
@@ -799,9 +799,13 @@ function goLive() {
 
     document.getElementById('playBtn').style.display = 'none';
     document.getElementById('pauseBtn').style.display = 'block';
-    document.getElementById('timeDisplay').textContent = 'Live';
-    document.getElementById('timeDisplay').style.color = '';
-    document.getElementById('timeDisplay').title = 'Click to select time, Shift+Click to go Live';
+
+    // Show "Live" or "Disconnected" based on connection status
+    const isConnected = ws && ws.readyState === 1;
+    const timeDisplay = document.getElementById('timeDisplay');
+    timeDisplay.textContent = isConnected ? 'Live' : 'Disconnected';
+    timeDisplay.style.color = isConnected ? '#6b7280' : '#ef4444'; // gray-500 or red-500
+    timeDisplay.title = 'Click to select time, Shift+Click to go Live';
 
     // Clear history buffers so they rebuild from live data
     cpuHistory.length = 0;
@@ -1357,11 +1361,18 @@ function updateProcs(event){
 
 function updateConnectionStatus(){
     const isConnected = ws && ws.readyState === 1;
-    // Hide connection status in playback mode
-    if(playbackMode) {
-        document.getElementById('wsStatus').style.display = 'none';
-    } else {
-        document.getElementById('wsStatus').style.display = isConnected ? 'none' : 'inline';
+
+    // Update timeDisplay to show "Disconnected" when not connected (only in live mode)
+    if(!playbackMode) {
+        const timeDisplay = document.getElementById('timeDisplay');
+        if(!isConnected) {
+            timeDisplay.textContent = 'Disconnected';
+            timeDisplay.style.color = '#ef4444'; // red-500
+        } else if(timeDisplay.textContent === 'Disconnected') {
+            // Restore to "Live" when reconnected
+            timeDisplay.textContent = 'Live';
+            timeDisplay.style.color = '#6b7280'; // gray-500
+        }
     }
 }
 
@@ -1405,15 +1416,19 @@ function addEventToLog(event){
         const container = document.getElementById('eventsContainer');
         const entry = createEventEntry(event);
         if(entry){
-            container.insertBefore(entry, container.firstChild);
-            if(container.children.length > 200) container.removeChild(container.lastChild);
+            // Add new events at the bottom (terminal-style)
+            container.appendChild(entry);
+            // Remove old events from the top
+            if(container.children.length > 200) container.removeChild(container.firstChild);
+            // Auto-scroll to bottom to follow new events
+            container.scrollTop = container.scrollHeight;
         }
     }
 }
 
 function matchesFilter(e, filter, evType){
     if(evType){
-        const map = {process:'ProcessLifecycle', security:'SecurityEvent', anomaly:'Anomaly'};
+        const map = {process:'ProcessLifecycle', security:'SecurityEvent', anomaly:'Anomaly', filesystem:'FileSystemEvent'};
         if(e.type !== map[evType]) return false;
     }
     return !filter || JSON.stringify(e).toLowerCase().includes(filter);
@@ -1427,15 +1442,18 @@ function createEventEntry(e){
     const time = e.timestamp ? new Date(e.timestamp).toISOString().substring(11,23) : '--:--:--';
     if(e.type === 'ProcessLifecycle'){
         const color = e.kind === 'Started' ? 'text-green-600' : e.kind === 'Exited' ? 'text-gray-400' : 'text-yellow-600';
-        // Show name, with full cmdline in title tooltip
-        const cmdlineDisplay = e.cmdline && e.cmdline !== e.name ? `title="${e.cmdline.replace(/"/g, '&quot;')}"` : '';
-        div.innerHTML = `<span class="text-gray-400">${time}</span> <span class="${color}">[${e.kind}]</span> <span ${cmdlineDisplay}>${e.name}</span> <span class="text-gray-400">(pid ${e.pid})</span>`;
+        // Show full command line inline for forensics
+        const cmd = e.cmdline || e.name;
+        div.innerHTML = `<span class="text-gray-400">${time}</span> <span class="${color}">[${e.kind}]</span> ${cmd} <span class="text-gray-400">(pid ${e.pid})</span>`;
     } else if(e.type === 'SecurityEvent'){
         const color = e.kind.includes('Success') ? 'text-green-600' : 'text-red-600';
         div.innerHTML = `<span class="text-gray-400">${time}</span> <span class="${color}">[${e.kind}]</span> ${e.user} ${e.source_ip ? 'from ' + e.source_ip : ''}`;
     } else if(e.type === 'Anomaly'){
         const color = e.severity === 'Critical' ? 'text-red-600' : 'text-yellow-600';
         div.innerHTML = `<span class="text-gray-400">${time}</span> <span class="${color}">[${e.severity}]</span> ${e.message}`;
+    } else if(e.type === 'FileSystemEvent'){
+        const color = e.kind === 'Created' ? 'text-blue-600' : e.kind === 'Deleted' ? 'text-red-600' : 'text-yellow-600';
+        div.innerHTML = `<span class="text-gray-400">${time}</span> <span class="${color}">[${e.kind}]</span> ${e.path}`;
     }
     return div;
 }
@@ -1445,12 +1463,15 @@ function reloadEvents(){
     container.innerHTML = '';
     const filter = document.getElementById('filterInput').value.toLowerCase();
     const evType = document.getElementById('eventType').value;
-    eventBuffer.slice().reverse().forEach(event => {
+    // Show events in chronological order (oldest to newest, like a terminal)
+    eventBuffer.forEach(event => {
         if(matchesFilter(event, filter, evType)){
             const entry = createEventEntry(event);
             if(entry) container.appendChild(entry);
         }
     });
+    // Scroll to bottom after reload
+    container.scrollTop = container.scrollHeight;
 }
 
 document.getElementById('filterInput').addEventListener('input', reloadEvents);

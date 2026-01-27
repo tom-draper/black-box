@@ -239,8 +239,17 @@ fn run_recorder(cli: Cli) -> Result<()> {
         });
     }
 
+    // Clone broadcast_tx for file watcher before moving into recorder
+    let file_watcher_tx = broadcast_tx.clone();
+
     // Run recorder in main thread with broadcasting
     let mut recorder = Recorder::open_with_broadcast(&data_dir, broadcast_tx)?;
+
+    // Start file watcher if configured
+    if config.file_watch.enabled && !config.file_watch.watch_dirs.is_empty() {
+        let watch_dirs = config.file_watch.watch_dirs.clone();
+        file_watcher::spawn_file_watcher(watch_dirs, file_watcher_tx)?;
+    }
 
     // Protect existing segment files
     if let Ok(entries) = std::fs::read_dir(&data_dir) {
