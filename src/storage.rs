@@ -51,26 +51,10 @@ impl EventTypeBloom {
         self.set_bit(hash3 % 256);
     }
 
-    pub fn might_contain(&self, event_type: u8) -> bool {
-        let hash1 = event_type as usize;
-        let hash2 = (event_type.wrapping_mul(31)) as usize;
-        let hash3 = (event_type.wrapping_mul(37)) as usize;
-
-        self.check_bit(hash1 % 256)
-            && self.check_bit(hash2 % 256)
-            && self.check_bit(hash3 % 256)
-    }
-
     fn set_bit(&mut self, bit_index: usize) {
         let word = bit_index / 64;
         let bit = bit_index % 64;
         self.bits[word] |= 1u64 << bit;
-    }
-
-    fn check_bit(&self, bit_index: usize) -> bool {
-        let word = bit_index / 64;
-        let bit = bit_index % 64;
-        (self.bits[word] & (1u64 << bit)) != 0
     }
 }
 

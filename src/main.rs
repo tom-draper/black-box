@@ -6,6 +6,7 @@ mod collector;
 mod commands;
 mod config;
 mod event;
+mod file_watcher;
 mod index;
 mod indexed_reader;
 mod protection;
@@ -612,6 +613,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
                 ts: OffsetDateTime::now_utc(),
                 pid: proc.pid,
                 name: proc.name.clone(),
+                cmdline: proc.cmdline.clone(),
                 kind: ProcessLifecycleKind::Started,
             };
             recorder.append(&Event::ProcessLifecycle(event))?;
@@ -622,6 +624,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
                 ts: OffsetDateTime::now_utc(),
                 pid: proc.pid,
                 name: proc.name.clone(),
+                cmdline: proc.cmdline.clone(),
                 kind: ProcessLifecycleKind::Exited,
             };
             recorder.append(&Event::ProcessLifecycle(event))?;
@@ -632,6 +635,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
                 ts: OffsetDateTime::now_utc(),
                 pid: proc.pid,
                 name: proc.name.clone(),
+                cmdline: proc.cmdline.clone(),
                 kind: ProcessLifecycleKind::Stuck,
             };
             recorder.append(&Event::ProcessLifecycle(event))?;
@@ -651,6 +655,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
                 ts: OffsetDateTime::now_utc(),
                 pid: proc.pid,
                 name: proc.name.clone(),
+                cmdline: proc.cmdline.clone(),
                 kind: ProcessLifecycleKind::Zombie,
             };
             recorder.append(&Event::ProcessLifecycle(event))?;
@@ -1122,13 +1127,13 @@ fn run_recorder(cli: Cli) -> Result<()> {
         // Report interesting events
         if !proc_diff.started.is_empty() {
             for proc in &proc_diff.started {
-                println!("[{}] [+] Process started: {} (pid {})", now_timestamp(), proc.name, proc.pid);
+                println!("[{}] [+] Process started: {} (pid {}) - {}", now_timestamp(), proc.name, proc.pid, proc.cmdline);
             }
         }
 
         if !proc_diff.exited.is_empty() {
             for proc in &proc_diff.exited {
-                println!("[{}] [-] Process exited: {} (pid {})", now_timestamp(), proc.name, proc.pid);
+                println!("[{}] [-] Process exited: {} (pid {}) - {}", now_timestamp(), proc.name, proc.pid, proc.cmdline);
             }
         }
 

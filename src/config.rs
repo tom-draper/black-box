@@ -16,6 +16,8 @@ pub struct Config {
     pub server: ServerConfig,
     #[serde(default)]
     pub protection: ProtectionConfig,
+    #[serde(default)]
+    pub file_watch: FileWatchConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -50,6 +52,21 @@ pub struct RemoteSyslogConfig {
     pub port: u16,
     #[serde(default)]
     pub protocol: String, // "tcp" or "udp"
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct FileWatchConfig {
+    pub enabled: bool,
+    pub watch_dirs: Vec<String>,
+}
+
+impl Default for FileWatchConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            watch_dirs: vec![],
+        }
+    }
 }
 
 impl Default for ProtectionConfig {
@@ -96,6 +113,7 @@ impl Config {
                 data_dir: "./data".to_string(),
             },
             protection: ProtectionConfig::default(),
+            file_watch: FileWatchConfig::default(),
         };
 
         let toml_content = toml::to_string_pretty(&config)
@@ -128,6 +146,7 @@ impl Config {
                 data_dir: "./test_data".to_string(),
             },
             protection: ProtectionConfig::default(),
+            file_watch: FileWatchConfig::default(),
         }
     }
 }

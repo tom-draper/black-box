@@ -903,6 +903,7 @@ fn count_process_fds(pid: u32) -> Result<u32> {
 pub struct ProcessInfo {
     pub pid: u32,
     pub name: String,
+    pub cmdline: String,  // Full command line with arguments
     pub state: String,
 }
 
@@ -919,11 +920,15 @@ pub fn read_processes() -> Result<ProcessSnapshot> {
         if let Ok(pid) = name_str.parse::<u32>() {
             if let Ok(name) = read_process_name(pid) {
                 if let Ok(stat) = read_process_stat(pid) {
+                    // Read full command line (fallback to name if unavailable)
+                    let cmdline = read_process_cmdline(pid).unwrap_or_else(|_| name.clone());
+
                     processes.insert(
                         pid,
                         ProcessInfo {
                             pid,
                             name,
+                            cmdline,
                             state: stat.state,
                         },
                     );

@@ -96,6 +96,7 @@ fn matches_event_type(event: &Event, filter: &str) -> bool {
         Event::ProcessSnapshot(_) => filter_lower.contains("process") && filter_lower.contains("snapshot"),
         Event::SecurityEvent(_) => filter_lower.contains("security") || filter_lower.contains("sec"),
         Event::Anomaly(_) => filter_lower.contains("anomaly") || filter_lower.contains("alert"),
+        Event::FileSystemEvent(_) => filter_lower.contains("file") || filter_lower.contains("fs"),
     }
 }
 
@@ -153,6 +154,11 @@ fn export_csv(events: &[Event], writer: &mut dyn Write) -> Result<()> {
                 a.ts.unix_timestamp(),
                 "anomaly",
                 format!("{:?} - {:?}: {}", a.severity, a.kind, a.message),
+            ),
+            Event::FileSystemEvent(f) => (
+                f.ts.unix_timestamp(),
+                "filesystem",
+                format!("{:?}: {}", f.kind, f.path),
             ),
         };
 

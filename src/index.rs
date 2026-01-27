@@ -179,6 +179,7 @@ fn event_type_id(event: &Event) -> u8 {
         Event::ProcessSnapshot(_) => 2,
         Event::SecurityEvent(_) => 3,
         Event::Anomaly(_) => 4,
+        Event::FileSystemEvent(_) => 5,
     }
 }
 

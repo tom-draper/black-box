@@ -448,6 +448,18 @@ document.getElementById('timelineChart').addEventListener('click', (e) => {
     const clickRatio = clickX / width;
     const targetTimestamp = firstTs + (clickRatio * timeRange);
 
+    // Stop any auto-playback
+    if(playbackInterval) {
+        clearTimeout(playbackInterval);
+        playbackInterval = null;
+    }
+
+    // Update button states to show paused
+    isPaused = true;
+    document.getElementById('pauseBtn').style.display = 'none';
+    document.getElementById('playBtn').style.display = 'block';
+
+    // Jump to the timestamp
     jumpToTimestamp(Math.floor(targetTimestamp));
 });
 
@@ -523,12 +535,16 @@ async function jumpToTimestamp(timestamp) {
     netUpHistory.length = 0;
     Object.keys(diskIoHistoryMap).forEach(k => delete diskIoHistoryMap[k]);
 
-    // Fetch historical data for this time point (load 60 seconds for smooth charts)
+    // Fetch historical data for this time point
+    // Use new simplified API: just pass timestamp, server finds last 60 SystemMetrics
     try {
-        const url = `/api/playback/events?start=${timestamp - 60}&end=${timestamp + 1}&limit=200`;
+        const url = `/api/playback/events?timestamp=${timestamp}&count=60`;
+        console.log('[DEBUG] Fetching playback events:', url);
 
         const resp = await fetch(url);
         const data = await resp.json();
+
+        console.log('[DEBUG] Received', data.events?.length || 0, 'total events');
 
         if(data.events && data.events.length > 0) {
             // If we're using fallback data, show a visual indicator
@@ -542,10 +558,12 @@ async function jumpToTimestamp(timestamp) {
             // Process events in order
             let latestSystemMetrics = null;
             let latestProcessSnapshot = null;
+            let systemMetricsCount = 0;
 
             data.events.forEach(event => {
                 if(event.type === 'SystemMetrics') {
                     latestSystemMetrics = event;
+                    systemMetricsCount++;
 
                     // Build history for charts - collect all events first
                     cpuHistory.push(event.cpu || 0);
@@ -559,6 +577,9 @@ async function jumpToTimestamp(timestamp) {
                 }
             });
 
+            console.log('[DEBUG] Found', systemMetricsCount, 'SystemMetrics events');
+            console.log('[DEBUG] History lengths before trim - CPU:', cpuHistory.length, 'Memory:', memoryHistory.length, 'NetDown:', netDownHistory.length, 'NetUp:', netUpHistory.length);
+
             // Trim history arrays to keep only the most recent MAX_HISTORY items
             if(cpuHistory.length > MAX_HISTORY) {
                 cpuHistory.splice(0, cpuHistory.length - MAX_HISTORY);
@@ -566,6 +587,9 @@ async function jumpToTimestamp(timestamp) {
                 netDownHistory.splice(0, netDownHistory.length - MAX_HISTORY);
                 netUpHistory.splice(0, netUpHistory.length - MAX_HISTORY);
             }
+
+            console.log('[DEBUG] History lengths after trim - CPU:', cpuHistory.length, 'Memory:', memoryHistory.length, 'NetDown:', netDownHistory.length, 'NetUp:', netUpHistory.length);
+            console.log('[DEBUG] Expected MAX_HISTORY:', MAX_HISTORY);
 
             // Render the latest state
             if(latestSystemMetrics) {
@@ -1360,7 +1384,9 @@ function createEventEntry(e){
     const time = e.timestamp ? new Date(e.timestamp).toISOString().substring(11,23) : '--:--:--';
     if(e.type === 'ProcessLifecycle'){
         const color = e.kind === 'Started' ? 'text-green-600' : e.kind === 'Exited' ? 'text-gray-400' : 'text-yellow-600';
-        div.innerHTML = `<span class="text-gray-400">${time}</span> <span class="${color}">[${e.kind}]</span> ${e.name} <span class="text-gray-400">(pid ${e.pid})</span>`;
+        // Show name, with full cmdline in title tooltip
+        const cmdlineDisplay = e.cmdline && e.cmdline !== e.name ? `title="${e.cmdline.replace(/"/g, '&quot;')}"` : '';
+        div.innerHTML = `<span class="text-gray-400">${time}</span> <span class="${color}">[${e.kind}]</span> <span ${cmdlineDisplay}>${e.name}</span> <span class="text-gray-400">(pid ${e.pid})</span>`;
     } else if(e.type === 'SecurityEvent'){
         const color = e.kind.includes('Success') ? 'text-green-600' : 'text-red-600';
         div.innerHTML = `<span class="text-gray-400">${time}</span> <span class="${color}">[${e.kind}]</span> ${e.user} ${e.source_ip ? 'from ' + e.source_ip : ''}`;
@@ -1531,6 +1557,7 @@ fn event_to_json(
                 "kind": format!("{:?}", p.kind),
                 "pid": p.pid,
                 "name": p.name,
+                "cmdline": p.cmdline,
             }))
         }
         Event::SecurityEvent(s) => {
@@ -1594,6 +1621,25 @@ fn event_to_json(
                     "mem_bytes": proc.mem_bytes,
                     "num_threads": proc.num_threads,
                 })).collect::<Vec<serde_json::Value>>(),
+            }))
+        }
+        Event::FileSystemEvent(fse) => {
+            if event_type_filter.is_some() && event_type_filter != Some("filesystem") {
+                return None;
+            }
+
+            let text = format!("{:?} {}", fse.kind, fse.path);
+            if let Some(f) = filter {
+                if !text.to_lowercase().contains(f) {
+                    return None;
+                }
+            }
+
+            Some(serde_json::json!({
+                "type": "FileSystemEvent",
+                "timestamp": fse.ts.format(&Rfc3339).ok()?,
+                "kind": format!("{:?}", fse.kind),
+                "path": fse.path
             }))
         }
     }

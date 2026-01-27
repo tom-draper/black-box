@@ -1,45 +1,216 @@
+// Playback API - provides two query modes for retrieving historical events:
+//
+// Mode 1: Count-based (?timestamp=T&count=N)
+//   - Returns the last N SystemMetrics events before timestamp T
+//   - Useful for playback UI where you always want exactly N data points
+//   - Server automatically searches backward to find enough events
+//
+// Mode 2: Range-based (?start=S&end=E&limit=L)
+//   - Returns all events between timestamps S and E (up to L total events)
+//   - Useful for export, analysis, or when you need events in a specific timeframe
+//   - Returns whatever events exist in that range (may be less than limit)
+
 use actix_web::{web, HttpResponse};
 use serde::Deserialize;
 use std::sync::Arc;
 use time::OffsetDateTime;
 
 use crate::indexed_reader::IndexedReader;
+use crate::reader::LogReader;
 use crate::event::Event;
 
 #[derive(Deserialize)]
 pub struct PlaybackQuery {
+    // Mode 1: Get last N SystemMetrics before a timestamp
+    // Usage: ?timestamp=1234567890&count=60
+    #[serde(rename = "timestamp")]
+    timestamp: Option<i64>,  // Unix seconds - the playback position
+    #[serde(rename = "count")]
+    count: Option<usize>,    // Number of SystemMetrics to return (default: 60)
+
+    // Mode 2: Get all events in a time range
+    // Usage: ?start=1234567890&end=1234567950&limit=200
     #[serde(rename = "start")]
-    start_timestamp: Option<i64>,  // Unix seconds
+    start_timestamp: Option<i64>,  // Unix seconds - range start
     #[serde(rename = "end")]
-    end_timestamp: Option<i64>,    // Unix seconds
+    end_timestamp: Option<i64>,    // Unix seconds - range end
     #[serde(rename = "limit")]
-    limit: Option<usize>,
+    limit: Option<usize>,          // Max total events to return
 }
 
 /// Get the most recent complete SystemMetrics (with static/semi-static fields) for page initialization
+/// Uses LogReader to read the most recent segment file (avoids old incompatible segments)
 pub async fn api_initial_state(
-    reader: web::Data<Arc<IndexedReader>>,
+    reader: web::Data<LogReader>,
 ) -> HttpResponse {
-    // Look back up to 5 minutes to find a complete SystemMetrics event
-    let now_ns = OffsetDateTime::now_utc().unix_timestamp_nanos();
-    let lookback_ns = now_ns - (5 * 60 * 1_000_000_000i128); // 5 minutes
+    eprintln!("Initial state: reading most recent segment file");
 
-    match reader.read_time_range(Some(lookback_ns), Some(now_ns)) {
+    match reader.read_recent_segment() {
         Ok(events) => {
-            // Find the most recent SystemMetrics with filesystems
+            eprintln!("Initial state: found {} events in recent segment", events.len());
+
+            // Count SystemMetrics events
+            let system_metrics_count = events.iter().filter(|e| matches!(e, Event::SystemMetrics(_))).count();
+            eprintln!("Initial state: {} SystemMetrics events", system_metrics_count);
+
+            // Try to find the most recent SystemMetrics with filesystems first
             for event in events.iter().rev() {
                 if let Event::SystemMetrics(m) = event {
                     if m.filesystems.is_some() {
+                        eprintln!("Initial state: returning event with filesystems at {}", m.ts);
                         // Found a complete event, return it formatted
                         return HttpResponse::Ok().json(format_event_for_api(event));
                     }
                 }
             }
-            // No complete event found
+
+            eprintln!("Initial state: no event with filesystems found");
+
+            // If no event with filesystems, return the most recent SystemMetrics anyway
+            for event in events.iter().rev() {
+                if let Event::SystemMetrics(m) = event {
+                    eprintln!("Initial state: returning SystemMetrics without filesystems at {}", m.ts);
+                    return HttpResponse::Ok().json(format_event_for_api(event));
+                }
+            }
+
+            // No SystemMetrics found at all
+            eprintln!("Initial state: NO SystemMetrics events found - returning empty");
             HttpResponse::Ok().json(serde_json::json!({}))
         }
-        Err(_) => HttpResponse::Ok().json(serde_json::json!({})),
+        Err(e) => {
+            eprintln!("Initial state: ERROR reading recent segment: {}", e);
+            HttpResponse::Ok().json(serde_json::json!({}))
+        }
     }
+}
+
+/// Mode 1: Fetch last N SystemMetrics before a timestamp
+async fn fetch_events_by_count(
+    log_reader: &LogReader,
+    indexed_reader: &Arc<IndexedReader>,
+    timestamp: i64,
+    target_count: usize,
+) -> HttpResponse {
+    let end_ns = (timestamp as i128) * 1_000_000_000;
+
+    eprintln!("[PLAYBACK] Count mode: Requesting {} SystemMetrics ending at {}",
+        target_count,
+        OffsetDateTime::from_unix_timestamp(timestamp).unwrap());
+
+    // Determine if this is recent data (use LogReader) or historical (use IndexedReader)
+    let now_ns = OffsetDateTime::now_utc().unix_timestamp_nanos();
+    let use_log_reader = (now_ns - end_ns) < (5 * 60 * 1_000_000_000i128); // Last 5 minutes
+
+    // Progressive search: start with 90 seconds, expand if needed
+    let search_durations = vec![90, 120, 180, 300]; // seconds to search back
+
+    let mut all_events = Vec::new();
+    let mut search_start_ns = end_ns;
+
+    for duration in search_durations {
+        search_start_ns = end_ns - ((duration as i128) * 1_000_000_000);
+
+        let events_result = if use_log_reader {
+            eprintln!("[PLAYBACK] Count mode: Using LogReader, searching back {} seconds", duration);
+            log_reader.read_all_events()
+                .map(|all| {
+                    all.into_iter()
+                        .filter(|e| {
+                            let ts = e.timestamp().unix_timestamp_nanos();
+                            ts >= search_start_ns && ts <= end_ns
+                        })
+                        .collect()
+                })
+        } else {
+            eprintln!("[PLAYBACK] Count mode: Using IndexedReader, searching back {} seconds", duration);
+            indexed_reader.read_time_range(Some(search_start_ns), Some(end_ns))
+        };
+
+        match events_result {
+            Ok(events) => {
+                let sm_count = events.iter().filter(|e| matches!(e, Event::SystemMetrics(_))).count();
+                eprintln!("[PLAYBACK] Count mode: Found {} SystemMetrics in {} second range", sm_count, duration);
+
+                if sm_count >= target_count {
+                    all_events = events;
+                    break;
+                }
+
+                // Keep searching if we don't have enough yet
+                all_events = events;
+            }
+            Err(e) => {
+                eprintln!("[PLAYBACK] Count mode: Error reading events: {}", e);
+                return HttpResponse::InternalServerError().json(serde_json::json!({
+                    "error": format!("Failed to read events: {}", e),
+                }));
+            }
+        }
+    }
+
+    // Extract SystemMetrics and take the last target_count
+    let mut system_metrics: Vec<Event> = all_events.iter()
+        .filter(|e| matches!(e, Event::SystemMetrics(_)))
+        .cloned()
+        .collect();
+
+    let metrics_count = system_metrics.len();
+    let selected_metrics: Vec<Event> = if system_metrics.len() > target_count {
+        system_metrics.split_off(system_metrics.len() - target_count)
+    } else {
+        system_metrics
+    };
+
+    eprintln!("[PLAYBACK] Count mode: Selected {} of {} SystemMetrics (target: {})",
+        selected_metrics.len(), metrics_count, target_count);
+
+    // Get time range of selected metrics
+    let (metrics_start_ns, metrics_end_ns) = if !selected_metrics.is_empty() {
+        let first_ts = selected_metrics.first().unwrap().timestamp().unix_timestamp_nanos();
+        let last_ts = selected_metrics.last().unwrap().timestamp().unix_timestamp_nanos();
+        (first_ts, last_ts)
+    } else {
+        (search_start_ns, end_ns)
+    };
+
+    // Include all other events within the selected metrics timespan
+    let other_events: Vec<Event> = all_events.into_iter()
+        .filter(|e| {
+            if matches!(e, Event::SystemMetrics(_)) {
+                return false;
+            }
+            let ts = e.timestamp().unix_timestamp_nanos();
+            ts >= metrics_start_ns && ts <= metrics_end_ns
+        })
+        .collect();
+
+    // Combine and sort
+    let mut final_events = selected_metrics;
+    final_events.extend(other_events);
+    final_events.sort_by_key(|e| e.timestamp().unix_timestamp_nanos());
+
+    // Look back for metadata
+    let metadata = find_missing_metadata(&indexed_reader, &final_events, end_ns);
+
+    // Format for API
+    let formatted_events: Vec<serde_json::Value> = final_events
+        .iter()
+        .map(format_event_for_api)
+        .collect();
+
+    let system_metrics_count = final_events.iter()
+        .filter(|e| matches!(e, Event::SystemMetrics(_)))
+        .count();
+
+    eprintln!("[PLAYBACK] Count mode: Returning {} total events ({} SystemMetrics) to client",
+        formatted_events.len(), system_metrics_count);
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "count": formatted_events.len(),
+        "events": formatted_events,
+        "metadata": metadata,
+    }))
 }
 
 /// Get time range metadata
@@ -140,27 +311,83 @@ pub async fn api_timeline(
     }
 }
 
-/// Get events in a time range for playback
+/// Get events for playback
+///
+/// Two modes supported:
+/// 1. Count mode: ?timestamp=T&count=N - Get last N SystemMetrics before timestamp T
+/// 2. Range mode: ?start=S&end=E&limit=L - Get all events between S and E (up to L events)
 pub async fn api_playback_events(
-    reader: web::Data<Arc<IndexedReader>>,
+    log_reader: web::Data<LogReader>,
+    indexed_reader: web::Data<Arc<IndexedReader>>,
     query: web::Query<PlaybackQuery>,
+) -> HttpResponse {
+    // Mode 1: Count-based query (timestamp + count)
+    if let Some(timestamp) = query.timestamp {
+        let target_count = query.count.unwrap_or(60);
+        return fetch_events_by_count(&log_reader, &indexed_reader, timestamp, target_count).await;
+    }
+
+    // Mode 2: Range-based query (start + end)
+    fetch_events_by_range(&log_reader, &indexed_reader, &query).await
+}
+
+/// Mode 2: Fetch all events in a time range (start to end)
+async fn fetch_events_by_range(
+    log_reader: &LogReader,
+    indexed_reader: &Arc<IndexedReader>,
+    query: &PlaybackQuery,
 ) -> HttpResponse {
     let start_ns = query.start_timestamp.map(|s| (s as i128) * 1_000_000_000);
     let end_ns = query.end_timestamp.map(|s| (s as i128) * 1_000_000_000);
 
-    match reader.read_time_range(start_ns, end_ns) {
+    eprintln!("[PLAYBACK] Range mode: start={:?} end={:?}",
+        start_ns.map(|ns| OffsetDateTime::from_unix_timestamp_nanos(ns).unwrap()),
+        end_ns.map(|ns| OffsetDateTime::from_unix_timestamp_nanos(ns).unwrap()));
+
+    // Try LogReader first for recent data (always up-to-date), fallback to IndexedReader for historical
+    let now_ns = OffsetDateTime::now_utc().unix_timestamp_nanos();
+    let use_log_reader = match end_ns {
+        Some(end) => (now_ns - end) < (5 * 60 * 1_000_000_000i128), // Last 5 minutes
+        None => true, // No end time specified, assume recent
+    };
+
+    let events_result = if use_log_reader {
+        eprintln!("[PLAYBACK] Using LogReader (recent data)");
+        log_reader.read_all_events()
+            .map(|all_events| {
+                // Filter by time range
+                all_events.into_iter()
+                    .filter(|e| {
+                        let ts = e.timestamp().unix_timestamp_nanos();
+                        if let Some(start) = start_ns {
+                            if ts < start { return false; }
+                        }
+                        if let Some(end) = end_ns {
+                            if ts > end { return false; }
+                        }
+                        true
+                    })
+                    .collect()
+            })
+    } else {
+        eprintln!("[PLAYBACK] Using IndexedReader (historical data)");
+        indexed_reader.read_time_range(start_ns, end_ns)
+    };
+
+    match events_result {
         Ok(mut events) => {
+            eprintln!("[PLAYBACK] Range mode: Reader returned {} events", events.len());
             let mut used_fallback = false;
 
-            // If no events found in the requested range, try to fall back to earlier data
+            // If no SystemMetrics found in the requested range, try to fall back to earlier data
             if events.is_empty() && end_ns.is_some() {
                 // Try to find the most recent data before the requested time
                 // Go back up to 7 days (604800 seconds)
                 let end_time = end_ns.unwrap();
                 let fallback_start = end_time - (7 * 24 * 3600 * 1_000_000_000i128);
 
-                // Read from fallback_start to requested end time
-                if let Ok(fallback_events) = reader.read_time_range(Some(fallback_start), Some(end_time)) {
+                // Read from fallback_start to requested end time (use IndexedReader for historical)
+                if let Ok(fallback_events) = indexed_reader.read_time_range(Some(fallback_start), Some(end_time)) {
                     // Take the most recent events before the requested time
                     events = fallback_events;
                     used_fallback = !events.is_empty();
@@ -169,52 +396,15 @@ pub async fn api_playback_events(
 
             // Look back to find missing static/semi-static fields (metadata)
             let metadata = if let Some(end_time) = end_ns {
-                find_missing_metadata(&reader, &events, end_time)
+                find_missing_metadata(&indexed_reader, &events, end_time)
             } else {
                 serde_json::json!({})
             };
 
-            // Apply limit with prioritization for SystemMetrics
+            // Apply limit if specified
             if let Some(limit) = query.limit {
                 if events.len() > limit {
-                    // Separate SystemMetrics from other events
-                    let mut system_metrics = Vec::new();
-                    let mut other_events = Vec::new();
-
-                    for event in events {
-                        if matches!(event, crate::event::Event::SystemMetrics(_)) {
-                            system_metrics.push(event);
-                        } else {
-                            other_events.push(event);
-                        }
-                    }
-
-                    // Take the most recent SystemMetrics (up to limit)
-                    let sm_count = system_metrics.len().min(limit);
-                    let sm_to_take = if system_metrics.len() > sm_count {
-                        system_metrics.split_off(system_metrics.len() - sm_count)
-                    } else {
-                        system_metrics
-                    };
-
-                    // Fill remaining space with other events
-                    let remaining = limit.saturating_sub(sm_to_take.len());
-                    let other_to_take = if other_events.len() > remaining {
-                        other_events.split_off(other_events.len() - remaining)
-                    } else {
-                        other_events
-                    };
-
-                    // Combine and sort by timestamp
-                    events = sm_to_take;
-                    events.extend(other_to_take);
-                    events.sort_by_key(|e| match e {
-                        crate::event::Event::SystemMetrics(m) => m.ts.unix_timestamp_nanos(),
-                        crate::event::Event::ProcessLifecycle(p) => p.ts.unix_timestamp_nanos(),
-                        crate::event::Event::ProcessSnapshot(p) => p.ts.unix_timestamp_nanos(),
-                        crate::event::Event::SecurityEvent(s) => s.ts.unix_timestamp_nanos(),
-                        crate::event::Event::Anomaly(a) => a.ts.unix_timestamp_nanos(),
-                    });
+                    events = events.into_iter().rev().take(limit).rev().collect();
                 }
             }
 
@@ -223,6 +413,9 @@ pub async fn api_playback_events(
                 .iter()
                 .map(format_event_for_api)
                 .collect();
+
+            let system_metrics_count = events.iter().filter(|e| matches!(e, crate::event::Event::SystemMetrics(_))).count();
+            eprintln!("[PLAYBACK] Range mode: Returning {} total events ({} SystemMetrics) to client", formatted_events.len(), system_metrics_count);
 
             HttpResponse::Ok().json(serde_json::json!({
                 "count": formatted_events.len(),
@@ -417,6 +610,7 @@ fn format_event_for_api(event: &Event) -> serde_json::Value {
             "kind": format!("{:?}", p.kind),
             "pid": p.pid,
             "name": p.name,
+            "cmdline": p.cmdline,
         }),
         Event::ProcessSnapshot(p) => serde_json::json!({
             "type": "ProcessSnapshot",
@@ -444,6 +638,12 @@ fn format_event_for_api(event: &Event) -> serde_json::Value {
             "severity": format!("{:?}", a.severity),
             "kind": format!("{:?}", a.kind),
             "message": a.message,
+        }),
+        Event::FileSystemEvent(fse) => serde_json::json!({
+            "type": "FileSystemEvent",
+            "timestamp": fse.ts.unix_timestamp_nanos() / 1_000_000, // ms
+            "kind": format!("{:?}", fse.kind),
+            "path": fse.path
         }),
     }
 }

@@ -8,6 +8,7 @@ pub enum Event {
     ProcessSnapshot(ProcessSnapshot),
     SecurityEvent(SecurityEvent),
     Anomaly(Anomaly),
+    FileSystemEvent(FileSystemEvent),
 }
 
 // System-wide metrics collected each interval
@@ -120,6 +121,7 @@ pub struct ProcessLifecycle {
     pub ts: OffsetDateTime,
     pub pid: u32,
     pub name: String,
+    pub cmdline: String,  // Full command line with arguments
     pub kind: ProcessLifecycleKind,
 }
 
@@ -217,6 +219,23 @@ pub enum AnomalyKind {
     UnauthorizedAccess,
 }
 
+// File system events (file created/modified/deleted)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileSystemEvent {
+    pub ts: OffsetDateTime,
+    pub kind: FileSystemEventKind,
+    pub path: String,
+    pub size: Option<u64>,  // File size if available
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FileSystemEventKind {
+    Created,
+    Modified,
+    Deleted,
+    Renamed { from: String, to: String },
+}
+
 impl Event {
     /// Get the timestamp from any event variant
     pub fn timestamp(&self) -> OffsetDateTime {
@@ -226,6 +245,7 @@ impl Event {
             Event::ProcessSnapshot(e) => e.ts,
             Event::SecurityEvent(e) => e.ts,
             Event::Anomaly(e) => e.ts,
+            Event::FileSystemEvent(e) => e.ts,
         }
     }
 }

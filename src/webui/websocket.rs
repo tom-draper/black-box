@@ -233,5 +233,11 @@ fn event_to_json(event: &crate::event::Event) -> serde_json::Value {
                 "num_threads": proc.num_threads,
             })).collect::<Vec<_>>(),
         }),
+        Event::FileSystemEvent(f) => serde_json::json!({
+            "type": "FileSystemEvent",
+            "timestamp": f.ts.unix_timestamp_nanos() / 1_000_000,
+            "kind": format!("{:?}", f.kind),
+            "path": f.path
+        }),
     }
 }
