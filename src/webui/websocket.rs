@@ -201,6 +201,7 @@ fn event_to_json(event: &crate::event::Event) -> serde_json::Value {
             "kind": format!("{:?}", p.kind),
             "pid": p.pid,
             "name": p.name,
+            "cmdline": p.cmdline,
         }),
         Event::SecurityEvent(s) => serde_json::json!({
             "type": "SecurityEvent",

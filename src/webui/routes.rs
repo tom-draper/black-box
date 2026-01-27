@@ -31,9 +31,12 @@ pub async fn index() -> HttpResponse {
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
-<div class="max-w mx-auto px-4 py-5vh">
-    <div class="fixed z-10 top-0 right-0">
-        <div class="flex gap-3 px-5 py-4 text-gray-400 items-center">
+<div class="max-w mx-auto px-4 py-5vh pb-64">
+    <div class="fixed w-full z-10 left-0 bottom-0 flex backdrop-blur-3xl">
+        <div class="grow">
+            <canvas id="timelineChart" class="w-full h-12 pt-2 cursor-pointer rounded" style="opacity:0;background:transparent;transition:opacity 0.3s ease-in;" title="Event density timeline - Click to jump to any time. Blue line shows current playback position."></canvas>
+        </div>
+        <div class="flex gap-3 px-5 text-gray-400 items-center">
             <svg id="rewindBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 hover:text-gray-600 transition duration-100 cursor-pointer" title="Rewind 1 minute">
                 <path d="M7.712 4.818A1.5 1.5 0 0 1 10 6.095v2.972c.104-.13.234-.248.389-.343l6.323-3.906A1.5 1.5 0 0 1 19 6.095v7.81a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.505 1.505 0 0 1-.389-.344v2.973a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.5 1.5 0 0 1 0-2.552l6.323-3.906Z" />
             </svg>
@@ -50,11 +53,8 @@ pub async fn index() -> HttpResponse {
             <div class="flex flex-col text-xs">
                 <input type="datetime-local" id="timePicker" class="px-1 py-0.5 border border-gray-300 rounded text-gray-700 text-xs" style="display:none" title="Select a specific date and time to view" />
                 <span id="timeDisplay" class="text-gray-500 cursor-pointer hover:text-gray-700" title="Click to select time, Shift+Click to go Live">Live</span>
-                <span id="timeRange" class="text-gray-400 text-xs" title="Total time range of available historical data"></span>
+                <span id="timeRange" class="text-gray-400 text-xs whitespace-nowrap" title="Total time range of available historical data"></span>
             </div>
-        </div>
-        <div class="px-5 pb-3">
-            <canvas id="timelineChart" width="280" height="48" class="cursor-pointer bg-gray-50 rounded" style="display:none;" title="Event density timeline - Click to jump to any time. Blue line shows current playback position."></canvas>
         </div>
     </div>
     <div id="mainContent" style="display:none;">
@@ -337,6 +337,8 @@ async function fetchInitialState() {
 
 // Timeline visualization
 let timelineData = null;
+let timelineHoverX = null;  // Track mouse position for hover effect
+let timelineHoverSetup = false;  // Prevent duplicate event listeners
 
 async function fetchTimeline() {
     try {
@@ -345,7 +347,14 @@ async function fetchTimeline() {
         timelineData = data;
 
         if(data.timeline && data.timeline.length > 0) {
-            document.getElementById('timelineChart').style.display = 'block';
+            const canvas = document.getElementById('timelineChart');
+            canvas.style.opacity = '1';
+
+            if(!timelineHoverSetup) {
+                setupTimelineHover();
+                timelineHoverSetup = true;
+            }
+
             drawTimeline();
         }
     } catch(e) {
@@ -353,18 +362,42 @@ async function fetchTimeline() {
     }
 }
 
+function setupTimelineHover() {
+    const canvas = document.getElementById('timelineChart');
+
+    canvas.addEventListener('mousemove', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        timelineHoverX = e.clientX - rect.left;
+        drawTimeline();
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+        timelineHoverX = null;
+        drawTimeline();
+    });
+
+    console.log('Timeline hover setup complete');
+}
+
 function drawTimeline() {
     if(!timelineData || !timelineData.timeline || timelineData.timeline.length === 0) return;
 
     const canvas = document.getElementById('timelineChart');
     const ctx = canvas.getContext('2d');
-    const width = canvas.width;
-    const height = canvas.height;
 
-    // Clear canvas and draw background
+    // Set canvas internal dimensions to match display size (prevents stretching)
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+
+    // Use display dimensions for drawing
+    const width = rect.width;
+    const height = rect.height;
+
+    // Clear canvas with transparent background
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = 'rgba(249, 250, 251, 1)'; // gray-50
-    ctx.fillRect(0, 0, width, height);
 
     const timeline = timelineData.timeline;
     const firstTs = timelineData.first_timestamp;
@@ -383,9 +416,14 @@ function drawTimeline() {
         return { x, y, timestamp: p.timestamp };
     });
 
+    // Determine if we're hovering
+    const isHovering = timelineHoverX !== null && timelineHoverX !== undefined;
+
     // Draw smooth curve using cubic Bezier curves
     ctx.beginPath();
-    ctx.strokeStyle = 'rgba(156, 163, 175, 0.8)'; // gray-400
+    // gray-500/60: rgba(107, 114, 128, 0.6) - normal
+    // gray-400: rgba(156, 163, 175, 1) - hover
+    ctx.strokeStyle = isHovering ? 'rgba(107, 114, 128, 1)' : 'rgba(156, 163, 175, 1)';
     ctx.lineWidth = 1.5;
 
     if(points.length > 0) {
@@ -416,6 +454,16 @@ function drawTimeline() {
     }
 
     ctx.stroke();
+
+    // Draw vertical line at hover position
+    if(isHovering && timelineHoverX >= 0 && timelineHoverX <= width) {
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(156, 163, 175, 1)'; // gray-400 with transparency
+        ctx.lineWidth = 1;
+        ctx.moveTo(timelineHoverX, 0);
+        ctx.lineTo(timelineHoverX, height);
+        ctx.stroke();
+    }
 
     // Draw vertical line for current playback position
     if(playbackMode && currentTimestamp) {
@@ -1413,6 +1461,12 @@ function reloadEvents(){
 document.getElementById('filterInput').addEventListener('input', reloadEvents);
 document.getElementById('eventType').addEventListener('change', reloadEvents);
 connectWebSocket();
+
+// Redraw timeline on window resize
+window.addEventListener('resize', () => {
+    drawTimeline();
+});
+
 // Only update clock in live mode (when not in playback and we have live data)
 setInterval(() => {
     if(!playbackMode && lastStats && lastStats.timestamp) {
