@@ -28,15 +28,16 @@ pub async fn index() -> HttpResponse {
         .max-w { max-width: 32rem; }
         .py-5vh { padding-top: 5vh; padding-bottom: 5vh; }
         th, td { padding: 0; }
+        .backdrop-blur-[1000px] { backdrop-filter: blur(1000px); }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
-<div class="max-w mx-auto px-4 py-5vh pb-64">
-    <div class="fixed w-full z-10 left-0 bottom-0 flex backdrop-blur-3xl">
+<div class="max-w mx-auto px-4 py-5vh">
+    <div class="fixed w-full z-10 left-0 top-0 flex backdrop-blur-[1000px]">
         <div class="grow">
-            <canvas id="timelineChart" class="w-full h-12 pt-2 cursor-pointer rounded" style="opacity:0;background:transparent;transition:opacity 0.3s ease-in;" title="Event density timeline - Click to jump to any time. Blue line shows current playback position."></canvas>
+            <canvas id="timelineChart" class="w-full h-12 cursor-pointer rounded" style="opacity:0;background:transparent;transition:opacity 0.3s ease-in;" title="Event density timeline"></canvas>
         </div>
-        <div class="flex gap-3 px-5 text-gray-400 items-center">
+        <div class="flex gap-3 px-5 py-2 text-gray-400 items-center">
             <svg id="rewindBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 hover:text-gray-600 transition duration-100 cursor-pointer" title="Rewind 1 minute">
                 <path d="M7.712 4.818A1.5 1.5 0 0 1 10 6.095v2.972c.104-.13.234-.248.389-.343l6.323-3.906A1.5 1.5 0 0 1 19 6.095v7.81a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.505 1.505 0 0 1-.389-.344v2.973a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.5 1.5 0 0 1 0-2.552l6.323-3.906Z" />
             </svg>
@@ -423,7 +424,7 @@ function drawTimeline() {
     ctx.beginPath();
     // gray-500/60: rgba(107, 114, 128, 0.6) - normal
     // gray-400: rgba(156, 163, 175, 1) - hover
-    ctx.strokeStyle = isHovering ? 'rgba(107, 114, 128, 1)' : 'rgba(156, 163, 175, 1)';
+    ctx.strokeStyle = isHovering ? 'rgba(107, 114, 128, 1)' : 'rgba(156, 163, 175, 0.8)';
     ctx.lineWidth = 1.5;
 
     if(points.length > 0) {
@@ -565,6 +566,7 @@ async function fetchPlaybackInfo() {
 
 // Jump to a specific timestamp and load data
 async function jumpToTimestamp(timestamp) {
+    console.log('DEBUG: jump to', new Date(timestamp));
     if(!timestamp) return;
 
     currentTimestamp = timestamp;
@@ -587,12 +589,11 @@ async function jumpToTimestamp(timestamp) {
     // Use new simplified API: just pass timestamp, server finds last 60 SystemMetrics
     try {
         const url = `/api/playback/events?timestamp=${timestamp}&count=60`;
-        console.log('[DEBUG] Fetching playback events:', url);
 
         const resp = await fetch(url);
         const data = await resp.json();
 
-        console.log('[DEBUG] Received', data.events?.length || 0, 'total events');
+        console.log(data);
 
         if(data.events && data.events.length > 0) {
             // If we're using fallback data, show a visual indicator
@@ -625,9 +626,6 @@ async function jumpToTimestamp(timestamp) {
                 }
             });
 
-            console.log('[DEBUG] Found', systemMetricsCount, 'SystemMetrics events');
-            console.log('[DEBUG] History lengths before trim - CPU:', cpuHistory.length, 'Memory:', memoryHistory.length, 'NetDown:', netDownHistory.length, 'NetUp:', netUpHistory.length);
-
             // Trim history arrays to keep only the most recent MAX_HISTORY items
             if(cpuHistory.length > MAX_HISTORY) {
                 cpuHistory.splice(0, cpuHistory.length - MAX_HISTORY);
@@ -635,9 +633,6 @@ async function jumpToTimestamp(timestamp) {
                 netDownHistory.splice(0, netDownHistory.length - MAX_HISTORY);
                 netUpHistory.splice(0, netUpHistory.length - MAX_HISTORY);
             }
-
-            console.log('[DEBUG] History lengths after trim - CPU:', cpuHistory.length, 'Memory:', memoryHistory.length, 'NetDown:', netDownHistory.length, 'NetUp:', netUpHistory.length);
-            console.log('[DEBUG] Expected MAX_HISTORY:', MAX_HISTORY);
 
             // Render the latest state
             if(latestSystemMetrics) {

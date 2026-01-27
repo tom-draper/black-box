@@ -92,11 +92,9 @@ async fn fetch_events_by_count(
     timestamp: i64,
     target_count: usize,
 ) -> HttpResponse {
-    let end_ns = (timestamp as i128) * 1_000_000_000;
-
-    eprintln!("[PLAYBACK] Count mode: Requesting {} SystemMetrics ending at {}",
-        target_count,
-        OffsetDateTime::from_unix_timestamp(timestamp).unwrap());
+    // Add 1 second to ensure we include events AT the requested timestamp
+    // (accounts for sub-second timing and collection overhead)
+    let end_ns = ((timestamp + 1) as i128) * 1_000_000_000;
 
     // Determine if this is recent data (use LogReader) or historical (use IndexedReader)
     let now_ns = OffsetDateTime::now_utc().unix_timestamp_nanos();
@@ -112,7 +110,6 @@ async fn fetch_events_by_count(
         search_start_ns = end_ns - ((duration as i128) * 1_000_000_000);
 
         let events_result = if use_log_reader {
-            eprintln!("[PLAYBACK] Count mode: Using LogReader, searching back {} seconds", duration);
             log_reader.read_all_events()
                 .map(|all| {
                     all.into_iter()
@@ -123,14 +120,12 @@ async fn fetch_events_by_count(
                         .collect()
                 })
         } else {
-            eprintln!("[PLAYBACK] Count mode: Using IndexedReader, searching back {} seconds", duration);
             indexed_reader.read_time_range(Some(search_start_ns), Some(end_ns))
         };
 
         match events_result {
             Ok(events) => {
                 let sm_count = events.iter().filter(|e| matches!(e, Event::SystemMetrics(_))).count();
-                eprintln!("[PLAYBACK] Count mode: Found {} SystemMetrics in {} second range", sm_count, duration);
 
                 if sm_count >= target_count {
                     all_events = events;
@@ -141,7 +136,6 @@ async fn fetch_events_by_count(
                 all_events = events;
             }
             Err(e) => {
-                eprintln!("[PLAYBACK] Count mode: Error reading events: {}", e);
                 return HttpResponse::InternalServerError().json(serde_json::json!({
                     "error": format!("Failed to read events: {}", e),
                 }));
@@ -161,9 +155,6 @@ async fn fetch_events_by_count(
     } else {
         system_metrics
     };
-
-    eprintln!("[PLAYBACK] Count mode: Selected {} of {} SystemMetrics (target: {})",
-        selected_metrics.len(), metrics_count, target_count);
 
     // Get time range of selected metrics
     let (metrics_start_ns, metrics_end_ns) = if !selected_metrics.is_empty() {
@@ -202,9 +193,6 @@ async fn fetch_events_by_count(
     let system_metrics_count = final_events.iter()
         .filter(|e| matches!(e, Event::SystemMetrics(_)))
         .count();
-
-    eprintln!("[PLAYBACK] Count mode: Returning {} total events ({} SystemMetrics) to client",
-        formatted_events.len(), system_metrics_count);
 
     HttpResponse::Ok().json(serde_json::json!({
         "count": formatted_events.len(),
@@ -340,10 +328,6 @@ async fn fetch_events_by_range(
     let start_ns = query.start_timestamp.map(|s| (s as i128) * 1_000_000_000);
     let end_ns = query.end_timestamp.map(|s| (s as i128) * 1_000_000_000);
 
-    eprintln!("[PLAYBACK] Range mode: start={:?} end={:?}",
-        start_ns.map(|ns| OffsetDateTime::from_unix_timestamp_nanos(ns).unwrap()),
-        end_ns.map(|ns| OffsetDateTime::from_unix_timestamp_nanos(ns).unwrap()));
-
     // Try LogReader first for recent data (always up-to-date), fallback to IndexedReader for historical
     let now_ns = OffsetDateTime::now_utc().unix_timestamp_nanos();
     let use_log_reader = match end_ns {
@@ -352,7 +336,6 @@ async fn fetch_events_by_range(
     };
 
     let events_result = if use_log_reader {
-        eprintln!("[PLAYBACK] Using LogReader (recent data)");
         log_reader.read_all_events()
             .map(|all_events| {
                 // Filter by time range
@@ -370,13 +353,11 @@ async fn fetch_events_by_range(
                     .collect()
             })
     } else {
-        eprintln!("[PLAYBACK] Using IndexedReader (historical data)");
         indexed_reader.read_time_range(start_ns, end_ns)
     };
 
     match events_result {
         Ok(mut events) => {
-            eprintln!("[PLAYBACK] Range mode: Reader returned {} events", events.len());
             let mut used_fallback = false;
 
             // If no SystemMetrics found in the requested range, try to fall back to earlier data
@@ -415,7 +396,6 @@ async fn fetch_events_by_range(
                 .collect();
 
             let system_metrics_count = events.iter().filter(|e| matches!(e, crate::event::Event::SystemMetrics(_))).count();
-            eprintln!("[PLAYBACK] Range mode: Returning {} total events ({} SystemMetrics) to client", formatted_events.len(), system_metrics_count);
 
             HttpResponse::Ok().json(serde_json::json!({
                 "count": formatted_events.len(),
