@@ -229,6 +229,7 @@ pub async fn index() -> HttpResponse {
 <script>
 let ws=null, eventBuffer=[], lastStats=null, isPaused=false;
 const MAX_BUFFER=1000;
+const eventKeys = new Set(); // Track unique event keys for deduplication (O(1) lookup)
 const memoryHistory = []; // Track last 60 seconds of memory usage
 const cpuHistory = []; // Track last 60 seconds of CPU usage
 const netDownHistory = []; // Track last 60 seconds of download speed
@@ -351,6 +352,14 @@ let firstTimestamp = null; // Earliest available data
 let lastTimestamp = null; // Latest available data
 const REWIND_STEP = 60; // 1 minute
 let playbackInterval = null; // Auto-playback timer
+
+// Playback buffer for efficient chunked loading
+let playbackBuffer = {}; // Events grouped by second: { "123456": [events...], "123457": [events...] }
+let bufferStart = null; // First second in buffer
+let bufferEnd = null; // Last second in buffer
+const BUFFER_SIZE = 60; // Fetch 60 seconds at a time
+const PREFETCH_THRESHOLD = 50; // Prefetch when 50 seconds into current buffer
+let lastPrefetchEnd = null; // Track last prefetched segment to avoid redundant fetches
 
 // Fetch the most recent complete system state on load to initialize caches
 async function fetchInitialState() {
@@ -640,12 +649,91 @@ async function fetchPlaybackInfo() {
     }
 }
 
+// Fetch and populate playback buffer with events
+async function fetchPlaybackBuffer(startTimestamp, endTimestamp) {
+    try {
+        const url = `/api/playback/events?start=${startTimestamp}&end=${endTimestamp}&limit=2000`;
+        const resp = await fetch(url);
+        const data = await resp.json();
+
+        console.log('Fetched buffer', startTimestamp, 'to', endTimestamp, data.events ? data.events.length : 0, 'events');
+
+        // Group events by second (rounded timestamp)
+        const buffer = {};
+        if (data.events) {
+            data.events.forEach(event => {
+                const second = Math.floor(event.timestamp / 1000); // Convert ms to seconds
+                if (!buffer[second]) {
+                    buffer[second] = [];
+                }
+                buffer[second].push(event);
+            });
+        }
+
+        // Store metadata if present
+        if (data.metadata) {
+            if(data.metadata.mem_total_bytes) cachedMemTotal = data.metadata.mem_total_bytes;
+            if(data.metadata.swap_total_bytes) cachedSwapTotal = data.metadata.swap_total_bytes;
+            if(data.metadata.disk_total_bytes) cachedDiskTotal = data.metadata.disk_total_bytes;
+            if(data.metadata.filesystems) cachedFilesystems = data.metadata.filesystems;
+            if(data.metadata.net_ip) cachedNetIp = data.metadata.net_ip;
+            if(data.metadata.net_gateway) cachedNetGateway = data.metadata.net_gateway;
+            if(data.metadata.net_dns) cachedNetDns = data.metadata.net_dns;
+            if(data.metadata.kernel_version) cachedKernel = data.metadata.kernel_version;
+            if(data.metadata.cpu_model) cachedCpuModel = data.metadata.cpu_model;
+            if(data.metadata.cpu_mhz) cachedCpuMhz = data.metadata.cpu_mhz;
+        }
+
+        return buffer;
+    } catch(e) {
+        console.error('Failed to fetch playback buffer:', e);
+        return {};
+    }
+}
+
+// Process events for a specific second from the playback buffer
+function processSecondFromBuffer(timestamp) {
+    const events = playbackBuffer[timestamp] || [];
+
+    let latestSystemMetrics = null;
+    let latestProcessSnapshot = null;
+
+    events.forEach(event => {
+        if(event.type === 'SystemMetrics') {
+            latestSystemMetrics = event;
+            // Add to history
+            cpuHistory.push(event.cpu || 0);
+            memoryHistory.push(event.mem || 0);
+            netDownHistory.push(event.net_recv || 0);
+            netUpHistory.push(event.net_send || 0);
+            if(cpuHistory.length > MAX_HISTORY) cpuHistory.shift();
+            if(memoryHistory.length > MAX_HISTORY) memoryHistory.shift();
+            if(netDownHistory.length > MAX_HISTORY) netDownHistory.shift();
+            if(netUpHistory.length > MAX_HISTORY) netUpHistory.shift();
+        } else if(event.type === 'ProcessSnapshot') {
+            latestProcessSnapshot = event;
+        } else {
+            addEventToLog(event);
+        }
+    });
+
+    // Render latest state
+    if(latestSystemMetrics) {
+        lastStats = latestSystemMetrics;
+        render();
+    }
+    if(latestProcessSnapshot) {
+        updateProcs(latestProcessSnapshot);
+    }
+
+    drawTimeline();
+}
+
 // Jump to a specific timestamp and load data
-// If incremental=true, don't clear buffers (used for auto-playback advancing 1 second at a time)
+// Now uses chunked buffering for efficient playback
 async function jumpToTimestamp(timestamp, incremental = false) {
     if(!timestamp) return;
 
-    const prevTimestamp = currentTimestamp;
     currentTimestamp = timestamp;
     playbackMode = true;
 
@@ -655,41 +743,26 @@ async function jumpToTimestamp(timestamp, incremental = false) {
         '⏱ ' + dt.toLocaleTimeString();
     document.getElementById('timeDisplay').style.color = '#f59e0b'; // amber color
 
-    // For incremental updates (auto-playback), just fetch new data without clearing
-    if(incremental && prevTimestamp) {
-        // Fetch only the new second of data
-        try {
-            const url = `/api/playback/events?start=${prevTimestamp}&end=${timestamp}&limit=100`;
-            const resp = await fetch(url);
-            const data = await resp.json();
+    // Check if timestamp is in current buffer
+    const inBuffer = bufferStart && bufferEnd && timestamp >= bufferStart && timestamp <= bufferEnd;
 
-            console.log('events range', data);
+    if(incremental && inBuffer) {
+        // Just process this second from the buffer (already loaded)
+        processSecondFromBuffer(timestamp);
 
-            if(data.events && data.events.length > 0) {
-                data.events.forEach(event => {
-                    if(event.type === 'SystemMetrics') {
-                        lastStats = event;
-                        // Update charts incrementally
-                        cpuHistory.push(event.cpu || 0);
-                        memoryHistory.push(event.mem || 0);
-                        netDownHistory.push(event.net_recv || 0);
-                        netUpHistory.push(event.net_send || 0);
-                        if(cpuHistory.length > MAX_HISTORY) cpuHistory.shift();
-                        if(memoryHistory.length > MAX_HISTORY) memoryHistory.shift();
-                        if(netDownHistory.length > MAX_HISTORY) netDownHistory.shift();
-                        if(netUpHistory.length > MAX_HISTORY) netUpHistory.shift();
-                        render();
-                    } else if(event.type === 'ProcessSnapshot') {
-                        updateProcs(event);
-                    } else {
-                        addEventToLog(event);
-                    }
-                });
+        // Prefetch next chunk if approaching end of buffer (only once per segment)
+        if(timestamp >= bufferStart + PREFETCH_THRESHOLD && timestamp < bufferEnd) {
+            const nextSegmentEnd = bufferEnd + BUFFER_SIZE;
+            // Only prefetch if we haven't already fetched this segment
+            if(lastPrefetchEnd !== nextSegmentEnd) {
+                console.log('Prefetching next chunk from', bufferEnd + 1, 'to', nextSegmentEnd);
+                const nextBuffer = await fetchPlaybackBuffer(bufferEnd + 1, nextSegmentEnd);
+                // Merge into existing buffer
+                Object.assign(playbackBuffer, nextBuffer);
+                bufferEnd = nextSegmentEnd;
+                lastPrefetchEnd = nextSegmentEnd;
             }
-        } catch(e) {
-            console.error('Failed to load incremental data:', e);
         }
-        drawTimeline();
         return;
     }
 
@@ -700,55 +773,37 @@ async function jumpToTimestamp(timestamp, incremental = false) {
     netUpHistory.length = 0;
     Object.keys(diskIoHistoryMap).forEach(k => delete diskIoHistoryMap[k]);
 
-    // Clear event buffer and container
+    // Clear event buffer, keys, and container
     eventBuffer.length = 0;
+    eventKeys.clear();
     document.getElementById('eventsContainer').innerHTML = '';
 
     // Clean up prevValues cache to prevent memory leak
     cleanupPrevValues();
 
-    // Fetch historical data for this time point
-    // Use new simplified API: just pass timestamp, server finds last 60 SystemMetrics
+    // Fetch past 60 seconds for chart history using the count API
     try {
-        const url = `/api/playback/events?timestamp=${timestamp}&count=60`;
+        const historyUrl = `/api/playback/events?timestamp=${timestamp}&count=60`;
+        const historyResp = await fetch(historyUrl);
+        const historyData = await historyResp.json();
 
-        const resp = await fetch(url);
-        const data = await resp.json();
+        console.log('Fetched history', historyData);
 
-        console.log('events', data);
-
-        if(data.events && data.events.length > 0) {
-            // If we're using fallback data, show a visual indicator
+        if(historyData.events && historyData.events.length > 0) {
             const timeDisplay = document.getElementById('timeDisplay');
-            if(data.fallback) {
-                timeDisplay.title = 'No data at this time, showing most recent available data';
-            } else {
-                timeDisplay.title = 'Click to select time, Shift+Click to go Live';
-            }
+            timeDisplay.title = 'Click to select time, Shift+Click to go Live';
 
-            // Process events in order
-            let latestSystemMetrics = null;
-            let latestProcessSnapshot = null;
-            let systemMetricsCount = 0;
-
-            data.events.forEach(event => {
+            // Build chart history from past events (only SystemMetrics)
+            historyData.events.forEach(event => {
                 if(event.type === 'SystemMetrics') {
-                    latestSystemMetrics = event;
-                    systemMetricsCount++;
-
-                    // Build history for charts - collect all events first
                     cpuHistory.push(event.cpu || 0);
                     memoryHistory.push(event.mem || 0);
                     netDownHistory.push(event.net_recv || 0);
                     netUpHistory.push(event.net_send || 0);
-                } else if(event.type === 'ProcessSnapshot') {
-                    latestProcessSnapshot = event;
-                } else {
-                    addEventToLog(event);
                 }
             });
 
-            // Trim history arrays to keep only the most recent MAX_HISTORY items
+            // Trim to MAX_HISTORY
             if(cpuHistory.length > MAX_HISTORY) {
                 cpuHistory.splice(0, cpuHistory.length - MAX_HISTORY);
                 memoryHistory.splice(0, memoryHistory.length - MAX_HISTORY);
@@ -756,45 +811,32 @@ async function jumpToTimestamp(timestamp, incremental = false) {
                 netUpHistory.splice(0, netUpHistory.length - MAX_HISTORY);
             }
 
-            // Render the latest state
-            if(latestSystemMetrics) {
-                // Merge metadata (missing static/semi-static fields) into the latest metrics
-                if(data.metadata) {
-                    for(const key in data.metadata) {
-                        if(!latestSystemMetrics[key] || latestSystemMetrics[key] === null) {
-                            latestSystemMetrics[key] = data.metadata[key];
-                        }
-                    }
-
-                    // Update caches from metadata
-                    if(data.metadata.mem_total_bytes) cachedMemTotal = data.metadata.mem_total_bytes;
-                    if(data.metadata.swap_total_bytes) cachedSwapTotal = data.metadata.swap_total_bytes;
-                    if(data.metadata.disk_total_bytes) cachedDiskTotal = data.metadata.disk_total_bytes;
-                    if(data.metadata.filesystems) cachedFilesystems = data.metadata.filesystems;
-                    if(data.metadata.net_ip_address) cachedNetIp = data.metadata.net_ip_address;
-                    if(data.metadata.net_gateway) cachedNetGateway = data.metadata.net_gateway;
-                    if(data.metadata.net_dns) cachedNetDns = data.metadata.net_dns;
-                    if(data.metadata.kernel_version) cachedKernel = data.metadata.kernel_version;
-                    if(data.metadata.cpu_model) cachedCpuModel = data.metadata.cpu_model;
-                    if(data.metadata.cpu_mhz) cachedCpuMhz = data.metadata.cpu_mhz;
-                }
-
-                lastStats = latestSystemMetrics;
-                render();
-            } else {
-                console.log('NO latestSystemMetrics - skipping render!');
+            // Handle metadata
+            if(historyData.metadata) {
+                if(historyData.metadata.mem_total_bytes) cachedMemTotal = historyData.metadata.mem_total_bytes;
+                if(historyData.metadata.swap_total_bytes) cachedSwapTotal = historyData.metadata.swap_total_bytes;
+                if(historyData.metadata.disk_total_bytes) cachedDiskTotal = historyData.metadata.disk_total_bytes;
+                if(historyData.metadata.filesystems) cachedFilesystems = historyData.metadata.filesystems;
+                if(historyData.metadata.net_ip) cachedNetIp = historyData.metadata.net_ip;
+                if(historyData.metadata.net_gateway) cachedNetGateway = historyData.metadata.net_gateway;
+                if(historyData.metadata.net_dns) cachedNetDns = historyData.metadata.net_dns;
+                if(historyData.metadata.kernel_version) cachedKernel = historyData.metadata.kernel_version;
+                if(historyData.metadata.cpu_model) cachedCpuModel = historyData.metadata.cpu_model;
+                if(historyData.metadata.cpu_mhz) cachedCpuMhz = historyData.metadata.cpu_mhz;
             }
-            if(latestProcessSnapshot) {
-                updateProcs(latestProcessSnapshot);
-            }
-        } else {
-            // No data found at all
-            console.log('No data available');
-            document.getElementById('timeDisplay').title = 'No historical data available';
         }
     } catch(e) {
-        console.error('Failed to load historical data:', e);
+        console.error('Failed to load history:', e);
     }
+
+    // Fetch forward buffer for playback (60 seconds ahead)
+    bufferStart = timestamp;
+    bufferEnd = timestamp + BUFFER_SIZE;
+    playbackBuffer = await fetchPlaybackBuffer(bufferStart, bufferEnd);
+    lastPrefetchEnd = null; // Reset prefetch tracker for new buffer
+
+    // Process current second from buffer
+    processSecondFromBuffer(timestamp);
 
     // Update timeline visualization
     drawTimeline();
@@ -936,8 +978,9 @@ function goLive() {
     netUpHistory.length = 0;
     Object.keys(diskIoHistoryMap).forEach(k => delete diskIoHistoryMap[k]);
 
-    // Clear event buffer and container
+    // Clear event buffer, keys, and container
     eventBuffer.length = 0;
+    eventKeys.clear();
     document.getElementById('eventsContainer').innerHTML = '';
 
     // Clean up prevValues cache to prevent memory leak
@@ -1627,8 +1670,23 @@ function connectWebSocket(){
 }
 
 function addEventToLog(event){
+    // Deduplicate: check if this event already exists using O(1) Set lookup
+    // Events are considered duplicates if they have the same timestamp, type, and key identifiers
+    const eventKey = `${event.timestamp}_${event.type}_${event.pid || event.path || event.message || ''}`;
+
+    if(eventKeys.has(eventKey)) {
+        return; // Skip duplicate event
+    }
+
     eventBuffer.push(event);
-    if(eventBuffer.length > MAX_BUFFER) eventBuffer.shift();
+    eventKeys.add(eventKey);
+
+    if(eventBuffer.length > MAX_BUFFER) {
+        const removedEvent = eventBuffer.shift();
+        // Remove the key for the shifted event
+        const removedKey = `${removedEvent.timestamp}_${removedEvent.type}_${removedEvent.pid || removedEvent.path || removedEvent.message || ''}`;
+        eventKeys.delete(removedKey);
+    }
 
     const filter = document.getElementById('filterInput').value.toLowerCase();
     const evType = document.getElementById('eventType').value;

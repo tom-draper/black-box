@@ -3,12 +3,25 @@ use actix_web::{web, Error, HttpRequest, HttpResponse};
 use actix_web_actors::ws;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use time::OffsetDateTime;
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::broadcast::EventBroadcaster;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
+
+// Format current time as HH:MM:SS.mmm
+fn now_timestamp() -> String {
+    let now = OffsetDateTime::now_utc();
+    format!(
+        "{:02}:{:02}:{:02}.{:03}",
+        now.hour(),
+        now.minute(),
+        now.second(),
+        now.millisecond()
+    )
+}
 
 // WebSocket actor that streams events to connected clients
 pub struct WsSession {
@@ -29,7 +42,7 @@ impl WsSession {
         ctx.run_interval(HEARTBEAT_INTERVAL, |act, ctx| {
             // Check client heartbeat
             if Instant::now().duration_since(act.hb) > CLIENT_TIMEOUT {
-                println!("WebSocket client heartbeat failed, disconnecting");
+                println!("{} WebSocket client heartbeat failed, disconnecting", now_timestamp());
                 ctx.stop();
                 return;
             }
@@ -54,13 +67,13 @@ impl Actor for WsSession {
     type Context = ws::WebsocketContext<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
-        println!("WebSocket client connected");
+        println!("{} WebSocket client connected", now_timestamp());
         self.start_heartbeat(ctx);
         self.start_event_stream(ctx);
     }
 
     fn stopped(&mut self, _ctx: &mut Self::Context) {
-        println!("WebSocket client disconnected");
+        println!("{} WebSocket client disconnected", now_timestamp());
     }
 }
 
@@ -104,7 +117,7 @@ impl StreamHandler<Result<crate::event::Event, tokio_stream::wrappers::errors::B
                 }
             }
             Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(skipped)) => {
-                eprintln!("WebSocket client lagged, skipped {} events", skipped);
+                eprintln!("{} WebSocket client lagged, skipped {} events", now_timestamp(), skipped);
                 // Continue receiving, don't stop
             }
         }
