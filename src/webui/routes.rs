@@ -222,7 +222,7 @@ pub async fn index() -> HttpResponse {
             </div>
         </div>
     </div>
-    <div id="eventsContainer" class="font-mono max-h-96 p-2 overflow-y-auto bg-white border border-gray-200 mt-1" style="font-size:12px" title="Scrollable event log (last 1000 events)"></div>
+    <div id="eventsContainer" class="font-mono max-h-96 p-2 overflow-y-auto bg-white border border-gray-200 mt-1" style="font-size:12px; min-height: 384px;" title="Scrollable event log (last 1000 events)"></div>
     </div>
 </div>
 
