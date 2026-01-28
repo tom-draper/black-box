@@ -857,6 +857,29 @@ fn read_process_user(pid: u32) -> Result<String> {
     Ok("unknown".to_string())
 }
 
+fn read_process_uid(pid: u32) -> Result<u32> {
+    let status_path = format!("/proc/{}/status", pid);
+    let content = fs::read_to_string(&status_path).context("Failed to read status")?;
+
+    // Find Uid line: "Uid:\t1000\t1000\t1000\t1000"
+    for line in content.lines() {
+        if line.starts_with("Uid:") {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 2 {
+                return parts[1].parse::<u32>().context("Parse UID");
+            }
+        }
+    }
+
+    anyhow::bail!("UID not found")
+}
+
+fn read_process_working_dir(pid: u32) -> Result<String> {
+    let cwd_path = format!("/proc/{}/cwd", pid);
+    let cwd = std::fs::read_link(&cwd_path).context("Failed to read cwd symlink")?;
+    Ok(cwd.to_string_lossy().to_string())
+}
+
 fn resolve_uid_to_username(uid: u32) -> String {
     // Cache for UID -> username mappings
     static UID_CACHE: OnceLock<std::collections::HashMap<u32, String>> = OnceLock::new();
@@ -880,6 +903,7 @@ fn resolve_uid_to_username(uid: u32) -> String {
 }
 
 struct ProcessStat {
+    ppid: u32,
     state: String,
     utime: u64,
     stime: u64,
@@ -902,6 +926,7 @@ fn read_process_stat(pid: u32) -> Result<ProcessStat> {
     }
 
     Ok(ProcessStat {
+        ppid: parts[1].parse().unwrap_or(0),                     // Field 4 (PPID)
         state: parts[0].to_string(),                             // Field 3
         utime: parts[11].parse().unwrap_or(0),                   // Field 14
         stime: parts[12].parse().unwrap_or(0),                   // Field 15
@@ -946,8 +971,12 @@ fn count_process_fds(pid: u32) -> Result<u32> {
 #[derive(Debug, Clone)]
 pub struct ProcessInfo {
     pub pid: u32,
+    pub ppid: Option<u32>,
     pub name: String,
     pub cmdline: String,  // Full command line with arguments
+    pub working_dir: Option<String>,
+    pub user: Option<String>,
+    pub uid: Option<u32>,
     pub state: String,
 }
 
@@ -967,12 +996,21 @@ pub fn read_processes() -> Result<ProcessSnapshot> {
                     // Read full command line (fallback to name if unavailable)
                     let cmdline = read_process_cmdline(pid).unwrap_or_else(|_| name.clone());
 
+                    // Read additional process metadata (best effort)
+                    let working_dir = read_process_working_dir(pid).ok();
+                    let user = read_process_user(pid).ok();
+                    let uid = read_process_uid(pid).ok();
+
                     processes.insert(
                         pid,
                         ProcessInfo {
                             pid,
+                            ppid: Some(stat.ppid),
                             name,
                             cmdline,
+                            working_dir,
+                            user,
+                            uid,
                             state: stat.state,
                         },
                     );
@@ -1287,6 +1325,106 @@ fn parse_tcp_line(line: &str) -> Option<(String, u16)> {
     }
 
     None
+}
+
+// ===== Per-Process Network Connections =====
+
+#[derive(Debug, Clone)]
+pub struct ProcessConnection {
+    pub local_addr: String,
+    pub local_port: u16,
+    pub remote_addr: String,
+    pub remote_port: u16,
+    pub state: String,
+}
+
+pub fn read_process_connections(pid: u32) -> Result<Vec<ProcessConnection>> {
+    let mut connections = Vec::new();
+
+    // Read TCP connections
+    let tcp_path = format!("/proc/{}/net/tcp", pid);
+    if let Ok(content) = fs::read_to_string(&tcp_path) {
+        for line in content.lines().skip(1) {
+            if let Some(conn) = parse_connection_line(line) {
+                connections.push(conn);
+            }
+        }
+    }
+
+    // Read TCP6 connections
+    let tcp6_path = format!("/proc/{}/net/tcp6", pid);
+    if let Ok(content) = fs::read_to_string(&tcp6_path) {
+        for line in content.lines().skip(1) {
+            if let Some(conn) = parse_connection_line(line) {
+                connections.push(conn);
+            }
+        }
+    }
+
+    Ok(connections)
+}
+
+fn parse_connection_line(line: &str) -> Option<ProcessConnection> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() < 4 {
+        return None;
+    }
+
+    // Parse local address
+    let local: Vec<&str> = parts[1].split(':').collect();
+    if local.len() != 2 {
+        return None;
+    }
+
+    // Parse remote address
+    let remote: Vec<&str> = parts[2].split(':').collect();
+    if remote.len() != 2 {
+        return None;
+    }
+
+    let local_addr = parse_hex_addr(local[0])?;
+    let local_port = u16::from_str_radix(local[1], 16).ok()?;
+    let remote_addr = parse_hex_addr(remote[0])?;
+    let remote_port = u16::from_str_radix(remote[1], 16).ok()?;
+
+    // Parse state
+    let state = match parts[3] {
+        "01" => "ESTABLISHED",
+        "02" => "SYN_SENT",
+        "03" => "SYN_RECV",
+        "04" => "FIN_WAIT1",
+        "05" => "FIN_WAIT2",
+        "06" => "TIME_WAIT",
+        "07" => "CLOSE",
+        "08" => "CLOSE_WAIT",
+        "09" => "LAST_ACK",
+        "0A" => "LISTEN",
+        "0B" => "CLOSING",
+        _ => "UNKNOWN",
+    };
+
+    Some(ProcessConnection {
+        local_addr,
+        local_port,
+        remote_addr,
+        remote_port,
+        state: state.to_string(),
+    })
+}
+
+fn parse_hex_addr(hex: &str) -> Option<String> {
+    if hex.len() == 8 {
+        // IPv4
+        let bytes = (0..4)
+            .map(|i| u8::from_str_radix(&hex[i*2..(i+1)*2], 16).unwrap_or(0))
+            .collect::<Vec<_>>();
+        Some(format!("{}.{}.{}.{}", bytes[3], bytes[2], bytes[1], bytes[0]))
+    } else if hex.len() == 32 {
+        // IPv6 - simplified display
+        Some("::".to_string())
+    } else {
+        None
+    }
 }
 
 // ===== Top Processes =====
@@ -1667,6 +1805,8 @@ use std::hash::{Hash, Hasher};
 static PASSWD_HASH: OnceLock<Mutex<u64>> = OnceLock::new();
 static GROUP_HASH: OnceLock<Mutex<u64>> = OnceLock::new();
 static SUDOERS_HASH: OnceLock<Mutex<u64>> = OnceLock::new();
+static CRON_HASH: OnceLock<Mutex<u64>> = OnceLock::new();
+static SYSTEMD_HASH: OnceLock<Mutex<u64>> = OnceLock::new();
 
 fn hash_file(path: &str) -> Result<u64> {
     let content = fs::read_to_string(path)?;
@@ -1877,6 +2017,286 @@ fn get_loaded_modules() -> Result<std::collections::HashSet<String>> {
     }
 
     Ok(modules)
+}
+
+// ===== Cron Job Monitoring =====
+
+pub fn check_cron_changes() -> Result<Option<String>> {
+    let mut combined_hash = 0u64;
+    let mut hasher = DefaultHasher::new();
+
+    // Check system crontab
+    if let Ok(content) = fs::read_to_string("/etc/crontab") {
+        content.hash(&mut hasher);
+        combined_hash ^= hasher.finish();
+    }
+
+    // Check /etc/cron.d/
+    if let Ok(entries) = fs::read_dir("/etc/cron.d") {
+        for entry in entries.flatten() {
+            if let Ok(content) = fs::read_to_string(entry.path()) {
+                let mut h = DefaultHasher::new();
+                content.hash(&mut h);
+                combined_hash ^= h.finish();
+            }
+        }
+    }
+
+    // Check user crontabs in /var/spool/cron/crontabs/
+    if let Ok(entries) = fs::read_dir("/var/spool/cron/crontabs") {
+        for entry in entries.flatten() {
+            if let Ok(content) = fs::read_to_string(entry.path()) {
+                let mut h = DefaultHasher::new();
+                content.hash(&mut h);
+                combined_hash ^= h.finish();
+            }
+        }
+    }
+
+    // Also check /var/spool/cron/ (RHEL/CentOS style)
+    if let Ok(entries) = fs::read_dir("/var/spool/cron") {
+        for entry in entries.flatten() {
+            if entry.path().is_file() {
+                if let Ok(content) = fs::read_to_string(entry.path()) {
+                    let mut h = DefaultHasher::new();
+                    content.hash(&mut h);
+                    combined_hash ^= h.finish();
+                }
+            }
+        }
+    }
+
+    if combined_hash == 0 {
+        return Ok(None);
+    }
+
+    let mutex = CRON_HASH.get_or_init(|| Mutex::new(combined_hash));
+    let mut last_hash = mutex.lock().unwrap();
+
+    if *last_hash != combined_hash && *last_hash != 0 {
+        *last_hash = combined_hash;
+        return Ok(Some("Cron configuration modified (persistence risk)".to_string()));
+    }
+
+    if *last_hash == 0 {
+        *last_hash = combined_hash;
+    }
+
+    Ok(None)
+}
+
+// ===== Systemd Service Monitoring =====
+
+pub fn check_systemd_changes() -> Result<Option<String>> {
+    let mut combined_hash = 0u64;
+
+    // Check /etc/systemd/system/
+    if let Ok(entries) = fs::read_dir("/etc/systemd/system") {
+        for entry in entries.flatten() {
+            if entry.path().extension().and_then(|s| s.to_str()) == Some("service") {
+                if let Ok(content) = fs::read_to_string(entry.path()) {
+                    let mut hasher = DefaultHasher::new();
+                    content.hash(&mut hasher);
+                    combined_hash ^= hasher.finish();
+                }
+            }
+        }
+    }
+
+    // Check /usr/lib/systemd/system/ for user-installed services
+    if let Ok(entries) = fs::read_dir("/usr/lib/systemd/system") {
+        for entry in entries.flatten() {
+            if entry.path().extension().and_then(|s| s.to_str()) == Some("service") {
+                if let Ok(content) = fs::read_to_string(entry.path()) {
+                    let mut hasher = DefaultHasher::new();
+                    content.hash(&mut hasher);
+                    combined_hash ^= hasher.finish();
+                }
+            }
+        }
+    }
+
+    if combined_hash == 0 {
+        return Ok(None);
+    }
+
+    let mutex = SYSTEMD_HASH.get_or_init(|| Mutex::new(combined_hash));
+    let mut last_hash = mutex.lock().unwrap();
+
+    if *last_hash != combined_hash && *last_hash != 0 {
+        *last_hash = combined_hash;
+        return Ok(Some("Systemd service configuration modified (persistence risk)".to_string()));
+    }
+
+    if *last_hash == 0 {
+        *last_hash = combined_hash;
+    }
+
+    Ok(None)
+}
+
+// ===== Package Manager Detection =====
+
+#[derive(Debug, Clone)]
+pub struct PackageOperation {
+    pub package_manager: String,
+    pub operation: String,  // install, remove, update
+    pub packages: Vec<String>,
+}
+
+pub fn detect_package_manager_operation(cmdline: &str) -> Option<PackageOperation> {
+    let lower = cmdline.to_lowercase();
+
+    // apt/apt-get
+    if lower.contains("apt-get") || lower.contains("apt ") {
+        if lower.contains("install") {
+            let packages = extract_package_names(&lower, &["install"]);
+            return Some(PackageOperation {
+                package_manager: "apt".to_string(),
+                operation: "install".to_string(),
+                packages,
+            });
+        } else if lower.contains("remove") || lower.contains("purge") {
+            let packages = extract_package_names(&lower, &["remove", "purge"]);
+            return Some(PackageOperation {
+                package_manager: "apt".to_string(),
+                operation: "remove".to_string(),
+                packages,
+            });
+        }
+    }
+
+    // pip
+    if lower.contains("pip") || lower.contains("pip3") {
+        if lower.contains("install") {
+            let packages = extract_package_names(&lower, &["install"]);
+            return Some(PackageOperation {
+                package_manager: "pip".to_string(),
+                operation: "install".to_string(),
+                packages,
+            });
+        } else if lower.contains("uninstall") {
+            let packages = extract_package_names(&lower, &["uninstall"]);
+            return Some(PackageOperation {
+                package_manager: "pip".to_string(),
+                operation: "remove".to_string(),
+                packages,
+            });
+        }
+    }
+
+    // npm
+    if lower.contains("npm") {
+        if lower.contains("install") || lower.contains(" i ") {
+            let packages = extract_package_names(&lower, &["install", "i"]);
+            return Some(PackageOperation {
+                package_manager: "npm".to_string(),
+                operation: "install".to_string(),
+                packages,
+            });
+        } else if lower.contains("uninstall") || lower.contains("remove") {
+            let packages = extract_package_names(&lower, &["uninstall", "remove"]);
+            return Some(PackageOperation {
+                package_manager: "npm".to_string(),
+                operation: "remove".to_string(),
+                packages,
+            });
+        }
+    }
+
+    // cargo
+    if lower.contains("cargo") {
+        if lower.contains("install") {
+            let packages = extract_package_names(&lower, &["install"]);
+            return Some(PackageOperation {
+                package_manager: "cargo".to_string(),
+                operation: "install".to_string(),
+                packages,
+            });
+        } else if lower.contains("uninstall") {
+            let packages = extract_package_names(&lower, &["uninstall"]);
+            return Some(PackageOperation {
+                package_manager: "cargo".to_string(),
+                operation: "remove".to_string(),
+                packages,
+            });
+        }
+    }
+
+    // yum/dnf
+    if lower.contains("yum") || lower.contains("dnf") {
+        let pm = if lower.contains("dnf") { "dnf" } else { "yum" };
+        if lower.contains("install") {
+            let packages = extract_package_names(&lower, &["install"]);
+            return Some(PackageOperation {
+                package_manager: pm.to_string(),
+                operation: "install".to_string(),
+                packages,
+            });
+        } else if lower.contains("remove") || lower.contains("erase") {
+            let packages = extract_package_names(&lower, &["remove", "erase"]);
+            return Some(PackageOperation {
+                package_manager: pm.to_string(),
+                operation: "remove".to_string(),
+                packages,
+            });
+        }
+    }
+
+    None
+}
+
+fn extract_package_names(cmdline: &str, keywords: &[&str]) -> Vec<String> {
+    let parts: Vec<&str> = cmdline.split_whitespace().collect();
+    let mut packages = Vec::new();
+    let mut found_keyword = false;
+
+    for part in parts {
+        if keywords.iter().any(|k| part.contains(k)) {
+            found_keyword = true;
+            continue;
+        }
+
+        if found_keyword {
+            // Skip flags
+            if part.starts_with('-') {
+                continue;
+            }
+            // Skip common non-package words
+            if part == "install" || part == "remove" || part == "uninstall"
+               || part == "purge" || part == "erase" || part == "-y"
+               || part == "--yes" || part == "-g" || part == "--global" {
+                continue;
+            }
+            packages.push(part.to_string());
+        }
+    }
+
+    packages
+}
+
+// ===== Sensitive File Access Monitoring =====
+
+static SENSITIVE_PATHS: &[&str] = &[
+    "/etc/shadow",
+    "/etc/gshadow",
+    "/.ssh/id_rsa",
+    "/.ssh/id_ed25519",
+    "/.aws/credentials",
+    "/.env",
+    "/credentials",
+    "/secrets",
+    "/.kube/config",
+    "/.docker/config.json",
+];
+
+pub fn is_sensitive_file_path(path: &str) -> bool {
+    for sensitive in SENSITIVE_PATHS {
+        if path.contains(sensitive) {
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(test)]

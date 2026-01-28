@@ -7,7 +7,8 @@ use std::thread;
 use std::time::Duration;
 use time::OffsetDateTime;
 
-use crate::event::{Event, FileSystemEvent, FileSystemEventKind};
+use crate::event::{Event, FileSystemEvent, FileSystemEventKind, SecurityEvent, SecurityEventKind};
+use crate::collector::is_sensitive_file_path;
 
 /// Spawn a file watcher in a background thread
 pub fn spawn_file_watcher(watch_dirs: Vec<String>, event_sender: Sender<Event>) -> Result<()> {
@@ -126,6 +127,18 @@ impl FileWatcher {
                 };
                 let _ = self.event_sender.send(Event::FileSystemEvent(fs_event));
                 event_count += 1;
+
+                // Check for sensitive file creation
+                if is_sensitive_file_path(&path_str) {
+                    let sec_event = SecurityEvent {
+                        ts,
+                        kind: SecurityEventKind::SensitiveFileAccessed,
+                        user: "unknown".to_string(),
+                        source_ip: None,
+                        message: format!("Sensitive file created: {}", path_str),
+                    };
+                    let _ = self.event_sender.send(Event::SecurityEvent(sec_event));
+                }
             }
 
             if event.mask.contains(inotify::EventMask::MODIFY) {
@@ -137,6 +150,18 @@ impl FileWatcher {
                 };
                 let _ = self.event_sender.send(Event::FileSystemEvent(fs_event));
                 event_count += 1;
+
+                // Check for sensitive file modification
+                if is_sensitive_file_path(&path_str) {
+                    let sec_event = SecurityEvent {
+                        ts,
+                        kind: SecurityEventKind::SensitiveFileAccessed,
+                        user: "unknown".to_string(),
+                        source_ip: None,
+                        message: format!("Sensitive file modified: {}", path_str),
+                    };
+                    let _ = self.event_sender.send(Event::SecurityEvent(sec_event));
+                }
             }
 
             if event.mask.contains(inotify::EventMask::DELETE) {

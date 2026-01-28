@@ -3,6 +3,7 @@ use actix_web::{web, Error, HttpRequest, HttpResponse};
 use actix_web_actors::ws;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio_stream::wrappers::BroadcastStream;
 
 use crate::broadcast::EventBroadcaster;
 
@@ -37,38 +38,15 @@ impl WsSession {
         });
     }
 
-    // Start event streaming from broadcaster
+    // Start event streaming from broadcaster (event-driven, not polling!)
     fn start_event_stream(&self, ctx: &mut ws::WebsocketContext<Self>) {
-        let mut rx = self.broadcaster.subscribe();
+        let rx = self.broadcaster.subscribe();
 
-        ctx.run_interval(Duration::from_millis(50), move |_act, ctx| {
-            // Try to receive multiple events per iteration (batch processing)
-            let mut count = 0;
-            while count < 10 {
-                match rx.try_recv() {
-                    Ok(event) => {
-                        // Send all events to client - client-side handles filtering for display
-                        // Serialize event to JSON and send to client
-                        match serde_json::to_string(&event_to_json(&event)) {
-                            Ok(json) => ctx.text(json),
-                            Err(e) => {
-                                eprintln!("Failed to serialize event: {}", e);
-                            }
-                        }
-                        count += 1;
-                    }
-                    Err(tokio::sync::broadcast::error::TryRecvError::Empty) => break,
-                    Err(tokio::sync::broadcast::error::TryRecvError::Lagged(skipped)) => {
-                        eprintln!("WebSocket client lagged, skipped {} events", skipped);
-                        break;
-                    }
-                    Err(tokio::sync::broadcast::error::TryRecvError::Closed) => {
-                        ctx.stop();
-                        break;
-                    }
-                }
-            }
-        });
+        // Wrap the broadcast receiver in a stream and add it to the actor
+        // This is event-driven: we only process when events arrive (no polling!)
+        let stream = BroadcastStream::new(rx);
+
+        ctx.add_stream(stream);
     }
 }
 
@@ -86,6 +64,7 @@ impl Actor for WsSession {
     }
 }
 
+// Handle incoming WebSocket protocol messages from the client
 impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsSession {
     fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
         match msg {
@@ -111,6 +90,27 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsSession {
     }
 }
 
+// Handle incoming events from the broadcast stream (event-driven, not polling!)
+impl StreamHandler<Result<crate::event::Event, tokio_stream::wrappers::errors::BroadcastStreamRecvError>> for WsSession {
+    fn handle(&mut self, msg: Result<crate::event::Event, tokio_stream::wrappers::errors::BroadcastStreamRecvError>, ctx: &mut Self::Context) {
+        match msg {
+            Ok(event) => {
+                // Serialize and send event
+                match event_to_json_string(&event) {
+                    Ok(json) => ctx.text(json),
+                    Err(e) => {
+                        eprintln!("Failed to serialize event: {}", e);
+                    }
+                }
+            }
+            Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(skipped)) => {
+                eprintln!("WebSocket client lagged, skipped {} events", skipped);
+                // Continue receiving, don't stop
+            }
+        }
+    }
+}
+
 // WebSocket handler endpoint
 pub async fn ws_handler(
     req: HttpRequest,
@@ -121,7 +121,13 @@ pub async fn ws_handler(
     ws::start(session, &req, stream)
 }
 
-// Convert Event to JSON format (same as API)
+// Optimized: Serialize event directly to JSON string
+fn event_to_json_string(event: &crate::event::Event) -> Result<String, serde_json::Error> {
+    // Convert to serde_json::Value then serialize (optimized with pre-sized allocations)
+    serde_json::to_string(&event_to_json(event))
+}
+
+// Convert Event to JSON format (same as API) - kept for large events
 fn event_to_json(event: &crate::event::Event) -> serde_json::Value {
     use crate::event::Event;
 
@@ -129,9 +135,66 @@ fn event_to_json(event: &crate::event::Event) -> serde_json::Value {
         Event::SystemMetrics(m) => {
             // Percentages are now calculated every second in main.rs using cached totals
 
+            // Pre-compute nested arrays outside json! macro
+            let mut disks = Vec::with_capacity(m.per_disk_metrics.len());
+            for d in &m.per_disk_metrics {
+                disks.push(serde_json::json!({
+                    "device": &d.device_name,
+                    "read": d.read_bytes_per_sec,
+                    "write": d.write_bytes_per_sec,
+                    "temp": d.temp_celsius,
+                }));
+            }
+
+            let filesystems = match &m.filesystems {
+                Some(fs_list) => {
+                    let mut filesystems = Vec::with_capacity(fs_list.len());
+                    for fs in fs_list {
+                        filesystems.push(serde_json::json!({
+                            "filesystem": &fs.filesystem,
+                            "mount": &fs.mount_point,
+                            "total": fs.total_bytes,
+                            "used": fs.used_bytes,
+                            "available": fs.available_bytes,
+                        }));
+                    }
+                    filesystems
+                },
+                None => Vec::new()
+            };
+
+            let users = match &m.logged_in_users {
+                Some(user_list) => {
+                    let mut users = Vec::with_capacity(user_list.len());
+                    for u in user_list {
+                        users.push(serde_json::json!({
+                            "username": &u.username,
+                            "terminal": &u.terminal,
+                            "remote_host": &u.remote_host,
+                        }));
+                    }
+                    users
+                },
+                None => Vec::new()
+            };
+
+            let fans = match &m.fans {
+                Some(fan_list) => {
+                    let mut fans = Vec::with_capacity(fan_list.len());
+                    for f in fan_list {
+                        fans.push(serde_json::json!({
+                            "label": &f.label,
+                            "rpm": f.rpm,
+                        }));
+                    }
+                    fans
+                },
+                None => Vec::new()
+            };
+
             let json_value = serde_json::json!({
                 "type": "SystemMetrics",
-                "timestamp": m.ts.unix_timestamp_nanos() / 1_000_000,  // Milliseconds for consistency with playback
+                "timestamp": m.ts.unix_timestamp_nanos() / 1_000_000,
                 "kernel": m.kernel_version,
                 "cpu_model": m.cpu_model,
                 "cpu_mhz": m.cpu_mhz,
@@ -152,24 +215,9 @@ fn event_to_json(event: &crate::event::Event) -> serde_json::Value {
                 "disk_total": m.disk_total_bytes,
                 "disk_read": m.disk_read_bytes_per_sec,
                 "disk_write": m.disk_write_bytes_per_sec,
-                "per_disk": m.per_disk_metrics.iter().map(|d| serde_json::json!({
-                    "device": d.device_name,
-                    "read": d.read_bytes_per_sec,
-                    "write": d.write_bytes_per_sec,
-                    "temp": d.temp_celsius,
-                })).collect::<Vec<_>>(),
-                "filesystems": m.filesystems.as_ref().map(|fs_list| fs_list.iter().map(|fs| serde_json::json!({
-                    "filesystem": fs.filesystem,
-                    "mount": fs.mount_point,
-                    "total": fs.total_bytes,
-                    "used": fs.used_bytes,
-                    "available": fs.available_bytes,
-                })).collect::<Vec<_>>()).unwrap_or_default(),
-                "users": m.logged_in_users.as_ref().map(|user_list| user_list.iter().map(|u| serde_json::json!({
-                    "username": u.username,
-                    "terminal": u.terminal,
-                    "remote_host": u.remote_host,
-                })).collect::<Vec<_>>()).unwrap_or_default(),
+                "per_disk": disks,
+                "filesystems": filesystems,
+                "users": users,
                 "net_interface": m.net_interface,
                 "net_ip": m.net_ip_address,
                 "net_gateway": m.net_gateway,
@@ -187,10 +235,7 @@ fn event_to_json(event: &crate::event::Event) -> serde_json::Value {
                 "gpu_mem_freq": m.gpu.mem_freq_mhz,
                 "gpu_temp2": m.gpu.gpu_temp_celsius,
                 "gpu_power": m.gpu.power_watts,
-                "fans": m.fans.as_ref().map(|fan_list| fan_list.iter().map(|f| serde_json::json!({
-                    "label": f.label,
-                    "rpm": f.rpm,
-                })).collect::<Vec<_>>()).unwrap_or_default(),
+                "fans": fans,
             });
 
             json_value
@@ -218,22 +263,29 @@ fn event_to_json(event: &crate::event::Event) -> serde_json::Value {
             "kind": format!("{:?}", a.kind),
             "message": a.message,
         }),
-        Event::ProcessSnapshot(p) => serde_json::json!({
-            "type": "ProcessSnapshot",
-            "timestamp": p.ts.unix_timestamp_nanos() / 1_000_000,
-            "count": p.processes.len(),
-            "total_processes": p.total_processes,
-            "running_processes": p.running_processes,
-            "processes": p.processes.iter().map(|proc| serde_json::json!({
-                "pid": proc.pid,
-                "name": proc.name,
-                "cmdline": proc.cmdline,
-                "state": proc.state,
-                "cpu_percent": proc.cpu_percent,
-                "mem_bytes": proc.mem_bytes,
-                "num_threads": proc.num_threads,
-            })).collect::<Vec<_>>(),
-        }),
+        Event::ProcessSnapshot(p) => {
+            let mut processes = Vec::with_capacity(p.processes.len());
+            for proc in &p.processes {
+                processes.push(serde_json::json!({
+                    "pid": proc.pid,
+                    "name": &proc.name,
+                    "cmdline": &proc.cmdline,
+                    "state": &proc.state,
+                    "user": &proc.user,
+                    "cpu_percent": proc.cpu_percent,
+                    "mem_bytes": proc.mem_bytes,
+                    "num_threads": proc.num_threads,
+                }));
+            }
+            serde_json::json!({
+                "type": "ProcessSnapshot",
+                "timestamp": p.ts.unix_timestamp_nanos() / 1_000_000,
+                "count": p.processes.len(),
+                "total_processes": p.total_processes,
+                "running_processes": p.running_processes,
+                "processes": processes,
+            })
+        },
         Event::FileSystemEvent(f) => serde_json::json!({
             "type": "FileSystemEvent",
             "timestamp": f.ts.unix_timestamp_nanos() / 1_000_000,

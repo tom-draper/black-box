@@ -120,9 +120,14 @@ pub struct FilesystemInfo {
 pub struct ProcessLifecycle {
     pub ts: OffsetDateTime,
     pub pid: u32,
+    pub ppid: Option<u32>,           // Parent process ID
     pub name: String,
-    pub cmdline: String,  // Full command line with arguments
+    pub cmdline: String,             // Full command line with arguments
+    pub working_dir: Option<String>, // Working directory when started
+    pub user: Option<String>,        // Username
+    pub uid: Option<u32>,            // User ID
     pub kind: ProcessLifecycleKind,
+    pub exit_code: Option<i32>,      // Exit code (only for Exited kind)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,6 +190,13 @@ pub enum SecurityEventKind {
     ListeningPortClosed,
     KernelModuleLoaded,
     KernelModuleUnloaded,
+    // Persistence and package management
+    CronJobModified,
+    SystemdServiceModified,
+    PackageInstalled,
+    PackageRemoved,
+    // Sensitive file access
+    SensitiveFileAccessed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

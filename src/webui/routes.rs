@@ -222,7 +222,7 @@ pub async fn index() -> HttpResponse {
             </div>
         </div>
     </div>
-    <div id="eventsContainer" class="font-mono max-h-96 p-2 overflow-y-auto bg-white border border-gray-200" style="font-size:12px" title="Scrollable event log (last 1000 events)"></div>
+    <div id="eventsContainer" class="font-mono max-h-96 p-2 overflow-y-auto bg-white border border-gray-200 mt-1" style="font-size:12px" title="Scrollable event log (last 1000 events)"></div>
     </div>
 </div>
 
@@ -250,12 +250,70 @@ let cachedCpuMhz = null;
 
 // Previous values cache for change detection (optimization to avoid unnecessary DOM updates)
 const prevValues = {};
+let prevValueCleanupCounter = 0;
+
+// Periodically clean up prevValues to prevent memory leak
+function cleanupPrevValues() {
+    const keys = Object.keys(prevValues);
+    // Only keep entries for elements that still exist in the DOM
+    keys.forEach(key => {
+        // Extract the actual element ID (remove suffixes like _text, _html, _style_, _class)
+        const baseId = key.split('_')[0];
+        if (!document.getElementById(baseId) && !document.getElementById(key)) {
+            delete prevValues[key];
+        }
+    });
+}
+
+// ===== Performance Optimizations for WebSocket Updates (1Hz) =====
+// These optimizations ensure smooth 1-second updates without stressing system resources:
+// 1. requestAnimationFrame batching - all canvas redraws happen in single animation frame
+// 2. Canvas context caching - avoid repeated getContext() calls
+// 3. Batch fillRect by color - reduce canvas state changes (huge performance gain)
+// 4. DOM element caching - reuse table rows instead of recreating
+// 5. Change detection - only update DOM when values actually change
+// 6. Document fragments - batch DOM insertions to avoid reflows
+// 7. Alpha channel disabled - faster canvas rendering
+// 8. Switch statements - faster than if-else chains
+
+// Performance optimization: batch chart updates with requestAnimationFrame
+let chartUpdateQueued = false;
+let chartsNeedingUpdate = new Set();
+
+function queueChartUpdate(chartId) {
+    chartsNeedingUpdate.add(chartId);
+    if (!chartUpdateQueued) {
+        chartUpdateQueued = true;
+        requestAnimationFrame(() => {
+            chartsNeedingUpdate.forEach(id => {
+                switch(id) {
+                    case 'cpu': drawChart('cpuChart', cpuHistory); break;
+                    case 'memory': drawChart('memoryChart', memoryHistory); break;
+                    case 'netDown': drawNetworkChart('netDownChart', netDownHistory); break;
+                    case 'netUp': drawNetworkChart('netUpChart', netUpHistory); break;
+                }
+            });
+            chartsNeedingUpdate.clear();
+            chartUpdateQueued = false;
+        });
+    }
+}
+
+// Cache canvas contexts to avoid repeated getContext calls
+const canvasContextCache = {};
 
 // Helper function to update DOM element only if value changed
 function updateIfChanged(id, value, updateFn) {
     if (prevValues[id] !== value) {
         prevValues[id] = value;
         updateFn(value);
+    }
+
+    // Periodically clean up stale entries (every 100 calls)
+    prevValueCleanupCounter++;
+    if (prevValueCleanupCounter >= 100) {
+        prevValueCleanupCounter = 0;
+        cleanupPrevValues();
     }
 }
 
@@ -348,6 +406,8 @@ async function fetchTimeline() {
         const resp = await fetch('/api/timeline');
         const data = await resp.json();
         timelineData = data;
+
+        console.log('timeline', data);
 
         if(data.timeline && data.timeline.length > 0) {
             const canvas = document.getElementById('timelineChart');
@@ -531,7 +591,19 @@ document.getElementById('timelineChart').addEventListener('mousemove', (e) => {
     const hoverTimestamp = firstTs + (hoverRatio * timeRange);
 
     const date = new Date(hoverTimestamp * 1000);
-    canvas.title = `Jump to ${date.toLocaleString()}`;
+    const now = new Date();
+
+    // Check if the date is today
+    const isToday = date.getFullYear() === now.getFullYear() &&
+                    date.getMonth() === now.getMonth() &&
+                    date.getDate() === now.getDate();
+
+    // If today, show just the time; otherwise show full date
+    const displayText = isToday
+        ? date.toTimeString().substring(0, 8)
+        : formatDate(date);
+
+    canvas.title = `Jump to ${displayText}`;
 });
 
 // Fetch available time range on load
@@ -541,6 +613,8 @@ async function fetchPlaybackInfo() {
         const data = await resp.json();
         firstTimestamp = data.first_timestamp;
         lastTimestamp = data.last_timestamp;
+
+        console.log('timestamp range', firstTimestamp, lastTimestamp);
 
         if(firstTimestamp && lastTimestamp) {
             const duration = lastTimestamp - firstTimestamp;
@@ -589,6 +663,8 @@ async function jumpToTimestamp(timestamp, incremental = false) {
             const resp = await fetch(url);
             const data = await resp.json();
 
+            console.log('events range', data);
+
             if(data.events && data.events.length > 0) {
                 data.events.forEach(event => {
                     if(event.type === 'SystemMetrics') {
@@ -628,6 +704,9 @@ async function jumpToTimestamp(timestamp, incremental = false) {
     eventBuffer.length = 0;
     document.getElementById('eventsContainer').innerHTML = '';
 
+    // Clean up prevValues cache to prevent memory leak
+    cleanupPrevValues();
+
     // Fetch historical data for this time point
     // Use new simplified API: just pass timestamp, server finds last 60 SystemMetrics
     try {
@@ -636,7 +715,7 @@ async function jumpToTimestamp(timestamp, incremental = false) {
         const resp = await fetch(url);
         const data = await resp.json();
 
-        console.log(data);
+        console.log('events', data);
 
         if(data.events && data.events.length > 0) {
             // If we're using fallback data, show a visual indicator
@@ -861,6 +940,9 @@ function goLive() {
     eventBuffer.length = 0;
     document.getElementById('eventsContainer').innerHTML = '';
 
+    // Clean up prevValues cache to prevent memory leak
+    cleanupPrevValues();
+
     // Update timeline visualization (clears vertical line)
     drawTimeline();
 }
@@ -1012,63 +1094,115 @@ function getUsageColor(pct){
 
 function drawChart(canvasId, history){
     const canvas = document.getElementById(canvasId);
-    const ctx = canvas.getContext('2d');
+    if (!canvas) return;
+
+    // Use cached context or create new one
+    let ctx = canvasContextCache[canvasId];
+    if (!ctx) {
+        ctx = canvas.getContext('2d', { alpha: false }); // alpha: false for better performance
+        canvasContextCache[canvasId] = ctx;
+    }
+
     const dpr = window.devicePixelRatio || 1;
 
-    // Set canvas size accounting for device pixel ratio
+    // Set canvas size accounting for device pixel ratio (only if changed)
     const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    ctx.scale(dpr, dpr);
+    const newWidth = rect.width * dpr;
+    const newHeight = rect.height * dpr;
+
+    if (canvas.width !== newWidth || canvas.height !== newHeight) {
+        canvas.width = newWidth;
+        canvas.height = newHeight;
+        ctx.scale(dpr, dpr);
+    }
 
     const width = rect.width;
     const height = rect.height;
     const barWidth = width / MAX_HISTORY;
 
-    // Clear canvas
-    ctx.clearRect(0, 0, width, height);
+    // Clear canvas and set background to gray-50
+    canvas.width = canvas.width;
+    ctx.scale(dpr, dpr);
+    ctx.fillStyle = '#f9fafb'; // gray-50
+    ctx.fillRect(0, 0, width, height);
 
-    // Draw bars from right to left (newest on right)
+    // Batch fillRect calls by color to reduce state changes
+    const barsByColor = {};
     history.forEach((pct, i) => {
         const x = (MAX_HISTORY - history.length + i) * barWidth;
         const barHeight = (pct / 100) * height;
         const y = height - barHeight;
+        const color = getUsageColor(pct);
 
-        ctx.fillStyle = getUsageColor(pct);
-        ctx.fillRect(x, y, barWidth, barHeight);
+        if (!barsByColor[color]) barsByColor[color] = [];
+        barsByColor[color].push({x, y, barWidth, barHeight});
+    });
+
+    // Draw all bars of the same color together
+    Object.keys(barsByColor).forEach(color => {
+        ctx.fillStyle = color;
+        barsByColor[color].forEach(bar => {
+            ctx.fillRect(bar.x, bar.y, bar.barWidth, bar.barHeight);
+        });
     });
 }
 
 function drawNetworkChart(canvasId, history){
     const canvas = document.getElementById(canvasId);
-    const ctx = canvas.getContext('2d');
+    if (!canvas) return;
+
+    // Use cached context or create new one
+    let ctx = canvasContextCache[canvasId];
+    if (!ctx) {
+        ctx = canvas.getContext('2d', { alpha: false }); // alpha: false for better performance
+        canvasContextCache[canvasId] = ctx;
+    }
+
     const dpr = window.devicePixelRatio || 1;
 
-    // Set canvas size accounting for device pixel ratio
+    // Set canvas size accounting for device pixel ratio (only if changed)
     const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    ctx.scale(dpr, dpr);
+    const newWidth = rect.width * dpr;
+    const newHeight = rect.height * dpr;
+
+    if (canvas.width !== newWidth || canvas.height !== newHeight) {
+        canvas.width = newWidth;
+        canvas.height = newHeight;
+        ctx.scale(dpr, dpr);
+    }
 
     const width = rect.width;
     const height = rect.height;
     const barWidth = width / MAX_HISTORY;
 
-    // Clear canvas
-    ctx.clearRect(0, 0, width, height);
+    // Clear canvas and set background to gray-50
+    canvas.width = canvas.width;
+    ctx.scale(dpr, dpr);
+    ctx.fillStyle = '#f9fafb'; // gray-50
+    ctx.fillRect(0, 0, width, height);
 
     // Find max value for scaling
     const maxVal = Math.max(...history, 1); // At least 1 to avoid division by zero
 
-    // Draw bars from right to left (newest on right)
+    // Batch fillRect calls by color to reduce state changes
+    const barsByColor = {};
     history.forEach((val, i) => {
         const x = (MAX_HISTORY - history.length + i) * barWidth;
         const pct = (val / maxVal) * 100;
         const barHeight = (val / maxVal) * height;
         const y = height - barHeight;
+        const color = getUsageColor(pct);
 
-        ctx.fillStyle = getUsageColor(pct);
-        ctx.fillRect(x, y, barWidth, barHeight);
+        if (!barsByColor[color]) barsByColor[color] = [];
+        barsByColor[color].push({x, y, barWidth, barHeight});
+    });
+
+    // Draw all bars of the same color together
+    Object.keys(barsByColor).forEach(color => {
+        ctx.fillStyle = color;
+        barsByColor[color].forEach(bar => {
+            ctx.fillRect(bar.x, bar.y, bar.barWidth, bar.barHeight);
+        });
     });
 }
 
@@ -1179,14 +1313,50 @@ function updateDiskIo(disks){
     });
 }
 
+// Cache for process table rows to avoid recreating DOM elements
+const procRowCache = {};
+
 function updateProcTable(tableId, procs, memTotal){
     const tbody = document.getElementById(tableId);
-    tbody.innerHTML = '';
-    procs.forEach(p => {
+    if (!tbody) return;
+
+    // Build new rows efficiently
+    const fragment = document.createDocumentFragment();
+    const newRows = [];
+
+    procs.forEach((p, i) => {
         const memPct = memTotal > 0 ? (p.mem_bytes / memTotal) * 100 : 0;
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${p.name}</td><td class="text-gray-400">${p.user || '-'}</td><td>${p.pid}</td><td class="text-right">${p.cpu_percent.toFixed(1)}%</td><td class="text-right">${memPct.toFixed(1)}%</td>`;
-        tbody.appendChild(tr);
+        const rowId = `${tableId}_${p.pid}`;
+
+        // Check if we can reuse an existing row
+        let tr = procRowCache[rowId];
+        if (!tr) {
+            tr = document.createElement('tr');
+            tr.id = rowId;
+            procRowCache[rowId] = tr;
+        }
+
+        // Only update if data changed (check using cache)
+        const rowData = `${p.name}|${p.user}|${p.pid}|${p.cpu_percent.toFixed(1)}|${memPct.toFixed(1)}`;
+        if (prevValues[`${rowId}_data`] !== rowData) {
+            prevValues[`${rowId}_data`] = rowData;
+            tr.innerHTML = `<td>${p.name}</td><td class="pr-2">${p.user || '-'}</td><td>${p.pid}</td><td class="text-right">${p.cpu_percent.toFixed(1)}%</td><td class="text-right">${memPct.toFixed(1)}%</td>`;
+        }
+
+        fragment.appendChild(tr);
+        newRows.push(rowId);
+    });
+
+    // Replace table contents efficiently
+    tbody.innerHTML = '';
+    tbody.appendChild(fragment);
+
+    // Clean up cache for rows no longer in use
+    Object.keys(procRowCache).forEach(key => {
+        if (key.startsWith(tableId + '_') && !newRows.includes(key)) {
+            delete procRowCache[key];
+            delete prevValues[`${key}_data`];
+        }
     });
 }
 
@@ -1243,7 +1413,7 @@ function render(){
         // Update CPU history
         cpuHistory.push(e.cpu);
         if(cpuHistory.length > MAX_HISTORY) cpuHistory.shift();
-        updateCpuChart();
+        queueChartUpdate('cpu');
     }
     (e.per_core_cpu || []).forEach((v, i) => updateCoreBar(`core_${i}`, v, document.getElementById('cpuCoresContainer'), i));
 
@@ -1267,7 +1437,7 @@ function render(){
         // Update memory history
         memoryHistory.push(e.mem);
         if(memoryHistory.length > MAX_HISTORY) memoryHistory.shift();
-        updateMemoryChart();
+        queueChartUpdate('memory');
     }
     if(e.cpu_temp){
         const color = e.cpu_temp >= 80 ? 'text-red-600' : e.cpu_temp >= 60 ? 'text-yellow-600' : 'text-green-600';
@@ -1315,11 +1485,11 @@ function render(){
     // Update network history
     netDownHistory.push(e.net_recv || 0);
     if(netDownHistory.length > MAX_HISTORY) netDownHistory.shift();
-    updateNetDownChart();
+    queueChartUpdate('netDown');
 
     netUpHistory.push(e.net_send || 0);
     if(netUpHistory.length > MAX_HISTORY) netUpHistory.shift();
-    updateNetUpChart();
+    queueChartUpdate('netUp');
 
     // Show RX and TX stats with errors/drops
     const rxErrors = e.net_recv_errors || 0;
@@ -1426,20 +1596,26 @@ function connectWebSocket(){
         updateConnectionStatus();
     };
     ws.onmessage = (ev) => {
-        if(isPaused) {
-            console.log('WebSocket message ignored (paused)');
-            return;
-        }
-        if(playbackMode) {
-            console.log('WebSocket message ignored (playback mode)');
-            return;
-        }
+        // Fast-path early returns
+        if(isPaused || playbackMode) return;
+
         try {
             const e = JSON.parse(ev.data);
-            if(e.type === 'SystemMetrics') { lastStats = e; render(); }
-            else if(e.type === 'ProcessSnapshot') { updateProcs(e); }
-            else { addEventToLog(e); }
-        } catch(err) {}
+            // Use switch for better performance than if-else chain
+            switch(e.type) {
+                case 'SystemMetrics':
+                    lastStats = e;
+                    render();
+                    break;
+                case 'ProcessSnapshot':
+                    updateProcs(e);
+                    break;
+                default:
+                    addEventToLog(e);
+            }
+        } catch(err) {
+            // Silent fail - don't log to avoid console spam
+        }
     };
     ws.onerror = () => {
         updateConnectionStatus();
@@ -1490,7 +1666,12 @@ function createEventEntry(e){
         const color = e.kind === 'Started' ? 'text-green-600' : e.kind === 'Exited' ? 'text-gray-400' : 'text-yellow-600';
         // Show full command line inline for forensics
         const cmd = e.cmdline || e.name;
-        div.innerHTML = `<span class="text-gray-400">${time}</span> <span class="${color}">[${e.kind}]</span> ${cmd} <span class="text-gray-400">(pid ${e.pid})</span>`;
+        let details = `(pid ${e.pid}`;
+        if(e.ppid) details += `, ppid ${e.ppid}`;
+        if(e.user) details += `, user ${e.user}`;
+        if(e.working_dir) details += `, cwd ${e.working_dir}`;
+        details += ')';
+        div.innerHTML = `<span class="text-gray-400">${time}</span> <span class="${color}">[${e.kind}]</span> ${cmd} <span class="text-gray-400">${details}</span>`;
     } else if(e.type === 'SecurityEvent'){
         const color = e.kind.includes('Success') ? 'text-green-600' : 'text-red-600';
         div.innerHTML = `<span class="text-gray-400">${time}</span> <span class="${color}">[${e.kind}]</span> ${e.user} ${e.source_ip ? 'from ' + e.source_ip : ''}`;
@@ -1499,7 +1680,16 @@ function createEventEntry(e){
         div.innerHTML = `<span class="text-gray-400">${time}</span> <span class="${color}">[${e.severity}]</span> ${e.message}`;
     } else if(e.type === 'FileSystemEvent'){
         const color = e.kind === 'Created' ? 'text-blue-600' : e.kind === 'Deleted' ? 'text-red-600' : 'text-yellow-600';
-        div.innerHTML = `<span class="text-gray-400">${time}</span> <span class="${color}">[${e.kind}]</span> ${e.path}`;
+        let sizeInfo = '';
+        if(e.size) {
+            const fmt = (b) => {
+                if(!b) return '0B';
+                const k=1024, s=['B','KB','MB','GB','TB'], i=Math.floor(Math.log(b)/Math.log(k));
+                return (b/Math.pow(k,i)).toFixed(i>1?1:0)+s[i];
+            };
+            sizeInfo = ` <span class="text-gray-400">(${fmt(e.size)})</span>`;
+        }
+        div.innerHTML = `<span class="text-gray-400">${time}</span> <span class="${color}">[${e.kind}]</span> ${e.path}${sizeInfo}`;
     }
     return div;
 }
@@ -1678,8 +1868,13 @@ fn event_to_json(
                 "timestamp": p.ts.format(&Rfc3339).ok()?,
                 "kind": format!("{:?}", p.kind),
                 "pid": p.pid,
+                "ppid": p.ppid,
                 "name": p.name,
                 "cmdline": p.cmdline,
+                "working_dir": p.working_dir,
+                "user": p.user,
+                "uid": p.uid,
+                "exit_code": p.exit_code,
             }))
         }
         Event::SecurityEvent(s) => {

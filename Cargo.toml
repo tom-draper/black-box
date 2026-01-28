@@ -21,6 +21,7 @@ inotify = "0.10"
 
 # Async runtime and web framework
 tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
 actix = "0.13"
 actix-web = "4"
 actix-web-actors = "4"

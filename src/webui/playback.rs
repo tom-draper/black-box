@@ -431,6 +431,9 @@ fn find_missing_metadata(reader: &IndexedReader, events: &[Event], end_time_ns: 
     let mut has_disk_total = false;
     let mut has_filesystems = false;
     let mut has_net_interface = false;
+    let mut has_net_ip = false;
+    let mut has_net_gateway = false;
+    let mut has_net_dns = false;
     let mut has_fans = false;
 
     for event in events {
@@ -443,13 +446,17 @@ fn find_missing_metadata(reader: &IndexedReader, events: &[Event], end_time_ns: 
             if m.disk_total_bytes.is_some() { has_disk_total = true; }
             if m.filesystems.is_some() { has_filesystems = true; }
             if m.net_interface.is_some() { has_net_interface = true; }
+            if m.net_ip_address.is_some() { has_net_ip = true; }
+            if m.net_gateway.is_some() { has_net_gateway = true; }
+            if m.net_dns.is_some() { has_net_dns = true; }
             if m.fans.is_some() { has_fans = true; }
         }
     }
 
     // If all fields are present, no need to look back
     if has_kernel && has_cpu_model && has_cpu_mhz && has_mem_total && has_swap_total &&
-       has_disk_total && has_filesystems && has_net_interface && has_fans {
+       has_disk_total && has_filesystems && has_net_interface && has_net_ip &&
+       has_net_gateway && has_net_dns && has_fans {
         return serde_json::json!({});
     }
 
@@ -501,6 +508,18 @@ fn find_missing_metadata(reader: &IndexedReader, events: &[Event], end_time_ns: 
                 metadata["net_interface"] = serde_json::json!(m.net_interface);
                 has_net_interface = true;
             }
+            if !has_net_ip && m.net_ip_address.is_some() {
+                metadata["net_ip"] = serde_json::json!(m.net_ip_address);
+                has_net_ip = true;
+            }
+            if !has_net_gateway && m.net_gateway.is_some() {
+                metadata["net_gateway"] = serde_json::json!(m.net_gateway);
+                has_net_gateway = true;
+            }
+            if !has_net_dns && m.net_dns.is_some() {
+                metadata["net_dns"] = serde_json::json!(m.net_dns);
+                has_net_dns = true;
+            }
             if !has_fans && m.fans.is_some() {
                 let fans: Vec<_> = m.fans.as_ref().unwrap().iter().map(|f| serde_json::json!({
                     "label": f.label,
@@ -512,7 +531,8 @@ fn find_missing_metadata(reader: &IndexedReader, events: &[Event], end_time_ns: 
 
             // Stop early if all fields found
             if has_kernel && has_cpu_model && has_cpu_mhz && has_mem_total && has_swap_total &&
-               has_disk_total && has_filesystems && has_net_interface && has_fans {
+               has_disk_total && has_filesystems && has_net_interface && has_net_ip &&
+               has_net_gateway && has_net_dns && has_fans {
                 break;
             }
         }
@@ -599,8 +619,13 @@ fn format_event_for_api(event: &Event) -> serde_json::Value {
             "timestamp": p.ts.unix_timestamp_nanos() / 1_000_000,  // Convert to milliseconds
             "kind": format!("{:?}", p.kind),
             "pid": p.pid,
+            "ppid": p.ppid,
             "name": p.name,
             "cmdline": p.cmdline,
+            "working_dir": p.working_dir,
+            "user": p.user,
+            "uid": p.uid,
+            "exit_code": p.exit_code,
         }),
         Event::ProcessSnapshot(p) => serde_json::json!({
             "type": "ProcessSnapshot",
@@ -633,7 +658,8 @@ fn format_event_for_api(event: &Event) -> serde_json::Value {
             "type": "FileSystemEvent",
             "timestamp": fse.ts.unix_timestamp_nanos() / 1_000_000, // ms
             "kind": format!("{:?}", fse.kind),
-            "path": fse.path
+            "path": fse.path,
+            "size": fse.size,
         }),
     }
 }
