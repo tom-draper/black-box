@@ -271,7 +271,17 @@ pub async fn api_timeline(
 
                 // Build timeline array with all minutes (including empty ones for smooth visualization)
                 let mut timeline = Vec::new();
-                let total_minutes = (last_minute - first_minute + 1) as usize;
+
+                // Exclude the current incomplete minute to avoid misleading drop-off at the end
+                let now_minute = (OffsetDateTime::now_utc().unix_timestamp() / 60) as i64;
+                let effective_last_minute = if last_minute >= now_minute {
+                    // Exclude current minute if it's incomplete
+                    now_minute - 1
+                } else {
+                    last_minute
+                };
+
+                let total_minutes = (effective_last_minute - first_minute + 1) as usize;
 
                 // If we have too many minutes (>500), downsample to keep response size reasonable
                 let step = if total_minutes > 500 {
@@ -280,7 +290,7 @@ pub async fn api_timeline(
                     1
                 };
 
-                for minute in (first_minute..=last_minute).step_by(step) {
+                for minute in (first_minute..=effective_last_minute).step_by(step) {
                     // When downsampling, aggregate counts for the step range
                     let mut count = 0u32;
                     let mut cpu_values = Vec::new();
@@ -319,7 +329,7 @@ pub async fn api_timeline(
                 HttpResponse::Ok().json(serde_json::json!({
                     "timeline": timeline,
                     "first_timestamp": (first_ns / 1_000_000_000) as i64,
-                    "last_timestamp": (last_ns / 1_000_000_000) as i64,
+                    "last_timestamp": effective_last_minute * 60, // Use effective last minute (excluding incomplete)
                 }))
             }
             Err(e) => {
