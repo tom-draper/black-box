@@ -253,12 +253,20 @@ pub async fn api_timeline(
                 let last_minute = (last_ns / 60_000_000_000) as i64;
 
                 let mut buckets = std::collections::HashMap::new();
+                let mut cpu_buckets: std::collections::HashMap<i64, Vec<f32>> = std::collections::HashMap::new();
+                let mut mem_buckets: std::collections::HashMap<i64, Vec<f32>> = std::collections::HashMap::new();
 
-                // Count events per minute
+                // Count events per minute and collect CPU/memory metrics
                 for event in events.iter() {
                     let ts_ns = event.timestamp().unix_timestamp_nanos();
                     let minute = (ts_ns / 60_000_000_000) as i64;
                     *buckets.entry(minute).or_insert(0u32) += 1;
+
+                    // Collect CPU and memory usage from SystemMetrics events
+                    if let Event::SystemMetrics(m) = event {
+                        cpu_buckets.entry(minute).or_insert_with(Vec::new).push(m.cpu_usage_percent);
+                        mem_buckets.entry(minute).or_insert_with(Vec::new).push(m.mem_usage_percent);
+                    }
                 }
 
                 // Build timeline array with all minutes (including empty ones for smooth visualization)
@@ -275,13 +283,36 @@ pub async fn api_timeline(
                 for minute in (first_minute..=last_minute).step_by(step) {
                     // When downsampling, aggregate counts for the step range
                     let mut count = 0u32;
+                    let mut cpu_values = Vec::new();
+                    let mut mem_values = Vec::new();
+
                     for m in minute..(minute + step as i64).min(last_minute + 1) {
                         count += buckets.get(&m).copied().unwrap_or(0);
+                        if let Some(cpus) = cpu_buckets.get(&m) {
+                            cpu_values.extend_from_slice(cpus);
+                        }
+                        if let Some(mems) = mem_buckets.get(&m) {
+                            mem_values.extend_from_slice(mems);
+                        }
                     }
+
+                    // Calculate averages
+                    let cpu_avg = if !cpu_values.is_empty() {
+                        Some(cpu_values.iter().sum::<f32>() / cpu_values.len() as f32)
+                    } else {
+                        None
+                    };
+                    let mem_avg = if !mem_values.is_empty() {
+                        Some(mem_values.iter().sum::<f32>() / mem_values.len() as f32)
+                    } else {
+                        None
+                    };
 
                     timeline.push(serde_json::json!({
                         "timestamp": minute * 60, // Convert back to seconds
                         "count": count,
+                        "cpu": cpu_avg,
+                        "mem": mem_avg,
                     }));
                 }
 

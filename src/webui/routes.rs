@@ -32,7 +32,7 @@ pub async fn index() -> HttpResponse {
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
-<div class="max-w mx-auto px-4 py-[50px]">
+<div class="max-w mx-auto px-4 py-[80px]">
     <div class="fixed w-full z-10 left-0 top-0 flex backdrop-blur-10xl">
         <div class="grow">
             <canvas id="timelineChart" class="w-full h-12 cursor-pointer rounded" style="opacity:0;background:transparent;transition:opacity 0.3s ease-in;" title="Event density timeline"></canvas>
@@ -451,6 +451,38 @@ function setupTimelineHover() {
     console.log('Timeline hover setup complete');
 }
 
+// Helper function to draw a smooth curve segment
+function drawSegment(ctx, points) {
+    if(points.length === 0) return;
+
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+
+    if(points.length === 1) {
+        // Single point - just draw a small marker
+        ctx.lineTo(points[0].x, points[0].y);
+    } else if(points.length === 2) {
+        // Two points - draw a line
+        ctx.lineTo(points[1].x, points[1].y);
+    } else {
+        // Multiple points - use cubic Bezier curves for smooth interpolation
+        for(let i = 0; i < points.length - 1; i++) {
+            const curr = points[i];
+            const next = points[i + 1];
+            const prev = i > 0 ? points[i - 1] : curr;
+            const after = i < points.length - 2 ? points[i + 2] : next;
+
+            const cp1x = curr.x + (next.x - prev.x) / 6;
+            const cp1y = curr.y + (next.y - prev.y) / 6;
+            const cp2x = next.x - (after.x - curr.x) / 6;
+            const cp2y = next.y - (after.y - curr.y) / 6;
+
+            ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, next.x, next.y);
+        }
+    }
+    ctx.stroke();
+}
+
 function drawTimeline() {
     if(!timelineData || !timelineData.timeline || timelineData.timeline.length === 0) return;
 
@@ -478,20 +510,74 @@ function drawTimeline() {
 
     if(timeRange <= 0 || timeline.length === 0) return;
 
-    // Find max count for scaling
+    // Determine if we're hovering
+    const isHovering = timelineHoverX !== null && timelineHoverX !== undefined;
+
+    // Draw CPU usage line (blue) - with gap detection
+    const cpuData = timeline
+        .filter(p => p.cpu !== null && p.cpu !== undefined)
+        .map(p => ({
+            x: ((p.timestamp - firstTs) / timeRange) * width,
+            y: height - ((p.cpu / 100) * (height - 8)) - 4,
+            timestamp: p.timestamp
+        }));
+
+    if(cpuData.length > 0) {
+        ctx.strokeStyle = isHovering ? 'rgba(59, 130, 246, 1)' : 'rgba(59, 130, 246, 0.5)'; // blue-500
+        ctx.lineWidth = 1.5;
+
+        // Draw with gap detection (break line when timestamps are more than 10 minutes apart)
+        let segmentStart = 0;
+        for(let i = 0; i < cpuData.length - 1; i++) {
+            const timeDiff = cpuData[i + 1].timestamp - cpuData[i].timestamp;
+            if(timeDiff > 600) { // Gap of more than 10 minutes
+                // Draw segment from segmentStart to i
+                drawSegment(ctx, cpuData.slice(segmentStart, i + 1));
+                segmentStart = i + 1;
+            }
+        }
+        // Draw final segment
+        drawSegment(ctx, cpuData.slice(segmentStart));
+    }
+
+    // Draw Memory usage line (yellow) - with gap detection
+    const memData = timeline
+        .filter(p => p.mem !== null && p.mem !== undefined)
+        .map(p => ({
+            x: ((p.timestamp - firstTs) / timeRange) * width,
+            y: height - ((p.mem / 100) * (height - 8)) - 4,
+            timestamp: p.timestamp
+        }));
+
+    if(memData.length > 0) {
+        ctx.strokeStyle = isHovering ? 'rgba(234, 179, 8, 1)' : 'rgba(234, 179, 8, 0.5)'; // yellow-500
+        ctx.lineWidth = 1.5;
+
+        // Draw with gap detection (break line when timestamps are more than 10 minutes apart)
+        let segmentStart = 0;
+        for(let i = 0; i < memData.length - 1; i++) {
+            const timeDiff = memData[i + 1].timestamp - memData[i].timestamp;
+            if(timeDiff > 600) { // Gap of more than 10 minutes
+                // Draw segment from segmentStart to i
+                drawSegment(ctx, memData.slice(segmentStart, i + 1));
+                segmentStart = i + 1;
+            }
+        }
+        // Draw final segment
+        drawSegment(ctx, memData.slice(segmentStart));
+    }
+
+    // Find max count for scaling event count line
     const maxCount = Math.max(...timeline.map(p => p.count), 1);
 
-    // Map data points to canvas coordinates
+    // Map event count data points to canvas coordinates
     const points = timeline.map(p => {
         const x = ((p.timestamp - firstTs) / timeRange) * width;
         const y = height - ((p.count / maxCount) * (height - 8)) - 4; // Leave 4px padding at top/bottom
         return { x, y, timestamp: p.timestamp };
     });
 
-    // Determine if we're hovering
-    const isHovering = timelineHoverX !== null && timelineHoverX !== undefined;
-
-    // Draw smooth curve using cubic Bezier curves
+    // Draw event count curve using cubic Bezier curves
     ctx.beginPath();
     // gray-500/60: rgba(107, 114, 128, 0.6) - normal
     // gray-400: rgba(156, 163, 175, 1) - hover
