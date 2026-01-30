@@ -72,28 +72,87 @@ fn now_timestamp() -> String {
 }
 
 /// Update metadata in shared memory if it has changed
+/// Only updates fields that are actually present (Some) in the SystemMetrics
 fn update_metadata_if_changed(
     shared_metadata: &Arc<std::sync::RwLock<Option<Metadata>>>,
     metrics: &SystemMetrics,
 ) -> bool {
-    let new_metadata = Metadata::from_system_metrics(metrics);
-
     let mut metadata_guard = match shared_metadata.write() {
         Ok(guard) => guard,
         Err(_) => return false, // Lock poisoned, skip update
     };
 
-    let should_update = match metadata_guard.as_ref() {
-        Some(cached) => new_metadata.has_changed(cached),
-        None => true, // First time, always update
-    };
+    let mut updated = false;
 
-    if should_update {
-        *metadata_guard = Some(new_metadata);
-        return true;
+    match metadata_guard.as_mut() {
+        Some(cached) => {
+            // Merge: only update fields that are present in SystemMetrics
+            if metrics.kernel_version.is_some() && metrics.kernel_version != cached.kernel_version {
+                cached.kernel_version = metrics.kernel_version.clone();
+                updated = true;
+            }
+            if metrics.cpu_model.is_some() && metrics.cpu_model != cached.cpu_model {
+                cached.cpu_model = metrics.cpu_model.clone();
+                updated = true;
+            }
+            if metrics.cpu_mhz.is_some() && metrics.cpu_mhz != cached.cpu_mhz {
+                cached.cpu_mhz = metrics.cpu_mhz;
+                updated = true;
+            }
+            if metrics.mem_total_bytes.is_some() && metrics.mem_total_bytes != cached.mem_total_bytes {
+                cached.mem_total_bytes = metrics.mem_total_bytes;
+                updated = true;
+            }
+            if metrics.swap_total_bytes.is_some() && metrics.swap_total_bytes != cached.swap_total_bytes {
+                cached.swap_total_bytes = metrics.swap_total_bytes;
+                updated = true;
+            }
+            if metrics.disk_total_bytes.is_some() && metrics.disk_total_bytes != cached.disk_total_bytes {
+                cached.disk_total_bytes = metrics.disk_total_bytes;
+                updated = true;
+            }
+            // Only update filesystems if it's non-empty (empty vec means data not collected this cycle)
+            if let Some(ref fs) = metrics.filesystems {
+                if !fs.is_empty() && metrics.filesystems != cached.filesystems {
+                    cached.filesystems = metrics.filesystems.clone();
+                    updated = true;
+                }
+            }
+            if metrics.net_interface.is_some() && metrics.net_interface != cached.net_interface {
+                cached.net_interface = metrics.net_interface.clone();
+                updated = true;
+            }
+            if metrics.net_ip_address.is_some() && metrics.net_ip_address != cached.net_ip_address {
+                cached.net_ip_address = metrics.net_ip_address.clone();
+                updated = true;
+            }
+            if metrics.net_gateway.is_some() && metrics.net_gateway != cached.net_gateway {
+                cached.net_gateway = metrics.net_gateway.clone();
+                updated = true;
+            }
+            if metrics.net_dns.is_some() && metrics.net_dns != cached.net_dns {
+                cached.net_dns = metrics.net_dns.clone();
+                updated = true;
+            }
+            // Only update fans if non-empty (empty vec means data not collected this cycle)
+            if let Some(ref fans) = metrics.fans {
+                if !fans.is_empty() && metrics.fans != cached.fans {
+                    cached.fans = metrics.fans.clone();
+                    updated = true;
+                }
+            }
+            if updated {
+                cached.last_updated = metrics.ts;
+            }
+        }
+        None => {
+            // First time: create from SystemMetrics
+            *metadata_guard = Some(Metadata::from_system_metrics(metrics));
+            updated = true;
+        }
     }
 
-    false
+    updated
 }
 
 fn main() -> Result<()> {
@@ -250,6 +309,11 @@ fn run_recorder(cli: Cli) -> Result<()> {
         last_updated: OffsetDateTime::now_utc(),
     };
 
+    eprintln!("[METADATA] Initial: filesystems={}, net_interface={:?}, net_ip={:?}",
+        initial_metadata.filesystems.as_ref().map(|fs| fs.len()).unwrap_or(0),
+        initial_metadata.net_interface,
+        initial_metadata.net_ip_address);
+
     let shared_metadata = Arc::new(std::sync::RwLock::new(Some(initial_metadata)));
 
     // Create broadcast channel for event streaming
@@ -261,6 +325,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
         let config_clone = config.clone();
         let broadcaster = Arc::new(broadcaster);
         let protection_config = config.protection.clone();
+        let metadata_clone = shared_metadata.clone();
 
         // Spawn Tokio runtime in background thread
         std::thread::spawn(move || {
@@ -292,7 +357,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
                 // Start web server if not disabled
                 if !disable_ui {
                     if let Err(e) =
-                        webui::start_server(data_dir_clone, port, broadcaster, config_clone).await
+                        webui::start_server(data_dir_clone, port, broadcaster, config_clone, metadata_clone).await
                     {
                         eprintln!("Web UI failed to start: {}", e);
                     }
@@ -679,10 +744,26 @@ fn run_recorder(cli: Cli) -> Result<()> {
             gpu: collector::read_gpu_info(),
         };
 
+        // Debug: log what fields are in this SystemMetrics (every 10 seconds)
+        if tick_count % 10 == 0 {
+            eprintln!("[SYSTEM_METRICS] tick={} filesystems={}, net_interface={:?}",
+                tick_count,
+                system_metrics.filesystems.as_ref().map(|fs| fs.len()).unwrap_or(0),
+                system_metrics.net_interface);
+        }
+
         recorder.append(&Event::SystemMetrics(system_metrics.clone()))?;
 
         // Update metadata in shared memory if static/semi-static fields have changed
-        let _ = update_metadata_if_changed(&shared_metadata, &system_metrics);
+        if update_metadata_if_changed(&shared_metadata, &system_metrics) {
+            if let Ok(guard) = shared_metadata.read() {
+                if let Some(ref meta) = *guard {
+                    eprintln!("[METADATA] Updated: filesystems={}, net_interface={:?}",
+                        meta.filesystems.as_ref().map(|fs| fs.len()).unwrap_or(0),
+                        meta.net_interface);
+                }
+            }
+        }
 
         // Track process lifecycle changes
         let proc_diff = diff_processes(&prev_processes, &current_processes);

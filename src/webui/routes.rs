@@ -761,7 +761,7 @@ async function fetchPlaybackBuffer(startTimestamp, endTimestamp) {
             if(data.metadata.mem_total_bytes) cachedMemTotal = data.metadata.mem_total_bytes;
             if(data.metadata.swap_total_bytes) cachedSwapTotal = data.metadata.swap_total_bytes;
             if(data.metadata.disk_total_bytes) cachedDiskTotal = data.metadata.disk_total_bytes;
-            if(data.metadata.filesystems) cachedFilesystems = data.metadata.filesystems;
+            if(data.metadata.filesystems && data.metadata.filesystems.length > 0) cachedFilesystems = data.metadata.filesystems;
             if(data.metadata.net_ip) cachedNetIp = data.metadata.net_ip;
             if(data.metadata.net_gateway) cachedNetGateway = data.metadata.net_gateway;
             if(data.metadata.net_dns) cachedNetDns = data.metadata.net_dns;
@@ -902,7 +902,7 @@ async function jumpToTimestamp(timestamp, incremental = false) {
                 if(historyData.metadata.mem_total_bytes) cachedMemTotal = historyData.metadata.mem_total_bytes;
                 if(historyData.metadata.swap_total_bytes) cachedSwapTotal = historyData.metadata.swap_total_bytes;
                 if(historyData.metadata.disk_total_bytes) cachedDiskTotal = historyData.metadata.disk_total_bytes;
-                if(historyData.metadata.filesystems) cachedFilesystems = historyData.metadata.filesystems;
+                if(historyData.metadata.filesystems && historyData.metadata.filesystems.length > 0) cachedFilesystems = historyData.metadata.filesystems;
                 if(historyData.metadata.net_ip) cachedNetIp = historyData.metadata.net_ip;
                 if(historyData.metadata.net_gateway) cachedNetGateway = historyData.metadata.net_gateway;
                 if(historyData.metadata.net_dns) cachedNetDns = historyData.metadata.net_dns;
@@ -1645,12 +1645,14 @@ function render(){
     updateTextIfChanged('netGateway', `Gateway: ${e.net_gateway ?? cachedNetGateway ?? '--'}`);
     updateTextIfChanged('netDns', `DNS: ${e.net_dns ?? cachedNetDns ?? '--'}`);
 
-    // Storage section - use cached filesystems if not in current event
-    const filesystems = e.filesystems || cachedFilesystems;
-    filesystems.forEach((fs, i) => {
-        const pct = fs.total > 0 ? Math.round((fs.used/fs.total)*100) : 0;
-        updateDiskBar(`disk_${i}`, pct, document.getElementById('diskContainer'), fs.mount, fs.used, fs.total);
-    });
+    // Storage section - use cached filesystems if not in current event or if empty
+    const filesystems = (e.filesystems && e.filesystems.length > 0) ? e.filesystems : cachedFilesystems;
+    if(filesystems && filesystems.length > 0) {
+        filesystems.forEach((fs, i) => {
+            const pct = fs.total > 0 ? Math.round((fs.used/fs.total)*100) : 0;
+            updateDiskBar(`disk_${i}`, pct, document.getElementById('diskContainer'), fs.mount, fs.used, fs.total);
+        });
+    }
 
     // Disk IO section
     updateDiskIo(e.per_disk || []);
@@ -1732,6 +1734,25 @@ function connectWebSocket(){
             const e = JSON.parse(ev.data);
             // Use switch for better performance than if-else chain
             switch(e.type) {
+                case 'Metadata':
+                    // Populate caches from metadata without rendering
+                    console.log('[METADATA] Received:', e);
+                    if(e.mem_total != null) cachedMemTotal = e.mem_total;
+                    if(e.swap_total != null) cachedSwapTotal = e.swap_total;
+                    if(e.disk_total != null) cachedDiskTotal = e.disk_total;
+                    if(e.net_ip != null) cachedNetIp = e.net_ip;
+                    if(e.net_gateway != null) cachedNetGateway = e.net_gateway;
+                    if(e.net_dns != null) cachedNetDns = e.net_dns;
+                    if(e.kernel != null) cachedKernel = e.kernel;
+                    if(e.cpu_model != null) cachedCpuModel = e.cpu_model;
+                    if(e.cpu_mhz != null) cachedCpuMhz = e.cpu_mhz;
+                    if(e.filesystems && e.filesystems.length > 0) {
+                        cachedFilesystems = e.filesystems;
+                        console.log('[METADATA] Cached', e.filesystems.length, 'filesystems');
+                    }
+                    if(e.fans && e.fans.length > 0) cachedFans = e.fans;
+                    // Don't render - just populate caches for when real data arrives
+                    break;
                 case 'SystemMetrics':
                     lastStats = e;
                     render();

@@ -27,13 +27,15 @@ fn now_timestamp() -> String {
 pub struct WsSession {
     hb: Instant,
     broadcaster: Arc<EventBroadcaster>,
+    metadata: Arc<std::sync::RwLock<Option<crate::event::Metadata>>>,
 }
 
 impl WsSession {
-    fn new(broadcaster: Arc<EventBroadcaster>) -> Self {
+    fn new(broadcaster: Arc<EventBroadcaster>, metadata: Arc<std::sync::RwLock<Option<crate::event::Metadata>>>) -> Self {
         Self {
             hb: Instant::now(),
             broadcaster,
+            metadata,
         }
     }
 
@@ -70,9 +72,38 @@ impl Actor for WsSession {
     fn started(&mut self, ctx: &mut Self::Context) {
         println!("{} WebSocket client connected", now_timestamp());
 
-        // Don't send synthetic metrics - just wait for the first real SystemMetrics
-        // The first real event will have metadata (initialized at startup) + actual data
-        // This avoids showing a "skeleton" UI with 0 values
+        // Send metadata as first message (just for populating caches, no render)
+        if let Ok(guard) = self.metadata.read() {
+            if let Some(ref metadata) = *guard {
+                eprintln!("[WEBSOCKET] Sending metadata: filesystems={}, net_interface={:?}, net_ip={:?}",
+                    metadata.filesystems.as_ref().map(|fs| fs.len()).unwrap_or(0),
+                    metadata.net_interface,
+                    metadata.net_ip_address);
+
+                let metadata_msg = serde_json::json!({
+                    "type": "Metadata",
+                    "kernel": metadata.kernel_version,
+                    "cpu_model": metadata.cpu_model,
+                    "cpu_mhz": metadata.cpu_mhz,
+                    "mem_total": metadata.mem_total_bytes,
+                    "swap_total": metadata.swap_total_bytes,
+                    "disk_total": metadata.disk_total_bytes,
+                    "filesystems": metadata.filesystems,
+                    "net_interface": metadata.net_interface,
+                    "net_ip": metadata.net_ip_address,
+                    "net_gateway": metadata.net_gateway,
+                    "net_dns": metadata.net_dns,
+                    "fans": metadata.fans,
+                });
+                if let Ok(json_str) = serde_json::to_string(&metadata_msg) {
+                    ctx.text(json_str);
+                }
+            } else {
+                eprintln!("[WEBSOCKET] WARNING: No metadata available!");
+            }
+        } else {
+            eprintln!("[WEBSOCKET] ERROR: Failed to read metadata lock!");
+        }
 
         self.start_heartbeat(ctx);
         self.start_event_stream(ctx);
@@ -135,8 +166,10 @@ pub async fn ws_handler(
     req: HttpRequest,
     stream: web::Payload,
     broadcaster: web::Data<EventBroadcaster>,
+    metadata: web::Data<std::sync::RwLock<Option<crate::event::Metadata>>>,
 ) -> Result<HttpResponse, Error> {
-    let session = WsSession::new(Arc::new(broadcaster.get_ref().clone()));
+    let metadata_arc = Arc::clone(&metadata.into_inner());
+    let session = WsSession::new(Arc::new(broadcaster.get_ref().clone()), metadata_arc);
     ws::start(session, &req, stream)
 }
 

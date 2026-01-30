@@ -15,6 +15,7 @@ pub async fn start_server(
     port: u16,
     broadcaster: Arc<EventBroadcaster>,
     config: Config,
+    metadata: Arc<std::sync::RwLock<Option<crate::event::Metadata>>>,
 ) -> Result<()> {
     let reader = web::Data::new(LogReader::new(&data_dir));
 
@@ -36,6 +37,7 @@ pub async fn start_server(
     let config_data = web::Data::new(config.clone());
     let start_time = web::Data::new(Instant::now());
     let data_dir_data = web::Data::new(data_dir.clone());
+    let metadata_data = web::Data::from(metadata);
 
     // Spawn the broadcaster bridge (crossbeam -> tokio broadcast)
     tokio::spawn(async move {
@@ -52,6 +54,7 @@ pub async fn start_server(
             .app_data(config_data.clone())
             .app_data(start_time.clone())
             .app_data(data_dir_data.clone())
+            .app_data(metadata_data.clone())
             .wrap(middleware::Logger::default())
             .wrap(auth::BasicAuth::new(config.auth.clone()))
             .route("/", web::get().to(routes::index))
