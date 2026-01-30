@@ -1,8 +1,28 @@
-use actix_web::{web, HttpResponse};
+use axum::{
+    extract::{Query, State},
+    http::{header, StatusCode},
+    response::{Html, IntoResponse, Json, Response},
+};
 use serde::Deserialize;
+use std::sync::Arc;
+use std::time::Instant;
 
+use crate::broadcast::EventBroadcaster;
+use crate::config::Config;
 use crate::event::Event;
+use crate::indexed_reader::IndexedReader;
 use crate::reader::LogReader;
+
+#[derive(Clone)]
+pub struct AppState {
+    pub reader: Arc<LogReader>,
+    pub indexed_reader: Arc<IndexedReader>,
+    pub broadcaster: Arc<EventBroadcaster>,
+    pub config: Arc<Config>,
+    pub start_time: Arc<Instant>,
+    pub data_dir: Arc<String>,
+    pub metadata: Arc<std::sync::RwLock<Option<crate::event::Metadata>>>,
+}
 
 #[derive(Deserialize)]
 pub struct EventQueryParams {
@@ -11,7 +31,7 @@ pub struct EventQueryParams {
     event_type: Option<String>,
 }
 
-pub async fn index() -> HttpResponse {
+pub async fn index() -> Html<&'static str> {
     let html = r##"
 <!DOCTYPE html>
 <html lang="en">
@@ -1933,22 +1953,24 @@ setInterval(() => {
 </body>
 </html>
 "##;
-    HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html)
+    Html(html)
 }
 
 pub async fn api_events(
-    reader: web::Data<LogReader>,
-    query: web::Query<EventQueryParams>,
-) -> HttpResponse {
+    State(state): State<AppState>,
+    Query(query): Query<EventQueryParams>,
+) -> Response {
     let filter = query.filter.as_ref().map(|s| s.to_lowercase());
     let event_type = query.event_type.as_deref();
 
-    let events = match reader.read_all_events() {
+    let events = match state.reader.read_all_events() {
         Ok(e) => e,
         Err(e) => {
             eprintln!("Error reading events: {}", e);
-            return HttpResponse::InternalServerError()
-                .json(serde_json::json!({"error": format!("Failed to read events: {}", e)}));
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Failed to read events: {}", e)})),
+            ).into_response();
         }
     };
 
@@ -1963,7 +1985,7 @@ pub async fn api_events(
 
     json_events.reverse();
 
-    HttpResponse::Ok().json(json_events)
+    Json(json_events).into_response()
 }
 
 fn event_to_json(

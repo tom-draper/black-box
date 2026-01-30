@@ -1,9 +1,14 @@
-use actix::{Actor, ActorContext, AsyncContext, StreamHandler};
-use actix_web::{web, Error, HttpRequest, HttpResponse};
-use actix_web_actors::ws;
+use axum::{
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        State,
+    },
+    response::Response,
+};
+use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 use time::OffsetDateTime;
+use tokio::time::{interval, Duration};
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::broadcast::EventBroadcaster;
@@ -23,183 +28,154 @@ fn now_timestamp() -> String {
     )
 }
 
-// WebSocket actor that streams events to connected clients
-pub struct WsSession {
-    hb: Instant,
+pub async fn ws_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<super::routes::AppState>,
+) -> Response {
+    ws.on_upgrade(move |socket| handle_socket(socket, state.broadcaster, state.metadata))
+}
+
+async fn handle_socket(
+    socket: WebSocket,
     broadcaster: Arc<EventBroadcaster>,
     metadata: Arc<std::sync::RwLock<Option<crate::event::Metadata>>>,
-}
+) {
+    let (mut sender, mut receiver) = socket.split();
 
-impl WsSession {
-    fn new(broadcaster: Arc<EventBroadcaster>, metadata: Arc<std::sync::RwLock<Option<crate::event::Metadata>>>) -> Self {
-        Self {
-            hb: Instant::now(),
-            broadcaster,
-            metadata,
-        }
-    }
+    println!("{} WebSocket client connected", now_timestamp());
 
-    // Start heartbeat process to detect disconnections
-    fn start_heartbeat(&self, ctx: &mut ws::WebsocketContext<Self>) {
-        ctx.run_interval(HEARTBEAT_INTERVAL, |act, ctx| {
-            // Check client heartbeat
-            if Instant::now().duration_since(act.hb) > CLIENT_TIMEOUT {
-                println!("{} WebSocket client heartbeat failed, disconnecting", now_timestamp());
-                ctx.stop();
-                return;
-            }
+    // Send metadata as first message
+    // Serialize inside the lock scope, but send after dropping the lock
+    let metadata_json = if let Ok(guard) = metadata.read() {
+        if let Some(ref metadata) = *guard {
+            eprintln!("[WEBSOCKET] Sending metadata: filesystems={}, processes={}, net_interface={:?}, net_ip={:?}",
+                metadata.filesystems.as_ref().map(|fs| fs.len()).unwrap_or(0),
+                metadata.processes.as_ref().map(|p| p.len()).unwrap_or(0),
+                metadata.net_interface,
+                metadata.net_ip_address);
 
-            ctx.ping(b"");
-        });
-    }
-
-    // Start event streaming from broadcaster (event-driven, not polling!)
-    fn start_event_stream(&self, ctx: &mut ws::WebsocketContext<Self>) {
-        let rx = self.broadcaster.subscribe();
-
-        // Wrap the broadcast receiver in a stream and add it to the actor
-        // This is event-driven: we only process when events arrive (no polling!)
-        let stream = BroadcastStream::new(rx);
-
-        ctx.add_stream(stream);
-    }
-
-}
-
-impl Actor for WsSession {
-    type Context = ws::WebsocketContext<Self>;
-
-    fn started(&mut self, ctx: &mut Self::Context) {
-        println!("{} WebSocket client connected", now_timestamp());
-
-        // Send metadata as first message (just for populating caches, no render)
-        if let Ok(guard) = self.metadata.read() {
-            if let Some(ref metadata) = *guard {
-                eprintln!("[WEBSOCKET] Sending metadata: filesystems={}, processes={}, net_interface={:?}, net_ip={:?}",
-                    metadata.filesystems.as_ref().map(|fs| fs.len()).unwrap_or(0),
-                    metadata.processes.as_ref().map(|p| p.len()).unwrap_or(0),
-                    metadata.net_interface,
-                    metadata.net_ip_address);
-
-                let metadata_msg = serde_json::json!({
-                    "type": "Metadata",
-                    "kernel": metadata.kernel_version,
-                    "cpu_model": metadata.cpu_model,
-                    "cpu_mhz": metadata.cpu_mhz,
-                    "mem_total": metadata.mem_total_bytes,
-                    "swap_total": metadata.swap_total_bytes,
-                    "disk_total": metadata.disk_total_bytes,
-                    "filesystems": metadata.filesystems,
-                    "net_interface": metadata.net_interface,
-                    "net_ip": metadata.net_ip_address,
-                    "net_gateway": metadata.net_gateway,
-                    "net_dns": metadata.net_dns,
-                    "fans": metadata.fans,
-                    "cpu_temp": metadata.temps.as_ref().and_then(|t| t.cpu_temp_celsius),
-                    "per_core_temps": metadata.temps.as_ref().map(|t| &t.per_core_temps),
-                    "gpu_temp": metadata.temps.as_ref().and_then(|t| t.gpu_temp_celsius),
-                    "mobo_temp": metadata.temps.as_ref().and_then(|t| t.motherboard_temp_celsius),
-                    "gpu_freq": metadata.gpu.as_ref().and_then(|g| g.gpu_freq_mhz),
-                    "gpu_mem_freq": metadata.gpu.as_ref().and_then(|g| g.mem_freq_mhz),
-                    "gpu_temp2": metadata.gpu.as_ref().and_then(|g| g.gpu_temp_celsius),
-                    "gpu_power": metadata.gpu.as_ref().and_then(|g| g.power_watts),
-                    "users": metadata.logged_in_users,
-                    "processes": metadata.processes,
-                    "total_processes": metadata.total_processes,
-                    "running_processes": metadata.running_processes,
-                });
-                if let Ok(json_str) = serde_json::to_string(&metadata_msg) {
-                    ctx.text(json_str);
-                }
-            } else {
-                eprintln!("[WEBSOCKET] WARNING: No metadata available!");
-            }
+            let metadata_msg = serde_json::json!({
+                "type": "Metadata",
+                "kernel": metadata.kernel_version,
+                "cpu_model": metadata.cpu_model,
+                "cpu_mhz": metadata.cpu_mhz,
+                "mem_total": metadata.mem_total_bytes,
+                "swap_total": metadata.swap_total_bytes,
+                "disk_total": metadata.disk_total_bytes,
+                "filesystems": metadata.filesystems,
+                "net_interface": metadata.net_interface,
+                "net_ip": metadata.net_ip_address,
+                "net_gateway": metadata.net_gateway,
+                "net_dns": metadata.net_dns,
+                "fans": metadata.fans,
+                "cpu_temp": metadata.temps.as_ref().and_then(|t| t.cpu_temp_celsius),
+                "per_core_temps": metadata.temps.as_ref().map(|t| &t.per_core_temps),
+                "gpu_temp": metadata.temps.as_ref().and_then(|t| t.gpu_temp_celsius),
+                "mobo_temp": metadata.temps.as_ref().and_then(|t| t.motherboard_temp_celsius),
+                "gpu_freq": metadata.gpu.as_ref().and_then(|g| g.gpu_freq_mhz),
+                "gpu_mem_freq": metadata.gpu.as_ref().and_then(|g| g.mem_freq_mhz),
+                "gpu_temp2": metadata.gpu.as_ref().and_then(|g| g.gpu_temp_celsius),
+                "gpu_power": metadata.gpu.as_ref().and_then(|g| g.power_watts),
+                "users": metadata.logged_in_users,
+                "processes": metadata.processes,
+                "total_processes": metadata.total_processes,
+                "running_processes": metadata.running_processes,
+            });
+            serde_json::to_string(&metadata_msg).ok()
         } else {
-            eprintln!("[WEBSOCKET] ERROR: Failed to read metadata lock!");
+            eprintln!("[WEBSOCKET] WARNING: No metadata available!");
+            None
         }
+    } else {
+        eprintln!("[WEBSOCKET] ERROR: Failed to read metadata lock!");
+        None
+    };
 
-        self.start_heartbeat(ctx);
-        self.start_event_stream(ctx);
+    // Send after dropping the lock
+    if let Some(json_str) = metadata_json {
+        let _ = sender.send(Message::Text(json_str)).await;
     }
 
-    fn stopped(&mut self, _ctx: &mut Self::Context) {
-        println!("{} WebSocket client disconnected", now_timestamp());
-    }
-}
+    // Subscribe to event broadcast
+    let rx = broadcaster.subscribe();
+    let mut event_stream = BroadcastStream::new(rx);
 
-// Handle incoming WebSocket protocol messages from the client
-impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsSession {
-    fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
-        match msg {
-            Ok(ws::Message::Ping(msg)) => {
-                self.hb = Instant::now();
-                ctx.pong(&msg);
-            }
-            Ok(ws::Message::Pong(_)) => {
-                self.hb = Instant::now();
-            }
-            Ok(ws::Message::Text(_text)) => {
-                // Ignore text messages from client (we only push events)
-            }
-            Ok(ws::Message::Binary(_)) => {
-                // Ignore binary messages
-            }
-            Ok(ws::Message::Close(reason)) => {
-                ctx.close(reason);
-                ctx.stop();
-            }
-            _ => ctx.stop(),
-        }
-    }
-}
+    // Set up heartbeat interval
+    let mut heartbeat = interval(HEARTBEAT_INTERVAL);
+    let mut last_pong = tokio::time::Instant::now();
 
-// Handle incoming events from the broadcast stream (event-driven, not polling!)
-impl StreamHandler<Result<crate::event::Event, tokio_stream::wrappers::errors::BroadcastStreamRecvError>> for WsSession {
-    fn handle(&mut self, msg: Result<crate::event::Event, tokio_stream::wrappers::errors::BroadcastStreamRecvError>, ctx: &mut Self::Context) {
-        match msg {
-            Ok(event) => {
-                // Serialize and send event
-                match event_to_json_string(&event) {
-                    Ok(json) => ctx.text(json),
-                    Err(e) => {
-                        eprintln!("Failed to serialize event: {}", e);
+    loop {
+        tokio::select! {
+            // Handle incoming messages from client
+            msg = receiver.next() => {
+                match msg {
+                    Some(Ok(Message::Ping(data))) => {
+                        last_pong = tokio::time::Instant::now();
+                        if sender.send(Message::Pong(data)).await.is_err() {
+                            break;
+                        }
                     }
+                    Some(Ok(Message::Pong(_))) => {
+                        last_pong = tokio::time::Instant::now();
+                    }
+                    Some(Ok(Message::Close(_))) | None => {
+                        break;
+                    }
+                    _ => {}
                 }
             }
-            Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(skipped)) => {
-                eprintln!("{} WebSocket client lagged, skipped {} events", now_timestamp(), skipped);
-                // Continue receiving, don't stop
+
+            // Send heartbeat pings
+            _ = heartbeat.tick() => {
+                // Check if client is still responding
+                if last_pong.elapsed() > CLIENT_TIMEOUT {
+                    println!("{} WebSocket client heartbeat failed, disconnecting", now_timestamp());
+                    break;
+                }
+
+                if sender.send(Message::Ping(vec![])).await.is_err() {
+                    break;
+                }
+            }
+
+            // Handle events from broadcaster
+            event = event_stream.next() => {
+                match event {
+                    Some(Ok(event)) => {
+                        match event_to_json_string(&event) {
+                            Ok(json) => {
+                                if sender.send(Message::Text(json)).await.is_err() {
+                                    break;
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to serialize event: {}", e);
+                            }
+                        }
+                    }
+                    Some(Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(skipped))) => {
+                        eprintln!("{} WebSocket client lagged, skipped {} events", now_timestamp(), skipped);
+                    }
+                    None => break,
+                }
             }
         }
     }
-}
 
-// WebSocket handler endpoint
-pub async fn ws_handler(
-    req: HttpRequest,
-    stream: web::Payload,
-    broadcaster: web::Data<EventBroadcaster>,
-    metadata: web::Data<std::sync::RwLock<Option<crate::event::Metadata>>>,
-) -> Result<HttpResponse, Error> {
-    let metadata_arc = Arc::clone(&metadata.into_inner());
-    let session = WsSession::new(Arc::new(broadcaster.get_ref().clone()), metadata_arc);
-    ws::start(session, &req, stream)
+    println!("{} WebSocket client disconnected", now_timestamp());
 }
 
 // Optimized: Serialize event directly to JSON string
 fn event_to_json_string(event: &crate::event::Event) -> Result<String, serde_json::Error> {
-    // Convert to serde_json::Value then serialize (optimized with pre-sized allocations)
     serde_json::to_string(&event_to_json(event))
 }
 
-// Convert Event to JSON format (same as API) - kept for large events
+// Convert Event to JSON format (same as API)
 fn event_to_json(event: &crate::event::Event) -> serde_json::Value {
     use crate::event::Event;
 
     match event {
         Event::SystemMetrics(m) => {
-            // Percentages are now calculated every second in main.rs using cached totals
-
             // Pre-compute nested arrays outside json! macro
             let mut disks = Vec::with_capacity(m.per_disk_metrics.len());
             for d in &m.per_disk_metrics {

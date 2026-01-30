@@ -10,7 +10,11 @@
 //   - Useful for export, analysis, or when you need events in a specific timeframe
 //   - Returns whatever events exist in that range (may be less than limit)
 
-use actix_web::{web, HttpResponse};
+use axum::{
+    extract::{Query, State},
+    http::StatusCode,
+    response::{IntoResponse, Json, Response},
+};
 use serde::Deserialize;
 use std::sync::Arc;
 use time::OffsetDateTime;
@@ -43,11 +47,11 @@ pub struct PlaybackQuery {
 /// Get the most recent complete SystemMetrics (with static/semi-static fields) for page initialization
 /// Uses LogReader to read the most recent segment file (avoids old incompatible segments)
 pub async fn api_initial_state(
-    reader: web::Data<LogReader>,
-) -> HttpResponse {
+    State(state): State<super::routes::AppState>,
+) -> Response {
     eprintln!("Initial state: reading most recent segment file");
 
-    match reader.read_recent_segment() {
+    match state.reader.read_recent_segment() {
         Ok(events) => {
             eprintln!("Initial state: found {} events in recent segment", events.len());
 
@@ -61,7 +65,7 @@ pub async fn api_initial_state(
                     if m.filesystems.is_some() {
                         eprintln!("Initial state: returning event with filesystems at {}", m.ts);
                         // Found a complete event, return it formatted
-                        return HttpResponse::Ok().json(format_event_for_api(event));
+                        return Json(format_event_for_api(event)).into_response();
                     }
                 }
             }
@@ -72,17 +76,17 @@ pub async fn api_initial_state(
             for event in events.iter().rev() {
                 if let Event::SystemMetrics(m) = event {
                     eprintln!("Initial state: returning SystemMetrics without filesystems at {}", m.ts);
-                    return HttpResponse::Ok().json(format_event_for_api(event));
+                    return Json(format_event_for_api(event)).into_response();
                 }
             }
 
             // No SystemMetrics found at all
             eprintln!("Initial state: NO SystemMetrics events found - returning empty");
-            HttpResponse::Ok().json(serde_json::json!({}))
+            Json(serde_json::json!({})).into_response()
         }
         Err(e) => {
             eprintln!("Initial state: ERROR reading recent segment: {}", e);
-            HttpResponse::Ok().json(serde_json::json!({}))
+            Json(serde_json::json!({})).into_response()
         }
     }
 }
@@ -95,7 +99,7 @@ async fn fetch_events_by_count(
     timestamp: i64,
     target_count: usize,
     before: bool,
-) -> HttpResponse {
+) -> Response {
     // For normal mode: include events AT the requested timestamp
     // For before mode: get events strictly before the timestamp
     let end_ns = if before {
@@ -128,7 +132,7 @@ async fn fetch_events_by_count(
                         .collect()
                 })
         } else {
-            indexed_reader.read_time_range(Some(search_start_ns), Some(end_ns))
+            Ok(indexed_reader.read_time_range(Some(search_start_ns), Some(end_ns)).unwrap_or_default())
         };
 
         match events_result {
@@ -144,9 +148,12 @@ async fn fetch_events_by_count(
                 all_events = events;
             }
             Err(e) => {
-                return HttpResponse::InternalServerError().json(serde_json::json!({
-                    "error": format!("Failed to read events: {}", e),
-                }));
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": format!("Failed to read events: {}", e),
+                    })).into_response()
+                ).into_response();
             }
         }
     }
@@ -190,7 +197,7 @@ async fn fetch_events_by_count(
     final_events.sort_by_key(|e| e.timestamp().unix_timestamp_nanos());
 
     // Look back for metadata
-    let metadata = find_missing_metadata(&indexed_reader, &final_events, end_ns);
+    let metadata = find_missing_metadata(indexed_reader, &final_events, end_ns);
 
     // Format for API
     let formatted_events: Vec<serde_json::Value> = final_events
@@ -202,51 +209,51 @@ async fn fetch_events_by_count(
         .filter(|e| matches!(e, Event::SystemMetrics(_)))
         .count();
 
-    HttpResponse::Ok().json(serde_json::json!({
+    Json(serde_json::json!({
         "count": formatted_events.len(),
         "events": formatted_events,
         "metadata": metadata,
-    }))
+    })).into_response()
 }
 
 /// Get time range metadata
 pub async fn api_playback_info(
-    reader: web::Data<Arc<IndexedReader>>,
-) -> HttpResponse {
+    State(state): State<super::routes::AppState>,
+) -> Response {
     // NOTE: Index is built at startup, so this reflects segments at that time
     // TODO: Implement automatic index refresh for new segments
-    if let Some((first_ns, last_ns)) = reader.get_time_range() {
+    if let Some((first_ns, last_ns)) = state.indexed_reader.get_time_range() {
         let first_secs = (first_ns / 1_000_000_000) as i64;
         let last_secs = (last_ns / 1_000_000_000) as i64;
 
         let first_dt = OffsetDateTime::from_unix_timestamp(first_secs).ok();
         let last_dt = OffsetDateTime::from_unix_timestamp(last_secs).ok();
 
-        HttpResponse::Ok().json(serde_json::json!({
+        Json(serde_json::json!({
             "first_timestamp": first_secs,
             "last_timestamp": last_secs,
             "first_timestamp_iso": first_dt.map(|dt| dt.to_string()),
             "last_timestamp_iso": last_dt.map(|dt| dt.to_string()),
-            "segment_count": reader.get_segments().len(),
-            "estimated_event_count": reader.estimate_event_count(),
-        }))
+            "segment_count": state.indexed_reader.get_segments().len(),
+            "estimated_event_count": state.indexed_reader.estimate_event_count(),
+        })).into_response()
     } else {
-        HttpResponse::Ok().json(serde_json::json!({
+        Json(serde_json::json!({
             "first_timestamp": null,
             "last_timestamp": null,
             "segment_count": 0,
             "estimated_event_count": 0,
-        }))
+        })).into_response()
     }
 }
 
 /// Get event density timeline (events per minute) for visualization
 pub async fn api_timeline(
-    reader: web::Data<Arc<IndexedReader>>,
-) -> HttpResponse {
-    if let Some((first_ns, last_ns)) = reader.get_time_range() {
+    State(state): State<super::routes::AppState>,
+) -> Response {
+    if let Some((first_ns, last_ns)) = state.indexed_reader.get_time_range() {
         // Read all events (this might be expensive for very large datasets)
-        match reader.read_time_range(Some(first_ns), Some(last_ns)) {
+        match state.indexed_reader.read_time_range(Some(first_ns), Some(last_ns)) {
             Ok(events) => {
                 // Bucket events by minute
                 let first_minute = (first_ns / 60_000_000_000) as i64; // Convert ns to minutes
@@ -326,25 +333,28 @@ pub async fn api_timeline(
                     }));
                 }
 
-                HttpResponse::Ok().json(serde_json::json!({
+                Json(serde_json::json!({
                     "timeline": timeline,
                     "first_timestamp": (first_ns / 1_000_000_000) as i64,
                     "last_timestamp": effective_last_minute * 60, // Use effective last minute (excluding incomplete)
-                }))
+                })).into_response()
             }
             Err(e) => {
                 eprintln!("Failed to read timeline: {}", e);
-                HttpResponse::InternalServerError().json(serde_json::json!({
-                    "error": "Failed to read timeline"
-                }))
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": "Failed to read timeline"
+                    }))
+                ).into_response()
             }
         }
     } else {
-        HttpResponse::Ok().json(serde_json::json!({
+        Json(serde_json::json!({
             "timeline": [],
             "first_timestamp": null,
             "last_timestamp": null,
-        }))
+        })).into_response()
     }
 }
 
@@ -355,19 +365,18 @@ pub async fn api_timeline(
 ///    Add &before=true to get events BEFORE timestamp (for progressive loading)
 /// 2. Range mode: ?start=S&end=E&limit=L - Get all events between S and E (up to L events)
 pub async fn api_playback_events(
-    log_reader: web::Data<LogReader>,
-    indexed_reader: web::Data<Arc<IndexedReader>>,
-    query: web::Query<PlaybackQuery>,
-) -> HttpResponse {
+    State(state): State<super::routes::AppState>,
+    Query(query): Query<PlaybackQuery>,
+) -> Response {
     // Mode 1: Count-based query (timestamp + count)
     if let Some(timestamp) = query.timestamp {
         let target_count = query.count.unwrap_or(60);
         let before = query.before.unwrap_or(false);
-        return fetch_events_by_count(&log_reader, &indexed_reader, timestamp, target_count, before).await;
+        return fetch_events_by_count(&state.reader, &state.indexed_reader, timestamp, target_count, before).await;
     }
 
     // Mode 2: Range-based query (start + end)
-    fetch_events_by_range(&log_reader, &indexed_reader, &query).await
+    fetch_events_by_range(&state.reader, &state.indexed_reader, &query).await
 }
 
 /// Mode 2: Fetch all events in a time range (start to end)
@@ -375,7 +384,7 @@ async fn fetch_events_by_range(
     log_reader: &LogReader,
     indexed_reader: &Arc<IndexedReader>,
     query: &PlaybackQuery,
-) -> HttpResponse {
+) -> Response {
     let start_ns = query.start_timestamp.map(|s| (s as i128) * 1_000_000_000);
     let end_ns = query.end_timestamp.map(|s| (s as i128) * 1_000_000_000);
 
@@ -428,7 +437,7 @@ async fn fetch_events_by_range(
 
             // Look back to find missing static/semi-static fields (metadata)
             let metadata = if let Some(end_time) = end_ns {
-                find_missing_metadata(&indexed_reader, &events, end_time)
+                find_missing_metadata(indexed_reader, &events, end_time)
             } else {
                 serde_json::json!({})
             };
@@ -448,16 +457,19 @@ async fn fetch_events_by_range(
 
             let system_metrics_count = events.iter().filter(|e| matches!(e, crate::event::Event::SystemMetrics(_))).count();
 
-            HttpResponse::Ok().json(serde_json::json!({
+            Json(serde_json::json!({
                 "count": formatted_events.len(),
                 "events": formatted_events,
                 "fallback": used_fallback,
                 "metadata": metadata,
-            }))
+            })).into_response()
         }
-        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
-            "error": format!("Failed to read events: {}", e),
-        })),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": format!("Failed to read events: {}", e),
+            }))
+        ).into_response(),
     }
 }
 

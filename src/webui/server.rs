@@ -1,7 +1,12 @@
-use actix_web::{middleware, web, App, HttpServer};
 use anyhow::Result;
+use axum::{
+    Router,
+    routing::get,
+};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
+use tower_http::trace::TraceLayer;
 
 use crate::broadcast::EventBroadcaster;
 use crate::config::Config;
@@ -17,7 +22,7 @@ pub async fn start_server(
     config: Config,
     metadata: Arc<std::sync::RwLock<Option<crate::event::Metadata>>>,
 ) -> Result<()> {
-    let reader = web::Data::new(LogReader::new(&data_dir));
+    let reader = Arc::new(LogReader::new(&data_dir));
 
     // Build indexed reader for time-travel queries
     let indexed_reader = match IndexedReader::new(&data_dir) {
@@ -30,44 +35,48 @@ pub async fn start_server(
             }))
         }
     };
-    let indexed_reader_data = web::Data::new(indexed_reader);
 
-    let broadcaster_clone = (*broadcaster).clone();
-    let broadcaster_data = web::Data::from(broadcaster);
-    let config_data = web::Data::new(config.clone());
-    let start_time = web::Data::new(Instant::now());
-    let data_dir_data = web::Data::new(data_dir.clone());
-    let metadata_data = web::Data::from(metadata);
+    let start_time = Arc::new(Instant::now());
 
     // Spawn the broadcaster bridge (crossbeam -> tokio broadcast)
+    let broadcaster_clone = (*broadcaster).clone();
     tokio::spawn(async move {
         broadcaster_clone.run().await;
     });
 
+    // Build app state
+    let state = routes::AppState {
+        reader,
+        indexed_reader,
+        broadcaster,
+        config: Arc::new(config.clone()),
+        start_time,
+        data_dir: Arc::new(data_dir),
+        metadata,
+    };
+
+    // Build router with auth middleware
+    let app = Router::new()
+        .route("/", get(routes::index))
+        .route("/api/events", get(routes::api_events))
+        .route("/api/playback/info", get(playback::api_playback_info))
+        .route("/api/playback/events", get(playback::api_playback_events))
+        .route("/api/initial-state", get(playback::api_initial_state))
+        .route("/api/timeline", get(playback::api_timeline))
+        .route("/ws", get(websocket::ws_handler))
+        .route("/health", get(health::health_check))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth::basic_auth_middleware,
+        ))
+        .layer(TraceLayer::new_for_http())
+        .with_state(state);
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     println!("Server listening on http://localhost:{}", port);
 
-    HttpServer::new(move || {
-        App::new()
-            .app_data(reader.clone())
-            .app_data(indexed_reader_data.clone())
-            .app_data(broadcaster_data.clone())
-            .app_data(config_data.clone())
-            .app_data(start_time.clone())
-            .app_data(data_dir_data.clone())
-            .app_data(metadata_data.clone())
-            .wrap(middleware::Logger::default())
-            .wrap(auth::BasicAuth::new(config.auth.clone()))
-            .route("/", web::get().to(routes::index))
-            .route("/api/events", web::get().to(routes::api_events))
-            .route("/api/playback/info", web::get().to(playback::api_playback_info))
-            .route("/api/playback/events", web::get().to(playback::api_playback_events))
-            .route("/api/initial-state", web::get().to(playback::api_initial_state))
-            .route("/api/timeline", web::get().to(playback::api_timeline))
-            .route("/ws", web::get().to(websocket::ws_handler))
-            .route("/health", web::get().to(health::health_check))
-    })
-    .bind(("0.0.0.0", port))?
-    .run()
-    .await
-    .map_err(|e| anyhow::anyhow!("Server error: {}", e))
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, app)
+        .await
+        .map_err(|e| anyhow::anyhow!("Server error: {}", e))
 }
