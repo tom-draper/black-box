@@ -10,28 +10,40 @@ A lightweight, always-on forensics recorder for Linux servers. Captures system m
 
 - Always-on monitoring with minimal overhead
 - Fixed disk usage (100MB ring buffer)
+- Tamper protection modes (append-only or immutable log files)
 - Configuration via `config.toml`
 - Single static binary
 - Real-time WebSocket streaming with a web UI
+- Time-travel playback - query historical events by timestamp or time range
+- Timeline visualization with event density and resource usage
+- Export events to JSON for external analysis
+- Remote monitoring with health checks and auto-export
 - HTTP Basic Authentication for security
 - Health monitoring endpoint
+- Systemd integration
 
 ## What It Captures
 
 ### System Metrics (1s interval)
-- CPU, Memory, Swap usage
-- Disk I/O and space
-- Network I/O
-- Load average
-- TCP connections
+- CPU, Memory, Swap usage (overall and per-core)
+- Disk I/O and space (per-disk metrics and temperatures)
+- Network I/O (bytes sent/received, errors, drops)
+- Load average (1m, 5m, 15m)
+- TCP connections and time-wait states
 - Context switches
+- Hardware monitoring (CPU/GPU/motherboard temperatures, fan speeds)
+- GPU metrics (frequency, memory frequency, power consumption)
+- Filesystem usage (per mount point)
+- System uptime
 
 ### Process Intelligence
 - Lifecycle events (start/exit/stuck/zombie)
-- Full command lines
-- Thread and file descriptor counts
-- Memory and disk I/O per process
-- Top 10 resource consumers (every 5s)
+- Full command lines and working directories
+- Process metadata (PID, PPID, user, UID, exit codes)
+- Thread counts and resource usage
+- Memory and CPU usage per process
+- Top resource consumers snapshot (every 5s)
+- Total and running process counts
 
 ### Security Events (5s interval)
 - Logged-in users
@@ -40,6 +52,10 @@ A lightweight, always-on forensics recorder for Linux servers. Captures system m
 - Failed login attempts
 - Brute force detection (5+ failures in 5 minutes)
 - Port scan detection (20+ ports from same IP)
+
+### File System Events
+- File modifications, creations, deletions
+- File paths and sizes
 
 ### Anomaly Detection
 - CPU spike (>80%)
@@ -69,19 +85,43 @@ This starts:
 On first run, Black Box will create a `config.toml` file with default credentials. If using authentication, change the default password immediately. See configuration details below.
 
 ### Command Line Options
+
 ```bash
 # Run with custom port
 ./black-box --port 9000
 
-# Run purely data collection without web server (headless mode)
+# Run in headless mode (no web UI, data collection only)
 ./black-box --headless
+
+# Run with tamper protection (append-only files)
+./black-box --protected
+
+# Run with hardened protection (immutable until stop)
+./black-box --hardened
+
+# Export recorded events to JSON
+./black-box export -o events.json
+
+# Export events from a time range
+./black-box export --start "2026-01-15T10:00:00Z" --end "2026-01-15T11:00:00Z"
+
+# Check status of running instance
+./black-box status
+
+# Monitor health and auto-export on failure
+./black-box monitor --interval 60 --export-dir ./backups
+
+# Generate systemd service
+./black-box systemd generate
 ```
 
 ### Web UI Features
 - Real-time WebSocket streaming - Events pushed to browser instantly
+- Time-travel playback - Navigate historical events by timestamp
+- Timeline visualization - Event density with CPU and memory usage graphs
 - HTTP Basic Authentication - Secure access with username/password
 - Search/filter events
-- Filter by event type (System/Process/Security/Anomalies)
+- Filter by event type (System/Process/Security/Anomalies/FileSystem)
 - Terminal-like aesthetic with color coding
 - Auto-reconnect on disconnect
 
@@ -123,6 +163,32 @@ To disable authentication (not recommended for production):
 enabled = false
 ```
 
+## Protection Modes
+
+Black Box supports tamper protection to prevent attackers from deleting evidence:
+
+### Default Mode
+No special protection. Log files can be modified or deleted.
+
+### Protected Mode (`--protected`)
+Uses `chattr +a` to make log files append-only. Files cannot be modified or deleted, only appended to. Useful for preventing evidence tampering while still allowing graceful shutdown.
+
+### Hardened Mode (`--hardened`)
+Maximum protection. Log files are made immutable during recording. Cannot be stopped gracefully - requires system reboot or manual intervention to stop. Use this when you need the highest level of tamper resistance.
+
+**Requirements:**
+- Root/sudo access (for `chattr` commands)
+- ext4 or similar filesystem with attribute support
+
+**Example:**
+```bash
+# Run with append-only protection
+sudo ./black-box --protected
+
+# Run with maximum protection (cannot stop without force)
+sudo ./black-box --hardened
+```
+
 ## Building
 
 ```bash
@@ -131,21 +197,18 @@ cargo build --release
 
 Binary will be at `target/release/black-box` (single file, ~3.5MB).
 
-## Testing
-
-```bash
-# Run all tests
-cargo test
-
-# Run tests with output
-cargo test -- --nocapture
-```
-
 ## Permissions
 
-Most features work as regular user. For full security monitoring:
+Most features work as a regular user. For enhanced capabilities:
+
+**Security event monitoring:**
 - Add user to `adm` group for auth log access: `sudo usermod -aG adm username`
-- Or run with sudo (not recommended for continuous operation)
+- Required for SSH login monitoring, sudo command tracking, and failed auth detection
+
+**Tamper protection modes:**
+- `--protected` and `--hardened` modes require root/sudo access
+- Uses `chattr` filesystem attributes to prevent log tampering
+- Requires ext4 or similar filesystem with extended attribute support
 
 ## API Endpoints
 
@@ -194,13 +257,121 @@ ws.onmessage = (event) => {
 };
 ```
 
-## Architecture
+### `/api/playback/info` - Playback Time Range
+Get the time range of available historical data.
 
-- **Recorder**: Collects events and writes to binary log files (synchronous loop)
-- **Storage**: Segmented ring buffer (8MB segments, max 12 segments = ~100MB)
-- **Reader**: Deserializes binary log files
-- **Broadcaster**: Bridges sync collector to async WebSocket clients
-- **Web Server**: Actix-web async HTTP server with WebSocket support and Basic Auth
+```bash
+curl -u admin:admin http://localhost:8080/api/playback/info
+```
+
+Response:
+```json
+{
+  "first_timestamp": 1705320000,
+  "last_timestamp": 1705323600,
+  "first_timestamp_iso": "2026-01-15T10:00:00Z",
+  "last_timestamp_iso": "2026-01-15T11:00:00Z",
+  "segment_count": 5,
+  "estimated_event_count": 3600
+}
+```
+
+### `/api/playback/events` - Historical Events
+Query historical events with two modes:
+
+**Mode 1: Count-based** - Get last N SystemMetrics before a timestamp:
+```bash
+# Get last 60 SystemMetrics before timestamp
+curl -u admin:admin "http://localhost:8080/api/playback/events?timestamp=1705323600&count=60"
+
+# Get events BEFORE timestamp (for progressive loading)
+curl -u admin:admin "http://localhost:8080/api/playback/events?timestamp=1705323600&count=60&before=true"
+```
+
+**Mode 2: Range-based** - Get all events in a time range:
+```bash
+# Get all events between start and end (up to limit)
+curl -u admin:admin "http://localhost:8080/api/playback/events?start=1705320000&end=1705323600&limit=1000"
+```
+
+### `/api/initial-state` - Initial State
+Get the most recent complete SystemMetrics for page initialization.
+
+```bash
+curl -u admin:admin http://localhost:8080/api/initial-state
+```
+
+### `/api/timeline` - Event Timeline
+Get event density timeline with CPU and memory usage for visualization.
+
+```bash
+curl -u admin:admin http://localhost:8080/api/timeline
+```
+
+Response includes per-minute buckets with event counts and average CPU/memory usage.
+
+## CLI Commands
+
+### Export Events
+
+Export recorded events to JSON for external analysis or archival:
+
+```bash
+# Export all events to JSON file
+./black-box export -o events.json
+
+# Export with compression
+./black-box export -o events.json.gz --compress
+
+# Export specific time range
+./black-box export \
+  --start "2026-01-15T10:00:00Z" \
+  --end "2026-01-15T11:00:00Z" \
+  -o events.json
+
+# Export only specific event type
+./black-box export --event-type SystemMetrics -o metrics.json
+
+# Export from custom data directory
+./black-box export --data-dir /path/to/data -o events.json
+```
+
+### Monitor Health
+
+Monitor a Black Box instance and automatically export data on failure:
+
+```bash
+# Monitor with 60 second intervals
+./black-box monitor --interval 60 --export-dir ./backups
+
+# Monitor with authentication
+./black-box monitor \
+  --url http://server:8080 \
+  --username admin \
+  --password secret \
+  --export-dir ./backups
+
+# Continuous backup (export on every check, not just failures)
+./black-box monitor --continuous --export-dir ./backups
+```
+
+### Check Status
+
+Query the health endpoint and display status:
+
+```bash
+# Check local instance
+./black-box status
+
+# Check remote instance with authentication
+./black-box status \
+  --url http://server:8080 \
+  --username admin \
+  --password secret
+
+# JSON output for scripting
+./black-box status --format json
+```
 
 ## Binary Format
 
@@ -227,15 +398,15 @@ Segment file:
 Server crashed at 3am. You have Black Box running.
 
 1. Open web UI: `http://localhost:8080` (login with your credentials)
-2. WebSocket streams events in real-time
-3. Use filters to search time range around incident
+2. Click the timeline at the top to see event density and resource usage over time
+3. Use the time picker or rewind/fast-forward buttons to navigate to 3am
 4. Look for anomalies flagged automatically (red highlights)
-5. Check what processes were running (Process events)
+5. Check what processes were running at that time (Process events)
 6. Review security events (SSH logins, sudo usage)
-7. See exact resource usage before crash (System metrics)
-8. Export data via `/api/events` endpoint for external analysis
+7. See exact resource usage before crash (System metrics with CPU/memory graphs)
+8. Export data via `/api/playback/events` for external analysis
 
-All data is timestamped and correlated - you can "rewind" to any point in time.
+All data is timestamped and correlated - you can travel back to any point in time within the retention window.
 
 ## Security Considerations
 
