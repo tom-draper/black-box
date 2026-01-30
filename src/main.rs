@@ -55,7 +55,7 @@ const COLLECTION_INTERVAL_SECS: u64 = 1;
 const TOP_PROCESSES_COUNT: usize = 10;
 const PROCESS_SNAPSHOT_INTERVAL: u64 = 5; // Snapshot top processes every 5 seconds
 const SECURITY_CHECK_INTERVAL: u64 = 5; // Check security events every 5 seconds
-const TEMPERATURE_CHECK_INTERVAL: u64 = 10; // Check temperatures every 10 seconds
+const TEMPERATURE_CHECK_INTERVAL: u64 = 60; // Check temperatures every 60 seconds
 const FILESYSTEM_CHECK_INTERVAL: u64 = 30; // Check filesystems every 30 seconds
 const NETWORK_CONFIG_CHECK_INTERVAL: u64 = 30; // Check network config every 30 seconds
 
@@ -140,6 +140,20 @@ fn update_metadata_if_changed(
                     cached.fans = metrics.fans.clone();
                     updated = true;
                 }
+            }
+            // Always update temps, gpu, and logged_in_users when present
+            // These are sent every cycle, so we can just update them
+            if Some(metrics.temps.clone()) != cached.temps {
+                cached.temps = Some(metrics.temps.clone());
+                updated = true;
+            }
+            if Some(metrics.gpu.clone()) != cached.gpu {
+                cached.gpu = Some(metrics.gpu.clone());
+                updated = true;
+            }
+            if metrics.logged_in_users.is_some() && metrics.logged_in_users != cached.logged_in_users {
+                cached.logged_in_users = metrics.logged_in_users.clone();
+                updated = true;
             }
             if updated {
                 cached.last_updated = metrics.ts;
@@ -298,6 +312,19 @@ fn run_recorder(cli: Cli) -> Result<()> {
     let cpu_info = collector::read_cpu_info();
     let net_stats = read_network_stats()?;
     let fans = read_fan_speeds();
+    let temps = read_temperatures();
+    // Get CPU count from initial CPU stats read
+    let initial_cpu_snapshot = read_all_cpu_stats()?;
+    let num_cores = initial_cpu_snapshot.per_core.len();
+    let per_core_temps = read_per_core_temperatures(num_cores);
+    let gpu_info = collector::read_gpu_info();
+    let logged_in_users_list = read_logged_in_users().ok().map(|users| {
+        users.into_iter().map(|u| event::LoggedInUserInfo {
+            username: u.username,
+            terminal: u.terminal,
+            remote_host: u.remote_host,
+        }).collect()
+    });
 
     let filesystems_vec: Vec<FilesystemInfo> = read_all_filesystems()
         .unwrap_or_default()
@@ -324,6 +351,14 @@ fn run_recorder(cli: Cli) -> Result<()> {
         net_gateway: get_default_gateway(),
         net_dns: get_dns_server(),
         fans: if fans.is_empty() { None } else { Some(fans) },
+        temps: Some(TemperatureReadings {
+            cpu_temp_celsius: temps.cpu_temp_celsius,
+            per_core_temps,
+            gpu_temp_celsius: temps.gpu_temp_celsius,
+            motherboard_temp_celsius: temps.motherboard_temp_celsius,
+        }),
+        gpu: Some(gpu_info),
+        logged_in_users: logged_in_users_list,
         processes: None,
         total_processes: None,
         running_processes: None,
@@ -583,9 +618,18 @@ fn run_recorder(cli: Cli) -> Result<()> {
         let include_static = tick_count <= 30 || tick_count % STATIC_FIELDS_INTERVAL == 0;
         let include_semi_static = tick_count <= 30 || tick_count % SEMI_STATIC_FIELDS_INTERVAL == 0;
 
-        // Collect static fields (hourly or on change)
-        let cpu_info = collector::read_cpu_info();
-        let kernel_version = collector::read_kernel_version();
+        // Only read expensive static fields when needed (not every second)
+        // These values almost never change, so we only check periodically
+        let (cpu_info, kernel_version) = if include_static {
+            (collector::read_cpu_info(), collector::read_kernel_version())
+        } else {
+            // Use cached values from last read
+            (
+                collector::CpuInfo { model: last_cpu_model.clone(), mhz: last_cpu_mhz },
+                last_kernel_version.clone()
+            )
+        };
+
         let mem_total = mem_stats.total_kb * 1024;
         let swap_total = swap_stats.total_kb * 1024;
         let disk_total = disk_space.total_bytes;
@@ -595,9 +639,10 @@ fn run_recorder(cli: Cli) -> Result<()> {
         cached_swap_total_for_pct = swap_total;
         cached_disk_total_for_pct = disk_total;
 
-        let kernel_changed = kernel_version != last_kernel_version;
-        let cpu_model_changed = cpu_info.model != last_cpu_model;
-        let cpu_mhz_changed = cpu_info.mhz != last_cpu_mhz;
+        // Only check for changes when we actually read the values
+        let kernel_changed = if include_static { kernel_version != last_kernel_version } else { false };
+        let cpu_model_changed = if include_static { cpu_info.model != last_cpu_model } else { false };
+        let cpu_mhz_changed = if include_static { cpu_info.mhz != last_cpu_mhz } else { false };
         let mem_total_changed = mem_total != last_mem_total;
         let swap_total_changed = swap_total != last_swap_total;
         let disk_total_changed = disk_total != last_disk_total;

@@ -64,7 +64,7 @@ pub struct SystemMetrics {
 }
 
 // Logged in user info
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LoggedInUserInfo {
     pub username: String,
     pub terminal: String,
@@ -72,7 +72,7 @@ pub struct LoggedInUserInfo {
 }
 
 // Temperature readings from various sensors
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TemperatureReadings {
     pub cpu_temp_celsius: Option<f32>,
     pub per_core_temps: Vec<Option<f32>>,
@@ -81,7 +81,7 @@ pub struct TemperatureReadings {
 }
 
 // GPU info
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct GpuInfo {
     pub gpu_freq_mhz: Option<u32>,
     pub mem_freq_mhz: Option<u32>,
@@ -279,6 +279,9 @@ pub struct Metadata {
     pub net_gateway: Option<String>,
     pub net_dns: Option<String>,
     pub fans: Option<Vec<FanReading>>,
+    pub temps: Option<TemperatureReadings>,
+    pub gpu: Option<GpuInfo>,
+    pub logged_in_users: Option<Vec<LoggedInUserInfo>>,
     pub processes: Option<Vec<ProcessInfo>>,
     pub total_processes: Option<u32>,
     pub running_processes: Option<u32>,
@@ -301,6 +304,9 @@ impl Metadata {
             net_gateway: m.net_gateway.clone(),
             net_dns: m.net_dns.clone(),
             fans: m.fans.clone(),
+            temps: Some(m.temps.clone()),
+            gpu: Some(m.gpu.clone()),
+            logged_in_users: m.logged_in_users.clone(),
             processes: None,
             total_processes: None,
             running_processes: None,

@@ -114,7 +114,8 @@ impl Recorder {
 
         self.file.write_all(&header_bytes)?;
         self.file.write_all(&payload)?;
-        self.file.flush()?;
+        // OS buffering is sufficient - no need to flush on every write
+        // Data will be flushed periodically by the OS and on segment rotation
 
         self.offset += record_len as u64;
 
