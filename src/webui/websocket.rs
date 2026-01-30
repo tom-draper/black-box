@@ -80,6 +80,17 @@ impl Actor for WsSession {
                     metadata.net_interface,
                     metadata.net_ip_address);
 
+                // Transform filesystems to match SystemMetrics field names
+                let filesystems_transformed = metadata.filesystems.as_ref().map(|fs_list| {
+                    fs_list.iter().map(|fs| serde_json::json!({
+                        "filesystem": fs.filesystem,
+                        "mount": fs.mount_point,
+                        "total": fs.total_bytes,
+                        "used": fs.used_bytes,
+                        "available": fs.available_bytes,
+                    })).collect::<Vec<_>>()
+                });
+
                 let metadata_msg = serde_json::json!({
                     "type": "Metadata",
                     "kernel": metadata.kernel_version,
@@ -88,7 +99,7 @@ impl Actor for WsSession {
                     "mem_total": metadata.mem_total_bytes,
                     "swap_total": metadata.swap_total_bytes,
                     "disk_total": metadata.disk_total_bytes,
-                    "filesystems": metadata.filesystems,
+                    "filesystems": filesystems_transformed,
                     "net_interface": metadata.net_interface,
                     "net_ip": metadata.net_ip_address,
                     "net_gateway": metadata.net_gateway,
