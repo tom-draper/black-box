@@ -537,10 +537,10 @@ fn find_missing_metadata(reader: &IndexedReader, events: &[Event], end_time_ns: 
             if !has_filesystems && m.filesystems.is_some() {
                 let filesystems: Vec<_> = m.filesystems.as_ref().unwrap().iter().map(|fs| serde_json::json!({
                     "filesystem": fs.filesystem,
-                    "mount": fs.mount_point,
-                    "total": fs.total_bytes,
-                    "used": fs.used_bytes,
-                    "available": fs.available_bytes,
+                    "mount_point": fs.mount_point,
+                    "total_bytes": fs.total_bytes,
+                    "used_bytes": fs.used_bytes,
+                    "available_bytes": fs.available_bytes,
                 })).collect();
                 metadata["filesystems"] = serde_json::json!(filesystems);
                 has_filesystems = true;
@@ -618,10 +618,10 @@ fn format_event_for_api(event: &Event) -> serde_json::Value {
                 })).collect::<Vec<_>>(),
                 "filesystems": m.filesystems.as_ref().map(|fs_list| fs_list.iter().map(|fs| serde_json::json!({
                     "filesystem": fs.filesystem,
-                    "mount": fs.mount_point,
-                    "total": fs.total_bytes,
-                    "used": fs.used_bytes,
-                    "available": fs.available_bytes,
+                    "mount_point": fs.mount_point,
+                    "total_bytes": fs.total_bytes,
+                    "used_bytes": fs.used_bytes,
+                    "available_bytes": fs.available_bytes,
                 })).collect::<Vec<_>>()).unwrap_or_default(),
                 "users": m.logged_in_users.as_ref().map(|user_list| user_list.iter().map(|u| serde_json::json!({
                     "username": u.username,

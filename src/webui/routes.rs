@@ -386,8 +386,8 @@ async function fetchInitialState() {
                 // Render filesystems immediately
                 const filesystems = data.filesystems;
                 filesystems.forEach((fs, i) => {
-                    const pct = fs.total > 0 ? Math.round((fs.used/fs.total)*100) : 0;
-                    updateDiskBar(`disk_${i}`, pct, document.getElementById('diskContainer'), fs.mount, fs.used, fs.total);
+                    const pct = fs.total_bytes > 0 ? Math.round((fs.used_bytes / fs.total_bytes) * 100) : 0;
+                    updateDiskBar(`disk_${i}`, pct, document.getElementById('diskContainer'), fs.mount_point, fs.used_bytes, fs.total_bytes);
                 });
             }
 
@@ -1649,8 +1649,8 @@ function render(){
     const filesystems = (e.filesystems && e.filesystems.length > 0) ? e.filesystems : cachedFilesystems;
     if(filesystems && filesystems.length > 0) {
         filesystems.forEach((fs, i) => {
-            const pct = fs.total > 0 ? Math.round((fs.used/fs.total)*100) : 0;
-            updateDiskBar(`disk_${i}`, pct, document.getElementById('diskContainer'), fs.mount, fs.used, fs.total);
+            const pct = fs.total_bytes > 0 ? Math.round((fs.used_bytes / fs.total_bytes) * 100) : 0;
+            updateDiskBar(`disk_${i}`, pct, document.getElementById('diskContainer'), fs.mount_point, fs.used_bytes, fs.total_bytes);
         });
     }
 
@@ -1747,6 +1747,8 @@ function connectWebSocket(){
                     if(e.cpu_model != null) cachedCpuModel = e.cpu_model;
                     if(e.cpu_mhz != null) cachedCpuMhz = e.cpu_mhz;
                     if(e.filesystems && e.filesystems.length > 0) {
+                        console.log('[METADATA] First filesystem fields:', Object.keys(e.filesystems[0]));
+                        console.log('[METADATA] First filesystem:', e.filesystems[0]);
                         cachedFilesystems = e.filesystems;
                         console.log('[METADATA] Cached', e.filesystems.length, 'filesystems');
                     }
@@ -1982,10 +1984,10 @@ fn event_to_json(
                 })).collect::<Vec<_>>(),
                 "filesystems": m.filesystems.as_ref().map(|fs_list| fs_list.iter().map(|fs| serde_json::json!({
                     "filesystem": fs.filesystem,
-                    "mount": fs.mount_point,
-                    "total": fs.total_bytes,
-                    "used": fs.used_bytes,
-                    "available": fs.available_bytes,
+                    "mount_point": fs.mount_point,
+                    "total_bytes": fs.total_bytes,
+                    "used_bytes": fs.used_bytes,
+                    "available_bytes": fs.available_bytes,
                 })).collect::<Vec<_>>()).unwrap_or_default(),
                 "tcp": m.tcp_connections,
                 "tcp_wait": m.tcp_time_wait,
