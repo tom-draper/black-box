@@ -90,7 +90,7 @@ pub struct GpuInfo {
 }
 
 // Fan speed readings
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FanReading {
     pub label: String,
     pub rpm: u32,
@@ -106,7 +106,7 @@ pub struct PerDiskMetrics {
 }
 
 // Filesystem usage stats (like df output)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FilesystemInfo {
     pub filesystem: String,
     pub mount_point: String,
@@ -260,6 +260,62 @@ impl Event {
             Event::Anomaly(e) => e.ts,
             Event::FileSystemEvent(e) => e.ts,
         }
+    }
+}
+
+/// Static/semi-static system metadata
+/// Stored separately from time-series events for efficient access
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Metadata {
+    pub kernel_version: Option<String>,
+    pub cpu_model: Option<String>,
+    pub cpu_mhz: Option<u32>,
+    pub mem_total_bytes: Option<u64>,
+    pub swap_total_bytes: Option<u64>,
+    pub disk_total_bytes: Option<u64>,
+    pub filesystems: Option<Vec<FilesystemInfo>>,
+    pub net_interface: Option<String>,
+    pub net_ip_address: Option<String>,
+    pub net_gateway: Option<String>,
+    pub net_dns: Option<String>,
+    pub fans: Option<Vec<FanReading>>,
+    pub last_updated: OffsetDateTime,
+}
+
+impl Metadata {
+    /// Create metadata from SystemMetrics
+    pub fn from_system_metrics(m: &SystemMetrics) -> Self {
+        Self {
+            kernel_version: m.kernel_version.clone(),
+            cpu_model: m.cpu_model.clone(),
+            cpu_mhz: m.cpu_mhz,
+            mem_total_bytes: m.mem_total_bytes,
+            swap_total_bytes: m.swap_total_bytes,
+            disk_total_bytes: m.disk_total_bytes,
+            filesystems: m.filesystems.clone(),
+            net_interface: m.net_interface.clone(),
+            net_ip_address: m.net_ip_address.clone(),
+            net_gateway: m.net_gateway.clone(),
+            net_dns: m.net_dns.clone(),
+            fans: m.fans.clone(),
+            last_updated: m.ts,
+        }
+    }
+
+    /// Check if metadata fields have changed (ignoring timestamp)
+    pub fn has_changed(&self, other: &Metadata) -> bool {
+        self.kernel_version != other.kernel_version
+            || self.cpu_model != other.cpu_model
+            || self.cpu_mhz != other.cpu_mhz
+            || self.mem_total_bytes != other.mem_total_bytes
+            || self.swap_total_bytes != other.swap_total_bytes
+            || self.disk_total_bytes != other.disk_total_bytes
+            || self.filesystems != other.filesystems
+            || self.net_interface != other.net_interface
+            || self.net_ip_address != other.net_ip_address
+            || self.net_gateway != other.net_gateway
+            || self.net_dns != other.net_dns
+            || self.fans != other.fans
     }
 }
 

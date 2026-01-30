@@ -61,6 +61,7 @@ impl WsSession {
 
         ctx.add_stream(stream);
     }
+
 }
 
 impl Actor for WsSession {
@@ -68,6 +69,11 @@ impl Actor for WsSession {
 
     fn started(&mut self, ctx: &mut Self::Context) {
         println!("{} WebSocket client connected", now_timestamp());
+
+        // Don't send synthetic metrics - just wait for the first real SystemMetrics
+        // The first real event will have metadata (initialized at startup) + actual data
+        // This avoids showing a "skeleton" UI with 0 values
+
         self.start_heartbeat(ctx);
         self.start_event_stream(ctx);
     }

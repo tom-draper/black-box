@@ -45,7 +45,7 @@ use collector::{
 };
 use event::{
     Anomaly, AnomalyKind, AnomalySeverity, Event, FilesystemInfo, LoggedInUserInfo,
-    PerDiskMetrics, ProcessInfo, ProcessLifecycle, ProcessLifecycleKind,
+    Metadata, PerDiskMetrics, ProcessInfo, ProcessLifecycle, ProcessLifecycleKind,
     ProcessSnapshot as EventProcessSnapshot, SecurityEvent, SecurityEventKind, SystemMetrics,
     TemperatureReadings,
 };
@@ -69,6 +69,31 @@ fn now_timestamp() -> String {
         now.second(),
         now.millisecond()
     )
+}
+
+/// Update metadata in shared memory if it has changed
+fn update_metadata_if_changed(
+    shared_metadata: &Arc<std::sync::RwLock<Option<Metadata>>>,
+    metrics: &SystemMetrics,
+) -> bool {
+    let new_metadata = Metadata::from_system_metrics(metrics);
+
+    let mut metadata_guard = match shared_metadata.write() {
+        Ok(guard) => guard,
+        Err(_) => return false, // Lock poisoned, skip update
+    };
+
+    let should_update = match metadata_guard.as_ref() {
+        Some(cached) => new_metadata.has_changed(cached),
+        None => true, // First time, always update
+    };
+
+    if should_update {
+        *metadata_guard = Some(new_metadata);
+        return true;
+    }
+
+    false
 }
 
 fn main() -> Result<()> {
@@ -188,6 +213,44 @@ fn run_recorder(cli: Cli) -> Result<()> {
     let port = cli.port.unwrap_or(config.server.port);
 
     let data_dir = config.server.data_dir.clone();
+
+    // Initialize metadata in memory early so web server can access it
+    let mem_stats = read_memory_stats()?;
+    let swap_stats = read_swap_stats()?;
+    let disk_space = read_disk_space()?;
+    let cpu_info = collector::read_cpu_info();
+    let net_stats = read_network_stats()?;
+    let fans = read_fan_speeds();
+
+    let filesystems_vec: Vec<FilesystemInfo> = read_all_filesystems()
+        .unwrap_or_default()
+        .iter()
+        .map(|fs| FilesystemInfo {
+            filesystem: fs.filesystem.clone(),
+            mount_point: fs.mount_point.clone(),
+            total_bytes: fs.total_bytes,
+            used_bytes: fs.used_bytes,
+            available_bytes: fs.available_bytes,
+        })
+        .collect();
+
+    let initial_metadata = Metadata {
+        kernel_version: Some(collector::read_kernel_version()),
+        cpu_model: Some(cpu_info.model),
+        cpu_mhz: Some(cpu_info.mhz),
+        mem_total_bytes: Some(mem_stats.total_kb * 1024),
+        swap_total_bytes: Some(swap_stats.total_kb * 1024),
+        disk_total_bytes: Some(disk_space.total_bytes),
+        filesystems: if filesystems_vec.is_empty() { None } else { Some(filesystems_vec) },
+        net_interface: Some(net_stats.primary_interface),
+        net_ip_address: get_primary_ip_address(),
+        net_gateway: get_default_gateway(),
+        net_dns: get_dns_server(),
+        fans: if fans.is_empty() { None } else { Some(fans) },
+        last_updated: OffsetDateTime::now_utc(),
+    };
+
+    let shared_metadata = Arc::new(std::sync::RwLock::new(Some(initial_metadata)));
 
     // Create broadcast channel for event streaming
     let (broadcast_tx, broadcaster) = EventBroadcaster::new();
@@ -318,6 +381,8 @@ fn run_recorder(cli: Cli) -> Result<()> {
     let mut cached_net_ip = get_primary_ip_address();
     let mut cached_net_gateway = get_default_gateway();
     let mut cached_net_dns = get_dns_server();
+
+    // Use the shared metadata (already initialized earlier)
 
     // Track static/semi-static field values for change detection
     let mut last_kernel_version = String::new();
@@ -614,7 +679,10 @@ fn run_recorder(cli: Cli) -> Result<()> {
             gpu: collector::read_gpu_info(),
         };
 
-        recorder.append(&Event::SystemMetrics(system_metrics))?;
+        recorder.append(&Event::SystemMetrics(system_metrics.clone()))?;
+
+        // Update metadata in shared memory if static/semi-static fields have changed
+        let _ = update_metadata_if_changed(&shared_metadata, &system_metrics);
 
         // Track process lifecycle changes
         let proc_diff = diff_processes(&prev_processes, &current_processes);

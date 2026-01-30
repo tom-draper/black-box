@@ -35,6 +35,7 @@ pub async fn start_server(
     let broadcaster_data = web::Data::from(broadcaster);
     let config_data = web::Data::new(config.clone());
     let start_time = web::Data::new(Instant::now());
+    let data_dir_data = web::Data::new(data_dir.clone());
 
     // Spawn the broadcaster bridge (crossbeam -> tokio broadcast)
     tokio::spawn(async move {
@@ -50,6 +51,7 @@ pub async fn start_server(
             .app_data(broadcaster_data.clone())
             .app_data(config_data.clone())
             .app_data(start_time.clone())
+            .app_data(data_dir_data.clone())
             .wrap(middleware::Logger::default())
             .wrap(auth::BasicAuth::new(config.auth.clone()))
             .route("/", web::get().to(routes::index))
