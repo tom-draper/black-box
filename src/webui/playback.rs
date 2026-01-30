@@ -671,13 +671,18 @@ fn format_event_for_api(event: &Event) -> serde_json::Value {
         Event::ProcessSnapshot(p) => serde_json::json!({
             "type": "ProcessSnapshot",
             "timestamp": p.ts.unix_timestamp_nanos() / 1_000_000,  // Convert to milliseconds
+            "count": p.processes.len(),
             "total_processes": p.total_processes,
             "running_processes": p.running_processes,
             "processes": p.processes.iter().map(|proc| serde_json::json!({
                 "pid": proc.pid,
                 "name": proc.name,
+                "cmdline": proc.cmdline,
+                "state": proc.state,
+                "user": proc.user,
                 "cpu_percent": proc.cpu_percent,
                 "mem_bytes": proc.mem_bytes,
+                "num_threads": proc.num_threads,
             })).collect::<Vec<_>>(),
         }),
         Event::SecurityEvent(s) => serde_json::json!({

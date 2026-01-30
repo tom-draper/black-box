@@ -1120,9 +1120,9 @@ document.getElementById('timePicker').addEventListener('blur', (e) => {
     setTimeout(() => e.target.style.display = 'none', 200);
 });
 
-// Fetch playback info and initial state on startup
+// Fetch playback info and timeline on startup
+// Initial state is fetched before connecting WebSocket (see below)
 fetchPlaybackInfo();
-fetchInitialState();
 fetchTimeline();
 
 const fmt = b => {
@@ -1861,7 +1861,12 @@ function reloadEvents(){
 
 document.getElementById('filterInput').addEventListener('input', reloadEvents);
 document.getElementById('eventType').addEventListener('change', reloadEvents);
-connectWebSocket();
+
+// Wait for initial state before connecting WebSocket to avoid 0% memory display
+(async () => {
+    await fetchInitialState();
+    connectWebSocket();
+})();
 
 // Redraw timeline on window resize
 window.addEventListener('resize', () => {
