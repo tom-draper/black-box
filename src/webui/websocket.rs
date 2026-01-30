@@ -106,6 +106,35 @@ async fn handle_socket(
 
     loop {
         tokio::select! {
+            // Prioritize events over other branches with biased selection
+            biased;
+
+            // Handle events from broadcaster FIRST (highest priority)
+            event = event_stream.next() => {
+                match event {
+                    Some(Ok(event)) => {
+                        match event_to_json_string(&event) {
+                            Ok(json) => {
+                                if sender.send(Message::Text(json)).await.is_err() {
+                                    break;
+                                }
+                                // Flush immediately for low latency
+                                if sender.flush().await.is_err() {
+                                    break;
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to serialize event: {}", e);
+                            }
+                        }
+                    }
+                    Some(Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(skipped))) => {
+                        eprintln!("{} WebSocket client lagged, skipped {} events", now_timestamp(), skipped);
+                    }
+                    None => break,
+                }
+            }
+
             // Handle incoming messages from client
             msg = receiver.next() => {
                 match msg {
@@ -125,7 +154,7 @@ async fn handle_socket(
                 }
             }
 
-            // Send heartbeat pings
+            // Send heartbeat pings (lowest priority)
             _ = heartbeat.tick() => {
                 // Check if client is still responding
                 if last_pong.elapsed() > CLIENT_TIMEOUT {
@@ -135,28 +164,6 @@ async fn handle_socket(
 
                 if sender.send(Message::Ping(vec![])).await.is_err() {
                     break;
-                }
-            }
-
-            // Handle events from broadcaster
-            event = event_stream.next() => {
-                match event {
-                    Some(Ok(event)) => {
-                        match event_to_json_string(&event) {
-                            Ok(json) => {
-                                if sender.send(Message::Text(json)).await.is_err() {
-                                    break;
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("Failed to serialize event: {}", e);
-                            }
-                        }
-                    }
-                    Some(Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(skipped))) => {
-                        eprintln!("{} WebSocket client lagged, skipped {} events", now_timestamp(), skipped);
-                    }
-                    None => break,
                 }
             }
         }

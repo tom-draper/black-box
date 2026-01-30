@@ -76,7 +76,13 @@ pub async fn start_server(
     println!("Server listening on http://localhost:{}", port);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app)
-        .await
-        .map_err(|e| anyhow::anyhow!("Server error: {}", e))
+
+    // Configure TCP socket for low latency (disable Nagle's algorithm)
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>()
+    )
+    .tcp_nodelay(true)
+    .await
+    .map_err(|e| anyhow::anyhow!("Server error: {}", e))
 }
