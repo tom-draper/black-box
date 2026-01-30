@@ -476,8 +476,12 @@ fn find_missing_metadata(reader: &IndexedReader, events: &[Event], end_time_ns: 
     let mut has_net_gateway = false;
     let mut has_net_dns = false;
     let mut has_fans = false;
+    let mut has_processes = false;
 
     for event in events {
+        if let Event::ProcessSnapshot(_) = event {
+            has_processes = true;
+        }
         if let Event::SystemMetrics(m) = event {
             if m.kernel_version.is_some() { has_kernel = true; }
             if m.cpu_model.is_some() { has_cpu_model = true; }
@@ -497,7 +501,7 @@ fn find_missing_metadata(reader: &IndexedReader, events: &[Event], end_time_ns: 
     // If all fields are present, no need to look back
     if has_kernel && has_cpu_model && has_cpu_mhz && has_mem_total && has_swap_total &&
        has_disk_total && has_filesystems && has_net_interface && has_net_ip &&
-       has_net_gateway && has_net_dns && has_fans {
+       has_net_gateway && has_net_dns && has_fans && has_processes {
         return serde_json::json!({});
     }
 
@@ -573,8 +577,33 @@ fn find_missing_metadata(reader: &IndexedReader, events: &[Event], end_time_ns: 
             // Stop early if all fields found
             if has_kernel && has_cpu_model && has_cpu_mhz && has_mem_total && has_swap_total &&
                has_disk_total && has_filesystems && has_net_interface && has_net_ip &&
-               has_net_gateway && has_net_dns && has_fans {
+               has_net_gateway && has_net_dns && has_fans && has_processes {
                 break;
+            }
+        }
+        if !has_processes {
+            if let Event::ProcessSnapshot(p) = event {
+                let processes: Vec<_> = p.processes.iter().map(|proc| serde_json::json!({
+                    "pid": proc.pid,
+                    "name": proc.name,
+                    "cmdline": proc.cmdline,
+                    "state": proc.state,
+                    "user": proc.user,
+                    "cpu_percent": proc.cpu_percent,
+                    "mem_bytes": proc.mem_bytes,
+                    "num_threads": proc.num_threads,
+                })).collect();
+                metadata["processes"] = serde_json::json!(processes);
+                metadata["total_processes"] = serde_json::json!(p.total_processes);
+                metadata["running_processes"] = serde_json::json!(p.running_processes);
+                has_processes = true;
+
+                // Stop early if all fields found
+                if has_kernel && has_cpu_model && has_cpu_mhz && has_mem_total && has_swap_total &&
+                   has_disk_total && has_filesystems && has_net_interface && has_net_ip &&
+                   has_net_gateway && has_net_dns && has_fans && has_processes {
+                    break;
+                }
             }
         }
     }

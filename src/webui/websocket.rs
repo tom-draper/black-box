@@ -75,8 +75,9 @@ impl Actor for WsSession {
         // Send metadata as first message (just for populating caches, no render)
         if let Ok(guard) = self.metadata.read() {
             if let Some(ref metadata) = *guard {
-                eprintln!("[WEBSOCKET] Sending metadata: filesystems={}, net_interface={:?}, net_ip={:?}",
+                eprintln!("[WEBSOCKET] Sending metadata: filesystems={}, processes={}, net_interface={:?}, net_ip={:?}",
                     metadata.filesystems.as_ref().map(|fs| fs.len()).unwrap_or(0),
+                    metadata.processes.as_ref().map(|p| p.len()).unwrap_or(0),
                     metadata.net_interface,
                     metadata.net_ip_address);
 
@@ -94,6 +95,9 @@ impl Actor for WsSession {
                     "net_gateway": metadata.net_gateway,
                     "net_dns": metadata.net_dns,
                     "fans": metadata.fans,
+                    "processes": metadata.processes,
+                    "total_processes": metadata.total_processes,
+                    "running_processes": metadata.running_processes,
                 });
                 if let Ok(json_str) = serde_json::to_string(&metadata_msg) {
                     ctx.text(json_str);

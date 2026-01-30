@@ -147,7 +147,7 @@ pub struct ProcessSnapshot {
     pub running_processes: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProcessInfo {
     pub pid: u32,
     pub name: String,
@@ -279,6 +279,9 @@ pub struct Metadata {
     pub net_gateway: Option<String>,
     pub net_dns: Option<String>,
     pub fans: Option<Vec<FanReading>>,
+    pub processes: Option<Vec<ProcessInfo>>,
+    pub total_processes: Option<u32>,
+    pub running_processes: Option<u32>,
     pub last_updated: OffsetDateTime,
 }
 
@@ -298,6 +301,9 @@ impl Metadata {
             net_gateway: m.net_gateway.clone(),
             net_dns: m.net_dns.clone(),
             fans: m.fans.clone(),
+            processes: None,
+            total_processes: None,
+            running_processes: None,
             last_updated: m.ts,
         }
     }

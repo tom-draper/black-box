@@ -248,6 +248,9 @@ let cachedNetDns = null;
 let cachedKernel = null;
 let cachedCpuModel = null;
 let cachedCpuMhz = null;
+let cachedProcesses = [];
+let cachedTotalProcesses = null;
+let cachedRunningProcesses = null;
 
 // Previous values cache for change detection (optimization to avoid unnecessary DOM updates)
 const prevValues = {};
@@ -1681,12 +1684,22 @@ function render(){
 }
 
 function updateProcs(event){
-    const procCountText = `${event.total_processes || 0} total ${event.running_processes || 0} running`;
+    // Use event processes if available, otherwise fall back to cached
+    const processes = (event.processes && event.processes.length > 0) ? event.processes : cachedProcesses;
+    const totalProcs = event.total_processes ?? cachedTotalProcesses ?? 0;
+    const runningProcs = event.running_processes ?? cachedRunningProcesses ?? 0;
+
+    // Update cache if we got new data
+    if(event.processes && event.processes.length > 0) cachedProcesses = event.processes;
+    if(event.total_processes != null) cachedTotalProcesses = event.total_processes;
+    if(event.running_processes != null) cachedRunningProcesses = event.running_processes;
+
+    const procCountText = `${totalProcs} total ${runningProcs} running`;
     updateTextIfChanged('procCount', procCountText);
 
     const memTotal = cachedMemTotal || lastStats?.mem_total || 0;
-    const topCpu = (event.processes || []).slice().sort((a,b) => b.cpu_percent - a.cpu_percent).slice(0,5);
-    const topMem = (event.processes || []).slice().sort((a,b) => b.mem_bytes - a.mem_bytes).slice(0,5);
+    const topCpu = processes.slice().sort((a,b) => b.cpu_percent - a.cpu_percent).slice(0,5);
+    const topMem = processes.slice().sort((a,b) => b.mem_bytes - a.mem_bytes).slice(0,5);
 
     // Only update tables if process lists actually changed
     const topCpuKey = JSON.stringify(topCpu.map(p => `${p.pid}_${p.cpu_percent}`));
@@ -1753,7 +1766,17 @@ function connectWebSocket(){
                         console.log('[METADATA] Cached', e.filesystems.length, 'filesystems');
                     }
                     if(e.fans && e.fans.length > 0) cachedFans = e.fans;
-                    // Don't render - just populate caches for when real data arrives
+                    if(e.processes && e.processes.length > 0) {
+                        cachedProcesses = e.processes;
+                        console.log('[METADATA] Cached', e.processes.length, 'processes');
+                    }
+                    if(e.total_processes != null) cachedTotalProcesses = e.total_processes;
+                    if(e.running_processes != null) cachedRunningProcesses = e.running_processes;
+                    // Render processes immediately if available (collected every 10s)
+                    if(e.processes && e.processes.length > 0) {
+                        updateProcs(e);
+                    }
+                    // Don't render other data - just populate caches for when real data arrives
                     break;
                 case 'SystemMetrics':
                     lastStats = e;

@@ -155,6 +155,24 @@ fn update_metadata_if_changed(
     updated
 }
 
+fn update_process_metadata(
+    shared_metadata: &Arc<std::sync::RwLock<Option<Metadata>>>,
+    snapshot: &EventProcessSnapshot,
+) {
+    let mut metadata_guard = match shared_metadata.write() {
+        Ok(guard) => guard,
+        Err(_) => return, // Lock poisoned, skip update
+    };
+
+    if let Some(cached) = metadata_guard.as_mut() {
+        // Always update processes when we get a ProcessSnapshot (every 10 seconds)
+        cached.processes = Some(snapshot.processes.clone());
+        cached.total_processes = Some(snapshot.total_processes);
+        cached.running_processes = Some(snapshot.running_processes);
+        cached.last_updated = snapshot.ts;
+    }
+}
+
 fn main() -> Result<()> {
     use cli::{Cli, Commands, ConfigCommands, SystemdCommands};
 
@@ -306,6 +324,9 @@ fn run_recorder(cli: Cli) -> Result<()> {
         net_gateway: get_default_gateway(),
         net_dns: get_dns_server(),
         fans: if fans.is_empty() { None } else { Some(fans) },
+        processes: None,
+        total_processes: None,
+        running_processes: None,
         last_updated: OffsetDateTime::now_utc(),
     };
 
@@ -1319,6 +1340,10 @@ fn run_recorder(cli: Cli) -> Result<()> {
                     total_processes: total_process_count,
                     running_processes: running_process_count,
                 };
+
+                // Update metadata with process snapshot
+                update_process_metadata(&shared_metadata, &snapshot);
+
                 recorder.append(&Event::ProcessSnapshot(snapshot))?;
             }
         }
