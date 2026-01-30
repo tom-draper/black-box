@@ -500,7 +500,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
     let ctxt_spike_threshold = 50000; // 50k context switches per second
 
     loop {
-        thread::sleep(Duration::from_secs(COLLECTION_INTERVAL_SECS));
+        let loop_start = std::time::Instant::now();
         tick_count += 1;
 
         // CPU stats
@@ -1407,6 +1407,15 @@ fn run_recorder(cli: Cli) -> Result<()> {
                 println!("{} [Z] Zombie process: {} (pid {})", now_timestamp(), proc.name, proc.pid);
             }
         }
+
+        // Adaptive sleep: only sleep for the remaining time in the interval
+        // If collection took longer than the interval, continue immediately
+        let elapsed = loop_start.elapsed();
+        let target_interval = Duration::from_secs(COLLECTION_INTERVAL_SECS);
+        if elapsed < target_interval {
+            thread::sleep(target_interval - elapsed);
+        }
+        // If elapsed >= target_interval, don't sleep - run as fast as possible
     }
 }
 
