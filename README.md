@@ -4,9 +4,13 @@
 
 <h1 align="center">Black Box</h1>
 
-A lightweight, always-on forensics recorder for Linux servers. Captures system metrics, process events, and security events to help with post-incident analysis.
+A lightweight, always-on forensics recorder for Linux servers. Captures system metrics, process events, and security events to help with post-incident analysis. Ideal for tracking malicious activity, monitoring AI agents, and reviewing errors.
 
-## Features
+<p align="center">
+  <img width="520" height="890" alt="Screenshot_20260131_105934" src="https://github.com/user-attachments/assets/ff1de6b3-2961-4464-93e1-b7c485efc7c4" />
+</p>
+
+## Key Features
 
 - Always-on monitoring with minimal overhead
 - Fixed disk usage (100MB ring buffer)
@@ -70,6 +74,14 @@ A lightweight, always-on forensics recorder for Linux servers. Captures system m
 
 ## Usage
 
+### Building
+
+```bash
+cargo build --release
+```
+
+Binary will be at `target/release/black-box` (single file, ~3.5MB).
+
 ### Start Black Box
 
 ```bash
@@ -84,7 +96,7 @@ This starts:
 
 On first run, Black Box will create a `config.toml` file with default credentials. If using authentication, change the default password immediately. See configuration details below.
 
-### Command Line Options
+#### Command Line Options
 
 ```bash
 # Run with custom port
@@ -114,16 +126,6 @@ On first run, Black Box will create a `config.toml` file with default credential
 # Generate systemd service
 ./black-box systemd generate
 ```
-
-### Web UI Features
-- Real-time WebSocket streaming - Events pushed to browser instantly
-- Time-travel playback - Navigate historical events by timestamp
-- Timeline visualization - Event density with CPU and memory usage graphs
-- HTTP Basic Authentication - Secure access with username/password
-- Search/filter events
-- Filter by event type (System/Process/Security/Anomalies/FileSystem)
-- Terminal-like aesthetic with color coding
-- Auto-reconnect on disconnect
 
 ## Configuration
 
@@ -188,14 +190,6 @@ sudo ./black-box --protected
 # Run with maximum protection (cannot stop without force)
 sudo ./black-box --hardened
 ```
-
-## Building
-
-```bash
-cargo build --release
-```
-
-Binary will be at `target/release/black-box` (single file, ~3.5MB).
 
 ## Permissions
 
@@ -408,10 +402,19 @@ Server crashed at 3am. You have Black Box running.
 
 All data is timestamped and correlated - you can travel back to any point in time within the retention window.
 
-## Security Considerations
+## Contributions
 
-- **Authentication**: HTTP Basic Auth protects all endpoints including WebSocket
-- **Passwords**: Stored as bcrypt hashes (cost factor 12)
-- **Production**: Use HTTPS via reverse proxy (nginx, Caddy) for TLS encryption
-- **Network**: Bind to localhost only if running on same machine
-- **Credentials**: Never commit `config.toml` with real passwords to version control
+Contributions, issues and feature requests are welcome.
+
+- Fork it (https://github.com/tom-draper/nginx-analytics)
+- Create your feature branch (`git checkout -b my-new-feature`)
+- Commit your changes (`git commit -am 'Add some feature'`)
+- Push to the branch (`git push origin my-new-feature`)
+- Create a new Pull Request
+
+----
+
+If you find value in my work, consider supporting me.
+
+Buy Me a Coffee: https://www.buymeacoffee.com/tomdraper<br>
+PayPal: https://www.paypal.com/paypalme/tomdraper
