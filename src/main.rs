@@ -365,11 +365,6 @@ fn run_recorder(cli: Cli) -> Result<()> {
         last_updated: OffsetDateTime::now_utc(),
     };
 
-    eprintln!("[METADATA] Initial: filesystems={}, net_interface={:?}, net_ip={:?}",
-        initial_metadata.filesystems.as_ref().map(|fs| fs.len()).unwrap_or(0),
-        initial_metadata.net_interface,
-        initial_metadata.net_ip_address);
-
     let shared_metadata = Arc::new(std::sync::RwLock::new(Some(initial_metadata)));
 
     // Create broadcast channel for event streaming
@@ -810,26 +805,10 @@ fn run_recorder(cli: Cli) -> Result<()> {
             gpu: collector::read_gpu_info(),
         };
 
-        // Debug: log what fields are in this SystemMetrics (every 10 seconds)
-        if tick_count % 10 == 0 {
-            eprintln!("[SYSTEM_METRICS] tick={} filesystems={}, net_interface={:?}",
-                tick_count,
-                system_metrics.filesystems.as_ref().map(|fs| fs.len()).unwrap_or(0),
-                system_metrics.net_interface);
-        }
-
         recorder.append(&Event::SystemMetrics(system_metrics.clone()))?;
 
         // Update metadata in shared memory if static/semi-static fields have changed
-        if update_metadata_if_changed(&shared_metadata, &system_metrics) {
-            if let Ok(guard) = shared_metadata.read() {
-                if let Some(ref meta) = *guard {
-                    eprintln!("[METADATA] Updated: filesystems={}, net_interface={:?}",
-                        meta.filesystems.as_ref().map(|fs| fs.len()).unwrap_or(0),
-                        meta.net_interface);
-                }
-            }
-        }
+        update_metadata_if_changed(&shared_metadata, &system_metrics);
 
         // Track process lifecycle changes
         let proc_diff = diff_processes(&prev_processes, &current_processes);

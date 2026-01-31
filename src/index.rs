@@ -22,7 +22,6 @@ impl IndexBuilder {
 
     /// Scan all segments and build indexes
     pub fn build_index(&self) -> Result<Vec<SegmentIndex>> {
-        eprintln!("Scanning directory: {:?}", self.dir);
         let mut segment_files = Vec::new();
 
         // Find all segment files
@@ -46,25 +45,13 @@ impl IndexBuilder {
         // Sort by segment ID
         segment_files.sort_by_key(|(id, _)| *id);
 
-        eprintln!("Found {} segment files", segment_files.len());
-
         let mut indexes = Vec::new();
         for (segment_id, path) in segment_files {
-            eprintln!("Processing segment {} at {:?}", segment_id, path);
-            match self.build_segment_index(segment_id, &path) {
-                Ok(index) => {
-                    eprintln!("  - First timestamp: {} ({:?})", index.first_timestamp_ns, index.first_timestamp_ns);
-                    eprintln!("  - Last timestamp: {} ({:?})", index.last_timestamp_ns, index.last_timestamp_ns);
-                    eprintln!("  - Blocks: {}, File size: {} bytes", index.blocks.len(), index.file_size);
-                    indexes.push(index);
-                }
-                Err(e) => {
-                    eprintln!("  - ERROR: Failed to index segment: {}", e);
-                }
+            if let Ok(index) = self.build_segment_index(segment_id, &path) {
+                indexes.push(index);
             }
         }
 
-        eprintln!("Successfully indexed {} segments\n", indexes.len());
         Ok(indexes)
     }
 

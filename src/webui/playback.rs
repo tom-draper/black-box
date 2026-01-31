@@ -45,43 +45,27 @@ pub struct PlaybackQuery {
 pub async fn api_initial_state(
     reader: web::Data<LogReader>,
 ) -> HttpResponse {
-    eprintln!("Initial state: reading most recent segment file");
-
     match reader.read_recent_segment() {
         Ok(events) => {
-            eprintln!("Initial state: found {} events in recent segment", events.len());
-
-            // Count SystemMetrics events
-            let system_metrics_count = events.iter().filter(|e| matches!(e, Event::SystemMetrics(_))).count();
-            eprintln!("Initial state: {} SystemMetrics events", system_metrics_count);
-
             // Try to find the most recent SystemMetrics with filesystems first
             for event in events.iter().rev() {
                 if let Event::SystemMetrics(m) = event {
                     if m.filesystems.is_some() {
-                        eprintln!("Initial state: returning event with filesystems at {}", m.ts);
-                        // Found a complete event, return it formatted
                         return HttpResponse::Ok().json(format_event_for_api(event));
                     }
                 }
             }
 
-            eprintln!("Initial state: no event with filesystems found");
-
             // If no event with filesystems, return the most recent SystemMetrics anyway
             for event in events.iter().rev() {
-                if let Event::SystemMetrics(m) = event {
-                    eprintln!("Initial state: returning SystemMetrics without filesystems at {}", m.ts);
+                if let Event::SystemMetrics(_) = event {
                     return HttpResponse::Ok().json(format_event_for_api(event));
                 }
             }
 
-            // No SystemMetrics found at all
-            eprintln!("Initial state: NO SystemMetrics events found - returning empty");
             HttpResponse::Ok().json(serde_json::json!({}))
         }
-        Err(e) => {
-            eprintln!("Initial state: ERROR reading recent segment: {}", e);
+        Err(_) => {
             HttpResponse::Ok().json(serde_json::json!({}))
         }
     }

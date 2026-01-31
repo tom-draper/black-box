@@ -370,8 +370,6 @@ async function fetchInitialState() {
         const resp = await fetch('/api/initial-state');
         const data = await resp.json();
 
-        console.log('initial state', data);
-
         if(data.type === 'SystemMetrics') {
             // Populate caches with static/semi-static fields
             if(data.mem_total != null) cachedMemTotal = data.mem_total;
@@ -419,8 +417,6 @@ async function fetchTimeline() {
         const data = await resp.json();
         timelineData = data;
 
-        console.log('timeline', data);
-
         if(data.timeline && data.timeline.length > 0) {
             const canvas = document.getElementById('timelineChart');
             canvas.style.opacity = '1';
@@ -451,7 +447,6 @@ function setupTimelineHover() {
         drawTimeline();
     });
 
-    console.log('Timeline hover setup complete');
 }
 
 // Helper function to draw a smooth curve segment
@@ -712,8 +707,6 @@ async function fetchPlaybackInfo() {
         firstTimestamp = data.first_timestamp;
         lastTimestamp = data.last_timestamp;
 
-        console.log('timestamp range', firstTimestamp, lastTimestamp);
-
         if(firstTimestamp && lastTimestamp) {
             const duration = lastTimestamp - firstTimestamp;
             const hours = Math.floor(duration / 3600);
@@ -744,8 +737,6 @@ async function fetchPlaybackBuffer(startTimestamp, endTimestamp) {
         const url = `/api/playback/events?start=${startTimestamp}&end=${endTimestamp}&limit=2000`;
         const resp = await fetch(url);
         const data = await resp.json();
-
-        console.log('Fetched buffer', startTimestamp, 'to', endTimestamp, data.events ? data.events.length : 0, 'events');
 
         // Group events by second (rounded timestamp)
         const buffer = {};
@@ -844,7 +835,6 @@ async function jumpToTimestamp(timestamp, incremental = false) {
             const nextSegmentEnd = bufferEnd + BUFFER_SIZE;
             // Only prefetch if we haven't already fetched this segment
             if(lastPrefetchEnd !== nextSegmentEnd) {
-                console.log('Prefetching next chunk from', bufferEnd + 1, 'to', nextSegmentEnd);
                 const nextBuffer = await fetchPlaybackBuffer(bufferEnd + 1, nextSegmentEnd);
                 // Merge into existing buffer
                 Object.assign(playbackBuffer, nextBuffer);
@@ -876,7 +866,6 @@ async function jumpToTimestamp(timestamp, incremental = false) {
         const historyResp = await fetch(historyUrl);
         const historyData = await historyResp.json();
 
-        console.log('Fetched history', historyData);
 
         if(historyData.events && historyData.events.length > 0) {
             const timeDisplay = document.getElementById('timeDisplay');
@@ -1001,7 +990,6 @@ document.getElementById('pauseBtn').addEventListener('click', () => {
 // Play button - either resume playback or return to live
 document.getElementById('playBtn').addEventListener('click', async () => {
     if(playbackMode && currentTimestamp) {
-        console.log('Starting auto-playback from', new Date(currentTimestamp * 1000));
         // Resume playback: auto-advance through history
         isPaused = false;
         document.getElementById('playBtn').style.display = 'none';
@@ -1014,7 +1002,6 @@ document.getElementById('playBtn').addEventListener('click', async () => {
         const autoAdvance = async () => {
             // Check if still in playback mode
             if(!playbackMode) {
-                console.log('Playback stopped');
                 return;
             }
 
@@ -1033,7 +1020,6 @@ document.getElementById('playBtn').addEventListener('click', async () => {
         // Start first advance immediately
         await autoAdvance();
     } else {
-        console.log('Not in playback mode, going straight to live');
         // Not in playback mode, just unpause
         goLive();
     }
@@ -1508,12 +1494,9 @@ function render(){
         if(!isNaN(eventDate.getTime())) {
             updateTextIfChanged('datetime', formatDate(eventDate));
         } else {
-            // Fallback if timestamp parsing fails
-            console.log('Timestamp parsing failed!');
             updateTextIfChanged('datetime', formatDate(new Date()));
         }
     } else {
-        console.log('No e.timestamp found');
         updateTextIfChanged('datetime', formatDate(new Date()));
     }
     const uptimeText = e.system_uptime_seconds ? `Uptime: ${formatUptime(e.system_uptime_seconds)}` : '';
@@ -1749,7 +1732,6 @@ function connectWebSocket(){
             switch(e.type) {
                 case 'Metadata':
                     // Populate caches from metadata without rendering
-                    console.log('[METADATA] Received:', e);
                     if(e.mem_total != null) cachedMemTotal = e.mem_total;
                     if(e.swap_total != null) cachedSwapTotal = e.swap_total;
                     if(e.disk_total != null) cachedDiskTotal = e.disk_total;
@@ -1760,15 +1742,11 @@ function connectWebSocket(){
                     if(e.cpu_model != null) cachedCpuModel = e.cpu_model;
                     if(e.cpu_mhz != null) cachedCpuMhz = e.cpu_mhz;
                     if(e.filesystems && e.filesystems.length > 0) {
-                        console.log('[METADATA] First filesystem fields:', Object.keys(e.filesystems[0]));
-                        console.log('[METADATA] First filesystem:', e.filesystems[0]);
                         cachedFilesystems = e.filesystems;
-                        console.log('[METADATA] Cached', e.filesystems.length, 'filesystems');
                     }
                     if(e.fans && e.fans.length > 0) cachedFans = e.fans;
                     if(e.processes && e.processes.length > 0) {
                         cachedProcesses = e.processes;
-                        console.log('[METADATA] Cached', e.processes.length, 'processes');
                     }
                     if(e.total_processes != null) cachedTotalProcesses = e.total_processes;
                     if(e.running_processes != null) cachedRunningProcesses = e.running_processes;

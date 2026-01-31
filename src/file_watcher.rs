@@ -86,8 +86,6 @@ impl FileWatcher {
 
         let wd = self.inotify.watches().add(path, mask)?;
         self.watch_descriptors.insert(wd.get_watch_descriptor_id(), path.to_path_buf());
-
-        eprintln!("Watching directory: {}", path.display());
         Ok(())
     }
 

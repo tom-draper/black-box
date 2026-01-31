@@ -75,12 +75,6 @@ impl Actor for WsSession {
         // Send metadata as first message (just for populating caches, no render)
         if let Ok(guard) = self.metadata.read() {
             if let Some(ref metadata) = *guard {
-                eprintln!("[WEBSOCKET] Sending metadata: filesystems={}, processes={}, net_interface={:?}, net_ip={:?}",
-                    metadata.filesystems.as_ref().map(|fs| fs.len()).unwrap_or(0),
-                    metadata.processes.as_ref().map(|p| p.len()).unwrap_or(0),
-                    metadata.net_interface,
-                    metadata.net_ip_address);
-
                 let metadata_msg = serde_json::json!({
                     "type": "Metadata",
                     "kernel": metadata.kernel_version,
@@ -111,11 +105,7 @@ impl Actor for WsSession {
                 if let Ok(json_str) = serde_json::to_string(&metadata_msg) {
                     ctx.text(json_str);
                 }
-            } else {
-                eprintln!("[WEBSOCKET] WARNING: No metadata available!");
             }
-        } else {
-            eprintln!("[WEBSOCKET] ERROR: Failed to read metadata lock!");
         }
 
         self.start_heartbeat(ctx);
