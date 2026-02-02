@@ -4,7 +4,7 @@
 
 <h1 align="center">Black Box</h1>
 
-<p align="center">
+<p align="center" height="10">
   <img width="830" height="10" alt="network_chart" src="https://github.com/user-attachments/assets/28889f14-6a8a-46b2-b885-3088d07facb6" />
 </p>
 
