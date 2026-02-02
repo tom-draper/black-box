@@ -414,7 +414,7 @@ All data is timestamped and correlated - you can travel back to any point in tim
 
 Contributions, issues and feature requests are welcome.
 
-- Fork it (https://github.com/tom-draper/nginx-analytics)
+- Fork it (https://github.com/tom-draper/black-box)
 - Create your feature branch (`git checkout -b my-new-feature`)
 - Commit your changes (`git commit -am 'Add some feature'`)
 - Push to the branch (`git push origin my-new-feature`)
