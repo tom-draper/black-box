@@ -4,27 +4,27 @@
 
 <h1 align="center">Black Box</h1>
 
-A lightweight, always-on forensics recorder for Linux servers. Captures system metrics, process events, and security events to help with post-incident analysis. Ideal for tracking malicious activity, monitoring AI agents, and reviewing errors.
+A lightweight, always-on forensics recorder for Linux servers. Captures system metrics, process events, and security events to help with post-incident analysis.
 
-<p align="center">
-  <img width="520" height="890" alt="Screenshot_20260131_105934" src="https://github.com/user-attachments/assets/ff1de6b3-2961-4464-93e1-b7c485efc7c4" />
-</p>
+Ideal for tracking malicious activity, monitoring AI agents, and reviewing errors.
 
 ## Key Features
 
 - Always-on monitoring with minimal overhead
-- Fixed disk usage (100MB ring buffer)
-- Tamper protection modes (append-only or immutable log files)
-- Configuration via `config.toml`
-- Single static binary
-- Real-time WebSocket streaming with a web UI
+- Real-time streaming with a web UI
 - Time-travel playback - query historical events by timestamp or time range
+- Tamper protection modes (append-only or immutable log files)
 - Timeline visualization with event density and resource usage
 - Export events to JSON for external analysis
 - Remote monitoring with health checks and auto-export
+- Fixed disk usage (ring buffer)
 - HTTP Basic Authentication for security
-- Health monitoring endpoint
 - Systemd integration
+- Single static binary
+
+<p align="center">
+  <img width="520" height="890" alt="Screenshot_20260131_105934" src="https://github.com/user-attachments/assets/ff1de6b3-2961-4464-93e1-b7c485efc7c4" />
+</p>
 
 ## What It Captures
 
