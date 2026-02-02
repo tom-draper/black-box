@@ -2,7 +2,7 @@
   <img width="50" height="50" alt="black-box" src="https://github.com/user-attachments/assets/94d70715-e9fe-4d74-8e3e-7a591e9ab543" />
 </p>
 
-<h1 align="center">Black Box</h1>
+<h3 align="center">Black Box</h3>
 
 <p align="center">
   <img width="830" height="10" alt="network_chart" src="https://github.com/user-attachments/assets/28889f14-6a8a-46b2-b885-3088d07facb6" />
