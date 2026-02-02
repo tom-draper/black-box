@@ -197,8 +197,9 @@ async fn fetch_events_by_count(
 pub async fn api_playback_info(
     reader: web::Data<Arc<IndexedReader>>,
 ) -> HttpResponse {
-    // NOTE: Index is built at startup, so this reflects segments at that time
-    // TODO: Implement automatic index refresh for new segments
+    // Refresh index to pick up any new segments written since server start
+    let _ = reader.refresh();
+
     if let Some((first_ns, last_ns)) = reader.get_time_range() {
         let first_secs = (first_ns / 1_000_000_000) as i64;
         let last_secs = (last_ns / 1_000_000_000) as i64;
@@ -228,6 +229,9 @@ pub async fn api_playback_info(
 pub async fn api_timeline(
     reader: web::Data<Arc<IndexedReader>>,
 ) -> HttpResponse {
+    // Refresh index to pick up any new segments written since server start
+    let _ = reader.refresh();
+
     if let Some((first_ns, last_ns)) = reader.get_time_range() {
         // Read all events (this might be expensive for very large datasets)
         match reader.read_time_range(Some(first_ns), Some(last_ns)) {
@@ -343,6 +347,9 @@ pub async fn api_playback_events(
     indexed_reader: web::Data<Arc<IndexedReader>>,
     query: web::Query<PlaybackQuery>,
 ) -> HttpResponse {
+    // Refresh index to pick up any new segments written since server start
+    let _ = indexed_reader.refresh();
+
     // Mode 1: Count-based query (timestamp + count)
     if let Some(timestamp) = query.timestamp {
         let target_count = query.count.unwrap_or(60);
