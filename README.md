@@ -206,25 +206,7 @@ Most features work as a regular user. For enhanced capabilities:
 
 ## API Endpoints
 
-### `/health` - Health Check
-Returns JSON with system status, uptime, event count, and storage usage.
 
-```bash
-curl -u admin:admin http://localhost:8080/health
-```
-
-Response:
-```json
-{
-  "status": "healthy",
-  "uptime_seconds": 3600,
-  "event_count": 15000,
-  "storage_bytes_used": 52428800,
-  "storage_bytes_max": 104857600,
-  "storage_percent": "50.00",
-  "timestamp": "2026-01-15T10:30:00Z"
-}
-```
 
 ### `/api/events` - REST API
 Get recent events (last 1000) with optional filtering.
@@ -282,6 +264,11 @@ curl -u admin:admin "http://localhost:8080/api/playback/events?timestamp=1705323
 curl -u admin:admin "http://localhost:8080/api/playback/events?timestamp=1705323600&count=60&before=true"
 ```
 
+### `/health` - Health Check
+Returns JSON with system status, uptime, event count, and storage usage.
+
+
+
 **Mode 2: Range-based** - Get all events in a time range:
 ```bash
 # Get all events between start and end (up to limit)
@@ -303,6 +290,23 @@ curl -u admin:admin http://localhost:8080/api/timeline
 ```
 
 Response includes per-minute buckets with event counts and average CPU/memory usage.
+
+```bash
+curl -u admin:admin http://localhost:8080/health
+```
+
+Response:
+```json
+{
+  "status": "healthy",
+  "uptime_seconds": 3600,
+  "event_count": 15000,
+  "storage_bytes_used": 52428800,
+  "storage_bytes_max": 104857600,
+  "storage_percent": "50.00",
+  "timestamp": "2026-01-15T10:30:00Z"
+}
+```
 
 ## CLI Commands
 
