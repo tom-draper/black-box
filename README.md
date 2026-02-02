@@ -5,7 +5,7 @@
 <h1 align="center">Black Box</h1>
 
 <p align="center">
-  <img width="830" height="10" alt="network_chart" src="https://github.com/user-attachments/assets/bd135275-1da5-4ebf-a40f-29376e92c62a" />
+  <img width="830" height="10" alt="network_chart" src="https://github.com/user-attachments/assets/28889f14-6a8a-46b2-b885-3088d07facb6" />
 </p>
 
 A lightweight, always-on forensics recorder for Linux servers. Captures system metrics, process events, and security events to help with post-incident analysis.
