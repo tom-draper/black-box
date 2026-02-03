@@ -12,7 +12,6 @@ use crate::event::Event;
 use crate::storage::{RecordHeader, MAGIC};
 
 const SEGMENT_SIZE: u64 = 8 * 1024 * 1024; // 8MB
-const DEFAULT_MAX_SEGMENTS: usize = 12; // 12 * 8MB = ~100MB total
 const FLUSH_INTERVAL_SECONDS: i64 = 30; // Flush every 30 seconds
 
 pub struct Recorder {
@@ -27,10 +26,6 @@ pub struct Recorder {
 }
 
 impl Recorder {
-    pub fn open_with_broadcast(dir: impl AsRef<Path>, broadcast_tx: SyncSender) -> Result<Self> {
-        Self::open_with_config(dir, DEFAULT_MAX_SEGMENTS, Some(broadcast_tx))
-    }
-
     pub fn open_with_config(
         dir: impl AsRef<Path>,
         max_segments: usize,

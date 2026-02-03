@@ -15,10 +15,6 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub hardened: bool,
 
-    /// Run in headless mode (disables web UI)
-    #[arg(long, global = true)]
-    pub headless: bool,
-
     /// Override server port
     #[arg(long, global = true)]
     pub port: Option<u16>,
@@ -30,12 +26,8 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Run the black box recorder (default if no command specified)
-    Run {
-        /// Force stop even in hardened mode
-        #[arg(long)]
-        force_stop: bool,
-    },
+    /// Run lightweight recorder without web UI
+    Monitor,
 
     /// Export recorded events
     Export {
@@ -68,8 +60,8 @@ pub enum Commands {
         data_dir: Option<String>,
     },
 
-    /// Monitor black box health and auto-export on failure
-    Monitor {
+    /// Watch remote black box instance for health and auto-export on failure
+    Watch {
         /// Black box server URL
         #[arg(default_value = "http://localhost:8080")]
         url: String,

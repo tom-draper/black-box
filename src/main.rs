@@ -27,7 +27,7 @@ use std::{
 use time::OffsetDateTime;
 
 use broadcast::EventBroadcaster;
-use cli::Cli;
+use cli::{Cli, Commands};
 use config::{Config, ProtectionMode, RemoteSyslogConfig};
 use protection::ProtectionManager;
 
@@ -207,7 +207,11 @@ fn main() -> Result<()> {
                 output, format, compress, event_type, start, end, data_dir,
             );
         }
-        Some(Commands::Monitor {
+        Some(Commands::Monitor) => {
+            // Run headless recorder (no web UI)
+            // Will be handled below with headless = true
+        }
+        Some(Commands::Watch {
             url,
             username,
             password,
@@ -271,12 +275,12 @@ fn main() -> Result<()> {
                 return commands::config::setup_remote_syslog(host, port, protocol);
             }
         },
-        Some(Commands::Run { force_stop: _ }) | None => {
-            // Fall through to run the recorder (default behavior)
+        None => {
+            // Fall through to run the recorder with web UI (default behavior)
         }
     }
 
-    // Run the black box recorder (default behavior)
+    // Run the black box recorder
     run_recorder(cli)
 }
 
@@ -290,8 +294,8 @@ fn run_recorder(cli: Cli) -> Result<()> {
         ProtectionMode::Default
     };
 
-    // Check for headless mode
-    let disable_ui = cli.headless;
+    // Check for headless mode (monitor command runs without web UI)
+    let disable_ui = matches!(cli.command, Some(Commands::Monitor));
 
     // Load configuration
     let config = Config::load()?;
@@ -423,8 +427,12 @@ fn run_recorder(cli: Cli) -> Result<()> {
     // Clone broadcast_tx for file watcher before moving into recorder
     let file_watcher_tx = broadcast_tx.clone();
 
+    // Calculate max segments from configured storage size
+    // Each segment is 8MB, so max_segments = max_storage_mb / 8
+    let max_segments = (config.server.max_storage_mb / 8).max(1) as usize;
+
     // Run recorder in main thread with broadcasting
-    let mut recorder = Recorder::open_with_broadcast(&data_dir, broadcast_tx)?;
+    let mut recorder = Recorder::open_with_config(&data_dir, max_segments, Some(broadcast_tx))?;
 
     // Start file watcher if configured
     if config.file_watch.enabled && !config.file_watch.watch_dirs.is_empty() {
@@ -451,7 +459,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
         ProtectionMode::Hardened => "HARDENED",
     });
     println!("Data directory: {}", data_dir);
-    println!("Max storage: ~100MB (ring buffer)");
+    println!("Max storage: ~{}MB (ring buffer)", config.server.max_storage_mb);
     println!("Collection interval: {}s", COLLECTION_INTERVAL_SECS);
     println!("Tracking: CPU, Memory, Swap, Disk, Network, TCP, Load, Temperature, Processes");
     if !disable_ui {

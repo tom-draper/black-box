@@ -93,12 +93,21 @@ Binary will be at `target/release/black-box` (single file, ~3.5MB).
 ```
 
 This starts:
-- Data recording to `./data/` directory
+- Data recording to `./data/` directory (configurable, see Configuration section)
 - Web UI at `http://localhost:8080` with authentication (default: admin/admin)
 - Events API at `http://localhost:8080/api/events` with authentication (default: admin/admin)
 - Health endpoint at `http://localhost:8080/health`
 
 On first run, Black Box will create a `config.toml` file with default credentials. If using authentication, change the default password immediately. See configuration details below.
+
+**Note:** For production deployments, configure a dedicated data directory like `/var/lib/black-box/` in `config.toml`.
+
+**Monitor Mode (Lightweight):**
+```bash
+./black-box monitor
+```
+
+Runs data collection only, without the web UI or API endpoints. Use this for minimal overhead when you only need recording.
 
 #### Command Line Options
 
@@ -106,8 +115,8 @@ On first run, Black Box will create a `config.toml` file with default credential
 # Run with custom port
 ./black-box --port 9000
 
-# Run in headless mode (no web UI, data collection only)
-./black-box --headless
+# Run in monitor mode (lightweight, no web UI)
+./black-box monitor
 
 # Run with tamper protection (append-only files)
 ./black-box --protected
@@ -124,8 +133,8 @@ On first run, Black Box will create a `config.toml` file with default credential
 # Check status of running instance
 ./black-box status
 
-# Monitor health and auto-export on failure
-./black-box monitor --interval 60 --export-dir ./backups
+# Watch remote instance health and auto-export on failure
+./black-box watch http://server:8080 --interval 60 --export-dir ./backups
 
 # Generate systemd service
 ./black-box systemd generate
@@ -143,7 +152,8 @@ password_hash = "$2b$12$..."  # bcrypt hash of "admin"
 
 [server]
 port = 8080
-data_dir = "./data"
+data_dir = "./data"  # For development. Use "/var/lib/black-box" for production
+max_storage_mb = 100  # Maximum storage size in MB (default: 100MB)
 ```
 
 ### Changing the Password
@@ -168,6 +178,46 @@ To disable authentication (not recommended for production):
 [auth]
 enabled = false
 ```
+
+### Data Directory
+
+**Default:** `./data` (current directory)
+
+For production deployments, use a dedicated system directory:
+
+```toml
+[server]
+port = 8080
+data_dir = "/var/lib/black-box"  # Recommended for production
+max_storage_mb = 100
+```
+
+**Recommended locations:**
+- **Production (systemd service):** `/var/lib/black-box/`
+- **User service:** `~/.local/share/black-box/`
+- **Development/testing:** `./data` (default)
+
+Create the directory and set permissions:
+```bash
+sudo mkdir -p /var/lib/black-box
+sudo chown black-box:black-box /var/lib/black-box  # If running as dedicated user
+```
+
+### Configuring Storage Size
+
+The ring buffer size can be adjusted based on your needs:
+
+```toml
+[server]
+max_storage_mb = 100  # Default: 100MB
+
+# Examples:
+# max_storage_mb = 50   # Low disk usage (50MB)
+# max_storage_mb = 500  # Medium retention (500MB)
+# max_storage_mb = 1000 # High retention (1GB)
+```
+
+Storage is organized into 8MB segments. The system keeps approximately `max_storage_mb / 8` segments in a ring buffer, automatically deleting the oldest when the limit is reached.
 
 ## Protection Modes
 
@@ -338,23 +388,22 @@ Export recorded events to JSON for external analysis or archival:
 ./black-box export --data-dir /path/to/data -o events.json
 ```
 
-### Monitor Health
+### Watch Remote Instance
 
-Monitor a Black Box instance and automatically export data on failure:
+Watch a remote Black Box instance and automatically export data on failure:
 
 ```bash
-# Monitor with 60 second intervals
-./black-box monitor --interval 60 --export-dir ./backups
+# Watch with 60 second intervals
+./black-box watch http://localhost:8080 --interval 60 --export-dir ./backups
 
-# Monitor with authentication
-./black-box monitor \
-  --url http://server:8080 \
+# Watch with authentication
+./black-box watch http://server:8080 \
   --username admin \
   --password secret \
   --export-dir ./backups
 
 # Continuous backup (export on every check, not just failures)
-./black-box monitor --continuous --export-dir ./backups
+./black-box watch http://server:8080 --continuous --export-dir ./backups
 ```
 
 ### Check Status

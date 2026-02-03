@@ -31,6 +31,12 @@ pub struct AuthConfig {
 pub struct ServerConfig {
     pub port: u16,
     pub data_dir: String,
+    #[serde(default = "default_max_storage_mb")]
+    pub max_storage_mb: u64,
+}
+
+fn default_max_storage_mb() -> u64 {
+    100 // 100MB default
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -111,6 +117,7 @@ impl Config {
             server: ServerConfig {
                 port: 8080,
                 data_dir: "./data".to_string(),
+                max_storage_mb: 100,
             },
             protection: ProtectionConfig::default(),
             file_watch: FileWatchConfig::default(),
@@ -144,6 +151,7 @@ impl Config {
             server: ServerConfig {
                 port: 8080,
                 data_dir: "./test_data".to_string(),
+                max_storage_mb: 100,
             },
             protection: ProtectionConfig::default(),
             file_watch: FileWatchConfig::default(),
