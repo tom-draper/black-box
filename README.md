@@ -84,7 +84,7 @@ Ideal for tracking malicious activity, monitoring AI agents, and reviewing error
 cargo build --release
 ```
 
-Binary will be at `target/release/black-box` (single file, ~3.5MB).
+Binary will be at `target/release/black-box`.
 
 ### Start Black Box
 
