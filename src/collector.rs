@@ -1330,6 +1330,7 @@ fn parse_tcp_line(line: &str) -> Option<(String, u16)> {
 // ===== Per-Process Network Connections =====
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ProcessConnection {
     pub local_addr: String,
     pub local_port: u16,
@@ -1338,6 +1339,7 @@ pub struct ProcessConnection {
     pub state: String,
 }
 
+#[allow(dead_code)]
 pub fn read_process_connections(pid: u32) -> Result<Vec<ProcessConnection>> {
     let mut connections = Vec::new();
 
@@ -1364,6 +1366,7 @@ pub fn read_process_connections(pid: u32) -> Result<Vec<ProcessConnection>> {
     Ok(connections)
 }
 
+#[allow(dead_code)]
 fn parse_connection_line(line: &str) -> Option<ProcessConnection> {
     let parts: Vec<&str> = line.split_whitespace().collect();
     if parts.len() < 4 {
@@ -1412,6 +1415,7 @@ fn parse_connection_line(line: &str) -> Option<ProcessConnection> {
     })
 }
 
+#[allow(dead_code)]
 fn parse_hex_addr(hex: &str) -> Option<String> {
     if hex.len() == 8 {
         // IPv4

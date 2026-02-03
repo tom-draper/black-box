@@ -511,8 +511,11 @@ fn run_recorder(cli: Cli) -> Result<()> {
     let mut last_logged_in_users: Vec<String> = Vec::new();
 
     // Cache for calculating percentages every second (even when totals aren't sent)
+    #[allow(unused_assignments)]
     let mut cached_mem_total_for_pct = 0u64;
+    #[allow(unused_assignments)]
     let mut cached_swap_total_for_pct = 0u64;
+    #[allow(unused_assignments)]
     let mut cached_disk_total_for_pct = 0u64;
 
     // Collection interval counters
