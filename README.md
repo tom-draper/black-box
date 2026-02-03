@@ -32,49 +32,11 @@ Ideal for tracking malicious activity, monitoring AI agents, and reviewing error
 
 ## What It Captures
 
-### System Metrics (1s interval)
-- CPU, Memory, Swap usage (overall and per-core)
-- Disk I/O and space (per-disk metrics and temperatures)
-- Network I/O (bytes sent/received, errors, drops)
-- Load average (1m, 5m, 15m)
-- TCP connections and time-wait states
-- Context switches
-- Hardware monitoring (CPU/GPU/motherboard temperatures, fan speeds)
-- GPU metrics (frequency, memory frequency, power consumption)
-- Filesystem usage (per mount point)
-- System uptime
-
-### Process Intelligence
-- Lifecycle events (start/exit/stuck/zombie)
-- Full command lines and working directories
-- Process metadata (PID, PPID, user, UID, exit codes)
-- Thread counts and resource usage
-- Memory and CPU usage per process
-- Top resource consumers snapshot (every 5s)
-- Total and running process counts
-
-### Security Events (5s interval)
-- Logged-in users
-- SSH authentication (success/failure)
-- Sudo commands
-- Failed login attempts
-- Brute force detection (5+ failures in 5 minutes)
-- Port scan detection (20+ ports from same IP)
-
-### File System Events
-- File modifications, creations, deletions
-- File paths and sizes
-
-### Anomaly Detection
-- CPU spike (>80%)
-- Memory spike (>90%)
-- Swap usage (>50%)
-- Disk full (>90%)
-- Disk I/O spike (>100MB/s)
-- Network spike (>500MB/s)
-- Context switch spike (>50k/s)
-- Process stuck in D state
-- Thread/connection leaks
+- **System Metrics** (1s): CPU, memory, disk I/O, network, load averages, temperatures, GPU metrics, filesystems
+- **Process Events**: Lifecycle tracking (start/exit/stuck), command lines, resource usage, top consumers
+- **Security Events** (5s): User logins, SSH auth, sudo commands, brute force/port scan detection
+- **File System Events**: File modifications, creations, deletions with paths and sizes
+- **Anomaly Detection**: Resource spikes, disk full, stuck processes, thread/connection leaks
 
 ## Usage
 
@@ -94,9 +56,8 @@ Binary will be at `target/release/black-box`.
 
 This starts:
 - Data recording to `./data/` directory (configurable, see Configuration section)
-- Web UI at `http://localhost:8080` with authentication (default: admin/admin)
-- Events API at `http://localhost:8080/api/events` with authentication (default: admin/admin)
-- Health endpoint at `http://localhost:8080/health`
+- Web UI at `http://localhost:8080`
+- REST/WebSocket API for events, playback, and monitoring
 
 On first run, Black Box will create a `config.toml` file with default credentials. If using authentication, change the default password immediately. See configuration details below.
 
@@ -124,16 +85,14 @@ Runs data collection only, without the web UI or API endpoints. Use this for min
 # Run with hardened protection (immutable until stop)
 ./black-box --hardened
 
-# Export recorded events to JSON
+# Export events (supports --compress, --format csv, --event-type filter)
 ./black-box export -o events.json
+./black-box export --start "2026-01-15T10:00:00Z" --end "2026-01-15T11:00:00Z" -o range.json
 
-# Export events from a time range
-./black-box export --start "2026-01-15T10:00:00Z" --end "2026-01-15T11:00:00Z"
-
-# Check status of running instance
+# Check status (supports --format json, --username/--password for auth)
 ./black-box status
 
-# Watch remote instance health and auto-export on failure
+# Watch remote instance (health checks + auto-export on failure)
 ./black-box watch http://server:8080 --interval 60 --export-dir ./backups
 
 # Generate systemd service
@@ -360,68 +319,6 @@ Response:
   "storage_percent": "50.00",
   "timestamp": "2026-01-15T10:30:00Z"
 }
-```
-
-## CLI Commands
-
-### Export Events
-
-Export recorded events to JSON for external analysis or archival:
-
-```bash
-# Export all events to JSON file
-./black-box export -o events.json
-
-# Export with compression
-./black-box export -o events.json.gz --compress
-
-# Export specific time range
-./black-box export \
-  --start "2026-01-15T10:00:00Z" \
-  --end "2026-01-15T11:00:00Z" \
-  -o events.json
-
-# Export only specific event type
-./black-box export --event-type SystemMetrics -o metrics.json
-
-# Export from custom data directory
-./black-box export --data-dir /path/to/data -o events.json
-```
-
-### Watch Remote Instance
-
-Watch a remote Black Box instance and automatically export data on failure:
-
-```bash
-# Watch with 60 second intervals
-./black-box watch http://localhost:8080 --interval 60 --export-dir ./backups
-
-# Watch with authentication
-./black-box watch http://server:8080 \
-  --username admin \
-  --password secret \
-  --export-dir ./backups
-
-# Continuous backup (export on every check, not just failures)
-./black-box watch http://server:8080 --continuous --export-dir ./backups
-```
-
-### Check Status
-
-Query the health endpoint and display status:
-
-```bash
-# Check local instance
-./black-box status
-
-# Check remote instance with authentication
-./black-box status \
-  --url http://server:8080 \
-  --username admin \
-  --password secret
-
-# JSON output for scripting
-./black-box status --format json
 ```
 
 ## Binary Format
