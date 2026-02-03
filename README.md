@@ -32,7 +32,8 @@ Ideal for tracking malicious activity, monitoring AI agents, and reviewing error
 
 ## What It Captures
 
-- **System Metrics** (1s): CPU, memory, disk I/O, network, load averages, temperatures, GPU metrics, filesystems
+- **System Metrics** (1s): CPU (per-core), memory, swap, disk I/O (per-disk + temps), network (I/O, TCP connections, errors/drops), load averages, temperatures, GPU metrics, filesystems (per-mount)
+- **System Info**: Kernel version, CPU model, hardware specs (collected on startup/hourly)
 - **Process Events**: Lifecycle tracking (start/exit/stuck), command lines, resource usage, top consumers
 - **Security Events** (5s): User logins, SSH auth, sudo commands, brute force/port scan detection
 - **File System Events**: File modifications, creations, deletions with paths and sizes
