@@ -63,6 +63,9 @@ pub async fn index() -> HttpResponse {
         <div class="text-gray-900 font-semibold" title="Black Box - Linux System Monitor">Black Box</div>
         <div id="headerControlsWrapper">
             <div id="headerControls" class="flex items-center gap-1 text-gray-400">
+                <div id="playbackTimeDisplay" class="flex items-center gap-1 text-xs mr-1" style="display:none;color:#f59e0b;" title="Current playback time">
+                    <span id="playbackTime"></span>
+                </div>
                 <svg id="headerRewindBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="hover:text-gray-600 transition duration-100 cursor-pointer" style="width:14px;height:14px" title="Rewind 1 minute">
                     <path d="M7.712 4.818A1.5 1.5 0 0 1 10 6.095v2.972c.104-.13.234-.248.389-.343l6.323-3.906A1.5 1.5 0 0 1 19 6.095v7.81a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.505 1.505 0 0 1-.389-.344v2.973a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.5 1.5 0 0 1 0-2.552l6.323-3.906Z" />
                 </svg>
@@ -736,13 +739,8 @@ async function fetchPlaybackInfo() {
             const ageHours = Math.floor(ageSeconds / 3600);
             const ageMins = Math.floor((ageSeconds % 3600) / 60);
 
-            if(ageSeconds < 60) {
-                document.getElementById('timeRange').textContent =
-                    `${hours}h ${mins}m (current)`;
-            } else {
-                document.getElementById('timeRange').textContent =
-                    `${hours}h ${mins}m (${ageHours}h ${ageMins}m old)`;
-            }
+            document.getElementById('timeRange').textContent =
+                `${hours}h ${mins}m`;
         }
     } catch(e) {
         console.error('Failed to fetch playback info:', e);
@@ -840,6 +838,13 @@ async function jumpToTimestamp(timestamp, incremental = false) {
     document.getElementById('timeDisplay').textContent =
         '⏱ ' + dt.toLocaleTimeString();
     document.getElementById('timeDisplay').style.color = '#f59e0b'; // amber color
+
+    // Update playback time display
+    document.getElementById('playbackTimeDisplay').style.display = 'flex';
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const formatted = `${days[dt.getDay()]}, ${dt.getDate()} ${months[dt.getMonth()]} ${dt.getFullYear()}, ${dt.toLocaleTimeString()}`;
+    document.getElementById('playbackTime').textContent = '⏱ ' + formatted;
 
     // Check if timestamp is in current buffer
     const inBuffer = bufferStart && bufferEnd && timestamp >= bufferStart && timestamp <= bufferEnd;
@@ -1003,6 +1008,9 @@ function goLive() {
     document.getElementById('playBtn').style.display = 'none';
     document.getElementById('pauseBtn').style.display = 'block';
 
+    // Hide playback time display when going live
+    document.getElementById('playbackTimeDisplay').style.display = 'none';
+
     // Show "Live" or "Disconnected" based on connection status
     const isConnected = ws && ws.readyState === 1;
     const timeDisplay = document.getElementById('timeDisplay');
@@ -1093,6 +1101,13 @@ function doPause() {
         const now = Math.floor(Date.now() / 1000);
         currentTimestamp = now;
         playbackMode = true;
+        // Update playback time display when pausing from live mode
+        const dt = new Date(now * 1000);
+        document.getElementById('playbackTimeDisplay').style.display = 'flex';
+        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const formatted = `${days[dt.getDay()]}, ${dt.getDate()} ${months[dt.getMonth()]} ${dt.getFullYear()}, ${dt.toLocaleTimeString()}`;
+        document.getElementById('playbackTime').textContent = '⏱ ' + formatted;
     }
 }
 
