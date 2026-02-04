@@ -61,6 +61,23 @@ pub async fn index() -> HttpResponse {
     <div id="mainContent" style="display:none;">
     <div class="flex justify-between items-center">
         <div class="text-gray-900 font-semibold" title="Black Box - Linux System Monitor">Black Box</div>
+        <div id="headerControlsWrapper">
+            <div id="headerControls" class="flex items-center gap-1 text-gray-400">
+                <svg id="headerRewindBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="hover:text-gray-600 transition duration-100 cursor-pointer" style="width:14px;height:14px" title="Rewind 1 minute">
+                    <path d="M7.712 4.818A1.5 1.5 0 0 1 10 6.095v2.972c.104-.13.234-.248.389-.343l6.323-3.906A1.5 1.5 0 0 1 19 6.095v7.81a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.505 1.505 0 0 1-.389-.344v2.973a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.5 1.5 0 0 1 0-2.552l6.323-3.906Z" />
+                </svg>
+                <svg id="headerPauseBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="hover:text-gray-600 transition duration-100 cursor-pointer" style="width:14px;height:14px" title="Pause (enable time-travel)">
+                    <path d="M5.75 3a.75.75 0 0 0-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 0 0 .75-.75V3.75A.75.75 0 0 0 7.25 3h-1.5ZM12.75 3a.75.75 0 0 0-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 0 0 .75-.75V3.75a.75.75 0 0 0-.75-.75h-1.5Z" />
+                </svg>
+                <svg id="headerPlayBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="text-gray-800 hover:text-gray-600 transition duration-100 cursor-pointer" style="width:14px;height:14px;display:none" title="Resume live view">
+                    <path d="M6.3 2.84A1.5 1.5 0 0 0 4 4.11v11.78a1.5 1.5 0 0 0 2.3 1.27l9.344-5.891a1.5 1.5 0 0 0 0-2.538L6.3 2.841Z" />
+                </svg>
+                <svg id="headerFastForwardBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="hover:text-gray-600 transition duration-100 cursor-pointer" style="width:14px;height:14px" title="Fast forward 1 minute">
+                    <path d="M3.288 4.818A1.5 1.5 0 0 0 1 6.095v7.81a1.5 1.5 0 0 0 2.288 1.276l6.323-3.905c.155-.096.285-.213.389-.344v2.973a1.5 1.5 0 0 0 2.288 1.276l6.323-3.905a1.5 1.5 0 0 0 0-2.552l-6.323-3.906A1.5 1.5 0 0 0 10 6.095v2.972a1.506 1.506 0 0 0-.389-.343L3.288 4.818Z" />
+                </svg>
+            </div>
+            <span id="headerDisconnected" class="text-xs" style="display:none;color:#ef4444;">Disconnected</span>
+        </div>
     </div>
     <div class="flex justify-between text-gray-500">
         <span id="datetime" title="Current system date and time"></span>
@@ -662,6 +679,7 @@ document.getElementById('timelineChart').addEventListener('click', (e) => {
     isPaused = true;
     document.getElementById('pauseBtn').style.display = 'none';
     document.getElementById('playBtn').style.display = 'block';
+    syncHeaderButtons();
 
     // Jump to the timestamp
     jumpToTimestamp(Math.floor(targetTimestamp));
@@ -921,79 +939,22 @@ async function jumpToTimestamp(timestamp, incremental = false) {
 }
 
 // Rewind button
-document.getElementById('rewindBtn').addEventListener('click', () => {
-    // Stop auto-playback
-    if(playbackInterval) {
-        clearTimeout(playbackInterval);
-        playbackInterval = null;
-    }
-
-    if(!playbackMode) {
-        // First click: pause and go back 1 minute from now
-        const now = Math.floor(Date.now() / 1000);
-        jumpToTimestamp(now - REWIND_STEP);
-        isPaused = true;
-        document.getElementById('pauseBtn').style.display = 'none';
-        document.getElementById('playBtn').style.display = 'block';
-    } else {
-        // Go back 1 minute from current position
-        const newTime = Math.max(firstTimestamp || 0, currentTimestamp - REWIND_STEP);
-        jumpToTimestamp(newTime);
-        // Show pause button after seeking
-        isPaused = true;
-        document.getElementById('pauseBtn').style.display = 'none';
-        document.getElementById('playBtn').style.display = 'block';
-    }
-});
+document.getElementById('rewindBtn').addEventListener('click', doRewind);
 
 // Fast-forward button
-document.getElementById('fastForwardBtn').addEventListener('click', () => {
-    if(!playbackMode) return; // Only works in playback mode
-
-    // Stop auto-playback
-    if(playbackInterval) {
-        clearTimeout(playbackInterval);
-        playbackInterval = null;
-    }
-
-    // Advance forward by REWIND_STEP, but don't go past the latest available timestamp (or now)
-    const target = currentTimestamp + REWIND_STEP;
-    const maxTime = lastTimestamp || Math.floor(Date.now() / 1000);
-    const newTime = Math.min(target, maxTime);
-    jumpToTimestamp(newTime);
-    // Show pause button after seeking
-    isPaused = true;
-    document.getElementById('pauseBtn').style.display = 'none';
-    document.getElementById('playBtn').style.display = 'block';
-});
+document.getElementById('fastForwardBtn').addEventListener('click', doFastForward);
 
 // Pause button
-document.getElementById('pauseBtn').addEventListener('click', () => {
-    isPaused = true;
-    document.getElementById('pauseBtn').style.display = 'none';
-    document.getElementById('playBtn').style.display = 'block';
+document.getElementById('pauseBtn').addEventListener('click', doPause);
 
-    // Stop auto-playback if running
-    if(playbackInterval) {
-        clearTimeout(playbackInterval);
-        playbackInterval = null;
-    }
-
-    // Enter playback mode at current time
-    if(!playbackMode) {
-        const now = Math.floor(Date.now() / 1000);
-        currentTimestamp = now;
-        playbackMode = true;
-    }
-});
-
-// Play button - either resume playback or return to live
-document.getElementById('playBtn').addEventListener('click', async () => {
+// Shared play logic
+async function doPlay() {
     if(playbackMode && currentTimestamp) {
         // Resume playback: auto-advance through history
         isPaused = false;
         document.getElementById('playBtn').style.display = 'none';
         document.getElementById('pauseBtn').style.display = 'block';
+        syncHeaderButtons();
 
         // Calculate a reasonable "live" threshold - within 10 seconds of now
         const liveThreshold = Math.floor(Date.now() / 1000) - 10;
@@ -1023,7 +984,10 @@ document.getElementById('playBtn').addEventListener('click', async () => {
         // Not in playback mode, just unpause
         goLive();
     }
-});
+}
+
+// Play button - either resume playback or return to live
+document.getElementById('playBtn').addEventListener('click', doPlay);
 
 // Return to live mode
 function goLive() {
@@ -1063,7 +1027,80 @@ function goLive() {
 
     // Update timeline visualization (clears vertical line)
     drawTimeline();
+
+    // Update header controls visibility
+    updateConnectionStatus();
 }
+
+// Sync header play/pause buttons with main buttons
+function syncHeaderButtons() {
+    const mainPauseVisible = document.getElementById('pauseBtn').style.display !== 'none';
+    document.getElementById('headerPauseBtn').style.display = mainPauseVisible ? 'inline' : 'none';
+    document.getElementById('headerPlayBtn').style.display = mainPauseVisible ? 'none' : 'inline';
+}
+
+// Shared rewind logic
+function doRewind() {
+    if(playbackInterval) {
+        clearTimeout(playbackInterval);
+        playbackInterval = null;
+    }
+    if(!playbackMode) {
+        const now = Math.floor(Date.now() / 1000);
+        jumpToTimestamp(now - REWIND_STEP);
+        isPaused = true;
+        document.getElementById('pauseBtn').style.display = 'none';
+        document.getElementById('playBtn').style.display = 'block';
+        syncHeaderButtons();
+    } else {
+        const newTime = Math.max(firstTimestamp || 0, currentTimestamp - REWIND_STEP);
+        jumpToTimestamp(newTime);
+        isPaused = true;
+        document.getElementById('pauseBtn').style.display = 'none';
+        document.getElementById('playBtn').style.display = 'block';
+        syncHeaderButtons();
+    }
+}
+
+// Shared fast-forward logic
+function doFastForward() {
+    if(!playbackMode) return;
+    if(playbackInterval) {
+        clearTimeout(playbackInterval);
+        playbackInterval = null;
+    }
+    const target = currentTimestamp + REWIND_STEP;
+    const maxTime = lastTimestamp || Math.floor(Date.now() / 1000);
+    const newTime = Math.min(target, maxTime);
+    jumpToTimestamp(newTime);
+    isPaused = true;
+    document.getElementById('pauseBtn').style.display = 'none';
+    document.getElementById('playBtn').style.display = 'block';
+    syncHeaderButtons();
+}
+
+// Shared pause logic
+function doPause() {
+    isPaused = true;
+    document.getElementById('pauseBtn').style.display = 'none';
+    document.getElementById('playBtn').style.display = 'block';
+    syncHeaderButtons();
+    if(playbackInterval) {
+        clearTimeout(playbackInterval);
+        playbackInterval = null;
+    }
+    if(!playbackMode) {
+        const now = Math.floor(Date.now() / 1000);
+        currentTimestamp = now;
+        playbackMode = true;
+    }
+}
+
+// Header button handlers
+document.getElementById('headerRewindBtn').addEventListener('click', doRewind);
+document.getElementById('headerFastForwardBtn').addEventListener('click', doFastForward);
+document.getElementById('headerPauseBtn').addEventListener('click', doPause);
+document.getElementById('headerPlayBtn').addEventListener('click', doPlay);
 
 // Time display click - either go live or open picker
 document.getElementById('timeDisplay').addEventListener('click', (e) => {
@@ -1103,6 +1140,7 @@ document.getElementById('timePicker').addEventListener('change', (e) => {
     isPaused = true;
     document.getElementById('pauseBtn').style.display = 'none';
     document.getElementById('playBtn').style.display = 'block';
+    syncHeaderButtons();
 });
 
 document.getElementById('timePicker').addEventListener('blur', (e) => {
@@ -1701,6 +1739,17 @@ function updateProcs(event){
 
 function updateConnectionStatus(){
     const isConnected = ws && ws.readyState === 1;
+
+    // Update header controls visibility
+    const headerControls = document.getElementById('headerControls');
+    const headerDisconnected = document.getElementById('headerDisconnected');
+    if(!isConnected && !playbackMode) {
+        headerControls.style.display = 'none';
+        headerDisconnected.style.display = 'inline';
+    } else {
+        headerControls.style.display = 'flex';
+        headerDisconnected.style.display = 'none';
+    }
 
     // Update timeDisplay to show "Disconnected" when not connected (only in live mode)
     if(!playbackMode) {

@@ -117,7 +117,6 @@ impl Recorder {
         if (now - self.last_flush).whole_seconds() >= FLUSH_INTERVAL_SECONDS {
             self.file.flush()?;
             self.last_flush = now;
-            eprintln!("[DEBUG] Flushed data to disk at {} (segment {})", now, self.current_segment);
         }
 
         // Broadcast event to WebSocket clients (non-blocking)
