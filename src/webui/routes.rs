@@ -19,6 +19,8 @@ pub async fn index() -> HttpResponse {
     <meta charset="utf-8">
     <title>Black Box</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="This server remembers what just happened.">
+    <meta property="og:description" content="This server remembers what just happened.">
     <meta name="theme-color" content="#ffffff">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="icon" type="image/svg+xml"
@@ -35,7 +37,7 @@ pub async fn index() -> HttpResponse {
 <div class="max-w mx-auto px-4 py-[80px]">
     <div class="fixed w-full z-10 left-0 top-0 flex backdrop-blur-10xl">
         <div class="grow">
-            <canvas id="timelineChart" class="w-full h-12 cursor-pointer rounded" style="opacity:0;background:transparent;transition:opacity 0.3s ease-in;" title="Event density timeline"></canvas>
+            <canvas id="timelineChart" class="w-full h-12 cursor-pointer rounded" style="opacity:0;background:transparent;transition:opacity 0.3s ease-in;" title="Click to jump to a point in time"></canvas>
         </div>
         <div class="flex gap-3 px-5 py-2 text-gray-400 items-center">
             <svg id="rewindBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 hover:text-gray-600 transition duration-100 cursor-pointer" title="Rewind 1 minute">
@@ -51,20 +53,20 @@ pub async fn index() -> HttpResponse {
                 <path d="M3.288 4.818A1.5 1.5 0 0 0 1 6.095v7.81a1.5 1.5 0 0 0 2.288 1.276l6.323-3.905c.155-.096.285-.213.389-.344v2.973a1.5 1.5 0 0 0 2.288 1.276l6.323-3.905a1.5 1.5 0 0 0 0-2.552l-6.323-3.906A1.5 1.5 0 0 0 10 6.095v2.972a1.506 1.506 0 0 0-.389-.343L3.288 4.818Z" />
             </svg>
             <div class="border-l border-gray-300 h-4"></div>
-            <div class="flex flex-col text-xs">
+            <div class="flex flex-col text-xs items-end">
                 <input type="datetime-local" id="timePicker" class="px-1 py-0.5 border border-gray-300 rounded text-gray-700 text-xs" style="display:none" title="Select a specific date and time to view" />
-                <span id="timeDisplay" class="cursor-pointer hover:text-gray-700" style="color:#ef4444;" title="Click to select time, Shift+Click to go Live">Disconnected</span>
-                <span id="timeRange" class="text-gray-400 text-xs whitespace-nowrap" title="Total time range of available historical data"></span>
+                <span id="timeDisplay" class="cursor-pointer hover:text-gray-700 whitespace-nowrap" style="color:#ef4444;" title="Click to select time, Shift+Click to go Live">Disconnected</span>
+                <span id="timeRange" class="text-gray-400 text-xs whitespace-nowrap" title="Total duration of recorded history"></span>
             </div>
         </div>
     </div>
     <div id="mainContent" style="display:none;">
     <div class="flex justify-between items-center">
-        <div class="text-gray-900 font-semibold" title="Black Box - Linux System Monitor">Black Box</div>
+        <div class="text-gray-900 font-semibold" title="Black Box">Black Box</div>
         <div id="headerControlsWrapper">
             <div id="headerControls" class="flex items-center gap-1 text-gray-400">
-                <div id="playbackTimeDisplay" class="flex items-center gap-1 text-xs mr-1" style="display:none;color:#f59e0b;" title="Current playback time">
-                    <span id="playbackTime"></span>
+                <div id="playbackTimeDisplay" class="flex items-center gap-1 text-xs mr-1" style="display:none;color:#f59e0b;" title="Viewing historical data at this time">
+                    <span id="playbackTime" style="display: none;"></span>
                 </div>
                 <svg id="headerRewindBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="hover:text-gray-600 transition duration-100 cursor-pointer" style="width:14px;height:14px" title="Rewind 1 minute">
                     <path d="M7.712 4.818A1.5 1.5 0 0 1 10 6.095v2.972c.104-.13.234-.248.389-.343l6.323-3.906A1.5 1.5 0 0 1 19 6.095v7.81a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.505 1.505 0 0 1-.389-.344v2.973a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.5 1.5 0 0 1 0-2.552l6.323-3.906Z" />
@@ -83,54 +85,54 @@ pub async fn index() -> HttpResponse {
         </div>
     </div>
     <div class="flex justify-between text-gray-500">
-        <span id="datetime" title="Current system date and time"></span>
-        <span id="uptime" title="Time since system boot"></span>
+        <span id="datetime" title="System date and time"></span>
+        <span id="uptime" title="System uptime"></span>
     </div>
     <div></div>
     <div class="flex items-center text-gray-900 font-semibold">
         <span class="pr-2">System</span>
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
-    <div id="kernelRow" class="text-gray-500" title="Linux kernel version"></div>
-    <div id="cpuDetailsRow" class="text-gray-500" title="CPU model and frequency"></div>
+    <div id="kernelRow" class="text-gray-500" title="Kernel version"></div>
+    <div id="cpuDetailsRow" class="text-gray-500" title="CPU model and clock speed"></div>
     <div class="text-gray-500 flex items-center gap-4">
         <div class="flex-1 flex items-center gap-4">
-            <span class="w-10" title="Overall CPU usage across all cores">CPU</span>
+            <span class="w-10" title="Total CPU usage across all cores">CPU</span>
             <span class="relative flex-1 bg-gray-200" style="height:10px;border-radius:1px">
                 <span id="cpuBar" class="block h-full transition-all duration-300" style="width:0%;border-radius:1px"></span>
                 <span id="cpuPct" class="absolute inset-0 flex items-center justify-center text-gray-500/60 overflow-visible"></span>
             </span>
         </div>
-        <span id="loadVal" class="flex-1 text-right text-gray-500" title="System load average over 1, 5, and 15 minutes">Load average: --% --% --%</span>
+        <span id="loadVal" class="flex-1 text-right text-gray-500" title="1, 5, and 15 minute load averages">Load average: --% --% --%</span>
     </div>
-    <div id="cpuCoresContainer" class="grid grid-cols-2 gap-x-4" title="Per-core CPU usage"></div>
+    <div id="cpuCoresContainer" class="grid grid-cols-2 gap-x-4" title="Usage breakdown by CPU core"></div>
     <div class="flex items-center" style="height:19.5px;width:100%;">
-        <canvas id="cpuChart" style="height:10px;width:100%;" title="CPU usage over last 60 seconds"></canvas>
+        <canvas id="cpuChart" style="height:10px;width:100%;" title="CPU usage history (60s)"></canvas>
     </div>
     <div class="flex justify-between gap-4">
-        <div class="text-gray-500 flex-1" id="ramUsed" title="Amount of RAM currently in use"></div>
-        <div class="text-gray-500 flex-1 text-right" id="cpuTemp" title="CPU temperature sensor reading"></div>
+        <div class="text-gray-500 flex-1" id="ramUsed" title="RAM in use"></div>
+        <div class="text-gray-500 flex-1 text-right" id="cpuTemp" title="CPU package temperature"></div>
     </div>
     <div class="flex justify-between gap-4">
-        <div class="text-gray-500 flex-1" id="ramAvail" title="Amount of RAM available for use"></div>
-        <div class="text-gray-500 flex-1 text-right" id="moboTemp" title="Motherboard temperature or fan speed"></div>
+        <div class="text-gray-500 flex-1" id="ramAvail" title="RAM available"></div>
+        <div class="text-gray-500 flex-1 text-right" id="moboTemp" title="Motherboard temperature"></div>
     </div>
     <div class="flex items-center" style="height:19.5px;width:100%;">
-        <canvas id="memoryChart" style="height:10px;width:100%;" title="Memory usage over last 60 seconds"></canvas>
+        <canvas id="memoryChart" style="height:10px;width:100%;" title="Memory usage history (60s)"></canvas>
     </div>
 
     <div></div>
-    <div class="flex items-center text-gray-900 font-semibold" id="graphicsSection" style="display:none" title="GPU metrics (only shown if GPU detected)">
+    <div class="flex items-center text-gray-900 font-semibold" id="graphicsSection" style="display:none" title="GPU metrics">
         <span class="pr-2">Graphics</span>
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
     <div class="flex justify-between gap-4" id="graphicsRow1" style="display:none">
-        <div class="text-gray-500" id="gpuFreq" title="GPU core frequency"></div>
+        <div class="text-gray-500" id="gpuFreq" title="GPU clock speed"></div>
         <div class="text-gray-500 text-right" id="gpuTemp" title="GPU temperature"></div>
     </div>
     <div class="flex justify-between gap-4" id="graphicsRow2" style="display:none">
-        <div class="text-gray-500" id="memFreq" title="GPU memory frequency"></div>
-        <div class="text-gray-500 text-right" id="imgQuality" title="GPU power consumption"></div>
+        <div class="text-gray-500" id="memFreq" title="VRAM clock speed"></div>
+        <div class="text-gray-500 text-right" id="imgQuality" title="GPU power draw"></div>
     </div>
 
     <div></div>
@@ -141,50 +143,50 @@ pub async fn index() -> HttpResponse {
     <div class="text-gray-500 flex gap-4">
         <div class="flex-1">
             <div>
-                <span id="netName" title="Primary network interface"></span>
-                <span id="netSpeedDown" title="Download speed in bytes per second"></span>
+                <span id="netName" title="Network interface name"></span>
+                <span id="netSpeedDown" title="Current download rate"></span>
             </div>
             <div class="flex items-center" style="height:19.5px;width:100%;">
-                <canvas id="netDownChart" style="height:10px;width:100%;" title="Download speed over last 60 seconds"></canvas>
+                <canvas id="netDownChart" style="height:10px;width:100%;" title="Download rate history (60s)"></canvas>
             </div>
         </div>
         <div class="flex-1">
-            <div id="netSpeedUp" title="Upload speed in bytes per second"></div>
+            <div id="netSpeedUp" title="Current upload rate"></div>
             <div class="flex items-center" style="height:19.5px;width:100%;">
-                <canvas id="netUpChart" style="height:10px;width:100%;" title="Upload speed over last 60 seconds"></canvas>
+                <canvas id="netUpChart" style="height:10px;width:100%;" title="Upload rate history (60s)"></canvas>
             </div>
         </div>
     </div>
     <div class="text-gray-500 flex gap-4">
-        <span class="flex-1" id="netRxStats" title="Receive errors and dropped packets per second"></span>
-        <span class="flex-1" id="netTxStats" title="Transmit errors and dropped packets per second"></span>
+        <span class="flex-1" id="netRxStats" title="RX errors and drops per second"></span>
+        <span class="flex-1" id="netTxStats" title="TX errors and drops per second"></span>
     </div>
     <div class="grid grid-cols-2 gap-x-4 text-gray-500">
-        <div id="netAddress" title="IP address of primary interface"></div>
-        <div id="netTcp" title="Number of active TCP connections"></div>
-        <div id="netGateway" title="Default gateway IP address"></div>
-        <div id="netDns" title="DNS server IP address"></div>
+        <div id="netAddress" title="Interface IP address"></div>
+        <div id="netTcp" title="Active TCP connections"></div>
+        <div id="netGateway" title="Default gateway"></div>
+        <div id="netDns" title="DNS server"></div>
     </div>
 
     <div></div>
     <div class="flex items-center text-gray-900 font-semibold">
-        <span class="pr-2" title="Mounted filesystems and their usage">Storage</span>
+        <span class="pr-2" title="Mounted filesystem usage">Storage</span>
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
-    <div id="diskContainer" title="Filesystem mount points with usage bars"></div>
+    <div id="diskContainer" title="Disk space used per mount point"></div>
 
     <div></div>
-    <div class="flex items-center text-gray-900 font-semibold" id="diskIoSection" style="display:none" title="Per-device disk I/O statistics">
+    <div class="flex items-center text-gray-900 font-semibold" id="diskIoSection" style="display:none" title="Read/write throughput per block device">
         <span class="pr-2">Disk IO</span>
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
     <table class="w-full text-gray-500" id="diskIoTable" style="display:none">
         <thead><tr class="text-left text-gray-400">
-            <th class="font-normal" style="width:60px" title="Block device name">Device</th>
-            <th class="font-normal text-right" style="width:80px" title="Read speed in bytes per second">Read</th>
-            <th class="font-normal text-right" style="width:80px" title="Write speed in bytes per second">Write</th>
-            <th class="font-normal text-right" style="width:50px" title="Disk temperature in Celsius">Temp</th>
-            <th style="width:128px" title="I/O activity over last 60 seconds"></th>
+            <th class="font-normal" style="width:60px" title="Device">Device</th>
+            <th class="font-normal text-right" style="width:80px" title="Read throughput">Read</th>
+            <th class="font-normal text-right" style="width:80px" title="Write throughput">Write</th>
+            <th class="font-normal text-right" style="width:50px" title="Drive temperature">Temp</th>
+            <th style="width:128px" title="I/O activity (60s)"></th>
         </tr></thead>
         <tbody id="diskIoTableBody"></tbody>
     </table>
@@ -192,47 +194,47 @@ pub async fn index() -> HttpResponse {
     <div></div>
     <div class="flex items-center text-gray-900 font-semibold">
         <span class="pr-2">Processes</span>
-        <span id="procCount" class="text-gray-500 font-normal pr-2" title="Total process count and running count"></span>
+        <span id="procCount" class="text-gray-500 font-normal pr-2" title="Total and running process count"></span>
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
-    <table class="w-full text-gray-500" title="Top 5 processes by CPU usage">
+    <table class="w-full text-gray-500" title="Processes sorted by CPU usage">
         <thead><tr class="text-left text-gray-400">
             <th class="font-medium text-gray-700">Top CPU</th>
-            <th class="font-normal w-16" title="Process owner">User</th>
-            <th class="font-normal w-16" title="Process ID">PID</th>
-            <th class="font-normal w-16 text-right" title="CPU usage percentage">CPU%</th>
-            <th class="font-normal w-16 text-right" title="Memory usage percentage">MEM%</th>
+            <th class="font-normal w-16" title="Owner">User</th>
+            <th class="font-normal w-16" title="Process ID (PID)">PID</th>
+            <th class="font-normal w-16 text-right" title="CPU usage">CPU%</th>
+            <th class="font-normal w-16 text-right" title="Memory usage">MEM%</th>
         </tr></thead>
         <tbody id="topCpuTable"></tbody>
     </table>
-    <table class="w-full text-gray-500" title="Top 5 processes by memory usage">
+    <table class="w-full text-gray-500" title="Processes sorted by memory usage">
         <thead><tr class="text-left text-gray-400">
             <th class="font-medium text-gray-700">Top Memory</th>
-            <th class="font-normal w-16" title="Process owner">User</th>
-            <th class="font-normal w-16" title="Process ID">PID</th>
-            <th class="font-normal w-16 text-right" title="CPU usage percentage">CPU%</th>
-            <th class="font-normal w-16 text-right" title="Memory usage percentage">MEM%</th>
+            <th class="font-normal w-16" title="Owner">User</th>
+            <th class="font-normal w-16" title="Process ID (PID)">PID</th>
+            <th class="font-normal w-16 text-right" title="CPU usage">CPU%</th>
+            <th class="font-normal w-16 text-right" title="Memory usage">MEM%</th>
         </tr></thead>
         <tbody id="topMemTable"></tbody>
     </table>
 
     <div></div>
-    <div class="flex items-center text-gray-900 font-semibold" id="usersSection" style="display:none" title="Currently logged in users">
+    <div class="flex items-center text-gray-900 font-semibold" id="usersSection" style="display:none" title="Logged in users">
         <span class="pr-2">Users</span>
-        <span id="userCount" class="text-gray-500 font-normal pr-2" title="Number of logged in users"></span>
+        <span id="userCount" class="text-gray-500 font-normal pr-2" title="User count"></span>
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
     <div id="usersContainer"></div>
 
     <div></div>
     <div class="flex items-center text-gray-900 font-semibold">
-        <span class="pr-2" title="Real-time event log for processes, security events, and anomalies">Events</span>
+        <span class="pr-2" title="Process, security, and system events">Events</span>
         <div class="flex-1 flex items-center">
             <div class="flex-1 border-b border-gray-200"></div>
             <div class="flex gap-1 items-center font-normal ml-2">
-                <input type="text" id="filterInput" placeholder="Search..." title="Filter events by text search"
+                <input type="text" id="filterInput" placeholder="Search..." title="Search events"
                     class="px-2 py-0 border border-gray-300 rounded text-gray-700 focus:outline-none focus:ring-1 focus:ring-gray-400" />
-                <select id="eventType" class="px-2 py-0 border border-gray-300 rounded text-gray-700 focus:outline-none" title="Filter by event type">
+                <select id="eventType" class="px-2 py-0 border border-gray-300 rounded text-gray-700 focus:outline-none" title="Show only this event type">
                     <option value="">All</option>
                     <option value="process">Process</option>
                     <option value="security">Security</option>
@@ -242,7 +244,7 @@ pub async fn index() -> HttpResponse {
             </div>
         </div>
     </div>
-    <div id="eventsContainer" class="font-mono max-h-96 p-2 overflow-y-auto bg-white border border-gray-200 mt-1" style="font-size:12px; min-height: 384px;" title="Scrollable event log (last 1000 events)"></div>
+    <div id="eventsContainer" class="font-mono max-h-96 p-2 overflow-y-auto bg-white border border-gray-200 mt-1" style="font-size:12px; min-height: 384px;" title="Last 1000 events"></div>
     </div>
 </div>
 
@@ -1209,7 +1211,7 @@ function updateBar(id, pct, container, labelText, rightLabel){
 function updateCoreBar(id, pct, container, coreNum){
     let el = document.getElementById(id);
     if(!el){
-        container.insertAdjacentHTML('beforeend', `<div class="text-gray-500 flex items-center gap-4" id="row_${id}">
+        container.insertAdjacentHTML('beforeend', `<div class="text-gray-500 flex items-center gap-4" id="row_${id}" title="CPU usage for core ${coreNum}">
             <span class="w-10">CPU${coreNum}</span>
             <span class="relative flex-1 bg-gray-200" style="height:10px;border-radius:1px">
                 <span id="${id}" class="block h-full transition-all duration-300" style="width:0%;border-radius:1px"></span>
@@ -1575,7 +1577,7 @@ function render(){
         });
         updateTextIfChanged('cpuPct', e.cpu.toFixed(1) + '%');
 
-        const loadText = `Load average: ${e.load?.toFixed(2) || '--'}% ${e.load5?.toFixed(2) || '--'}% ${e.load15?.toFixed(2) || '--'}%`;
+        const loadText = `Load average: ${e.load?.toFixed(2) || '--'} ${e.load5?.toFixed(2) || '--'} ${e.load15?.toFixed(2) || '--'}`;
         updateTextIfChanged('loadVal', loadText);
 
         // Update CPU history
