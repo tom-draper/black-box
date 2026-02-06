@@ -532,7 +532,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
     const SEMI_STATIC_FIELDS_INTERVAL: u64 = 60;  // 1 minute for semi-static fields
 
     // Thresholds for anomaly detection
-    let cpu_spike_threshold = 80.0;
+    let cpu_spike_threshold = 90.0;
     let mem_spike_threshold = 90.0;
     let swap_usage_threshold = 50.0; // Start warning if swap is used
     let disk_full_threshold = 90.0;
