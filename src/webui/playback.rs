@@ -453,8 +453,9 @@ fn find_missing_metadata(reader: &IndexedReader, events: &[Event], end_time_ns: 
         return serde_json::json!({});
     }
 
-    // Look back up to 24 hours to find missing fields
-    let lookback_start = end_time_ns - (24 * 3600 * 1_000_000_000i128);
+    // Look back up to 1 hour to find missing fields (reduced from 24h for performance)
+    // Metadata fields (kernel, CPU model, etc.) are typically available within minutes
+    let lookback_start = end_time_ns - (3600 * 1_000_000_000i128);
     let lookback_events = reader.read_time_range(Some(lookback_start), Some(end_time_ns))
         .unwrap_or_default();
 
