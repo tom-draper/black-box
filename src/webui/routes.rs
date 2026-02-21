@@ -952,63 +952,81 @@ async function jumpToTimestamp(timestamp, incremental = false) {
     // Clean up prevValues cache to prevent memory leak
     cleanupPrevValues();
 
-    // Fetch past 60 seconds for chart history using the count API
-    try {
-        const historyUrl = `/api/playback/events?timestamp=${timestamp}&count=60`;
-        const historyResp = await fetch(historyUrl);
-        const historyData = await historyResp.json();
-
-
-        if(historyData.events && historyData.events.length > 0) {
-            const timeDisplay = document.getElementById('timeDisplay');
-            timeDisplay.title = 'Click to select time, Shift+Click to go Live';
-
-            // Build chart history from past events and populate event log
-            historyData.events.forEach(event => {
-                if(event.type === 'SystemMetrics') {
-                    cpuHistory.push(event.cpu || 0);
-                    memoryHistory.push(event.mem || 0);
-                    netDownHistory.push(event.net_recv || 0);
-                    netUpHistory.push(event.net_send || 0);
-                } else if(event.type !== 'ProcessSnapshot') {
-                    // Add non-SystemMetrics, non-ProcessSnapshot events to the log
-                    addEventToLog(event);
-                }
-            });
-
-            // Trim to MAX_HISTORY
-            if(cpuHistory.length > MAX_HISTORY) {
-                cpuHistory.splice(0, cpuHistory.length - MAX_HISTORY);
-                memoryHistory.splice(0, memoryHistory.length - MAX_HISTORY);
-                netDownHistory.splice(0, netDownHistory.length - MAX_HISTORY);
-                netUpHistory.splice(0, netUpHistory.length - MAX_HISTORY);
-            }
-
-            // Handle metadata
-            if(historyData.metadata) {
-                if(historyData.metadata.mem_total_bytes) cachedMemTotal = historyData.metadata.mem_total_bytes;
-                if(historyData.metadata.swap_total_bytes) cachedSwapTotal = historyData.metadata.swap_total_bytes;
-                if(historyData.metadata.disk_total_bytes) cachedDiskTotal = historyData.metadata.disk_total_bytes;
-                if(historyData.metadata.filesystems && historyData.metadata.filesystems.length > 0) cachedFilesystems = historyData.metadata.filesystems;
-                if(historyData.metadata.net_ip) cachedNetIp = historyData.metadata.net_ip;
-                if(historyData.metadata.net_gateway) cachedNetGateway = historyData.metadata.net_gateway;
-                if(historyData.metadata.net_dns) cachedNetDns = historyData.metadata.net_dns;
-                if(historyData.metadata.kernel_version) cachedKernel = historyData.metadata.kernel_version;
-                if(historyData.metadata.cpu_model) cachedCpuModel = historyData.metadata.cpu_model;
-                if(historyData.metadata.cpu_mhz) cachedCpuMhz = historyData.metadata.cpu_mhz;
-            }
-        }
-    } catch(e) {
-        console.error('Failed to load history:', e);
-        // Hide spinner on error
-        hideTimelineLoader();
-    }
-
-    // Fetch forward buffer for playback (60 seconds ahead)
+    // Fetch both history and forward buffer in parallel for better performance
     bufferStart = timestamp;
     bufferEnd = timestamp + BUFFER_SIZE;
-    playbackBuffer = await fetchPlaybackBuffer(bufferStart, bufferEnd);
+
+    const [historyData, forwardBuffer] = await Promise.all([
+        fetch(`/api/playback/events?timestamp=${timestamp}&count=60`).then(r => r.json()).catch(e => {
+            console.error('Failed to load history:', e);
+            return { events: [] };
+        }),
+        fetchPlaybackBuffer(bufferStart, bufferEnd)
+    ]);
+
+    playbackBuffer = forwardBuffer;
     lastPrefetchEnd = null; // Reset prefetch tracker for new buffer
+
+    if(historyData.events && historyData.events.length > 0) {
+        const timeDisplay = document.getElementById('timeDisplay');
+        timeDisplay.title = 'Click to select time, Shift+Click to go Live';
+
+        // Batch event log updates for better DOM performance
+        const fragment = document.createDocumentFragment();
+        const filter = document.getElementById('filterInput').value.toLowerCase();
+        const evType = document.getElementById('eventType').value;
+
+        // Build chart history from past events and prepare event log entries
+        historyData.events.forEach(event => {
+            if(event.type === 'SystemMetrics') {
+                cpuHistory.push(event.cpu || 0);
+                memoryHistory.push(event.mem || 0);
+                netDownHistory.push(event.net_recv || 0);
+                netUpHistory.push(event.net_send || 0);
+            } else if(event.type !== 'ProcessSnapshot') {
+                // Add to buffer for deduplication tracking
+                const eventKey = `${event.timestamp}_${event.type}_${event.pid || event.path || event.message || ''}`;
+                if(!eventKeys.has(eventKey)) {
+                    eventBuffer.push(event);
+                    eventKeys.add(eventKey);
+
+                    // Create DOM entry if it matches filter
+                    if(matchesFilter(event, filter, evType)) {
+                        const entry = createEventEntry(event);
+                        if(entry) fragment.appendChild(entry);
+                    }
+                }
+            }
+        });
+
+        // Append all events at once (single DOM operation)
+        if(fragment.children.length > 0) {
+            const container = document.getElementById('eventsContainer');
+            container.appendChild(fragment);
+        }
+
+        // Trim to MAX_HISTORY
+        if(cpuHistory.length > MAX_HISTORY) {
+            cpuHistory.splice(0, cpuHistory.length - MAX_HISTORY);
+            memoryHistory.splice(0, memoryHistory.length - MAX_HISTORY);
+            netDownHistory.splice(0, netDownHistory.length - MAX_HISTORY);
+            netUpHistory.splice(0, netUpHistory.length - MAX_HISTORY);
+        }
+
+        // Handle metadata
+        if(historyData.metadata) {
+            if(historyData.metadata.mem_total_bytes) cachedMemTotal = historyData.metadata.mem_total_bytes;
+            if(historyData.metadata.swap_total_bytes) cachedSwapTotal = historyData.metadata.swap_total_bytes;
+            if(historyData.metadata.disk_total_bytes) cachedDiskTotal = historyData.metadata.disk_total_bytes;
+            if(historyData.metadata.filesystems && historyData.metadata.filesystems.length > 0) cachedFilesystems = historyData.metadata.filesystems;
+            if(historyData.metadata.net_ip) cachedNetIp = historyData.metadata.net_ip;
+            if(historyData.metadata.net_gateway) cachedNetGateway = historyData.metadata.net_gateway;
+            if(historyData.metadata.net_dns) cachedNetDns = historyData.metadata.net_dns;
+            if(historyData.metadata.kernel_version) cachedKernel = historyData.metadata.kernel_version;
+            if(historyData.metadata.cpu_model) cachedCpuModel = historyData.metadata.cpu_model;
+            if(historyData.metadata.cpu_mhz) cachedCpuMhz = historyData.metadata.cpu_mhz;
+        }
+    }
 
     // Process current second from buffer
     processSecondFromBuffer(timestamp);
