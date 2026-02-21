@@ -33,6 +33,19 @@ pub async fn index() -> HttpResponse {
         .max-w { max-width: 32rem; }
         th, td { padding: 0; }
         .backdrop-blur-10xl { -webkit-backdrop-filter: blur(1000px); backdrop-filter: blur(1000px); }
+        /* Loading spinner for timeline data fetch */
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .loading-spinner {
+            width: 12px;
+            height: 12px;
+            border: 2px solid rgba(156, 163, 175, 0.3);
+            border-top-color: #9ca3af;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -70,6 +83,7 @@ pub async fn index() -> HttpResponse {
                 <div id="playbackTimeDisplay" class="flex items-center gap-1 text-xs mr-1" style="display:none;color:#f59e0b;" title="Viewing historical data at this time">
                     <span id="playbackTime" style="display: none;"></span>
                 </div>
+                <div id="timelineLoadingSpinner" class="loading-spinner" style="display:none;"></div>
                 <svg id="headerRewindBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="hover:text-gray-600 transition duration-100 cursor-pointer" style="width:14px;height:14px" title="Rewind 1 minute">
                     <path d="M7.712 4.818A1.5 1.5 0 0 1 10 6.095v2.972c.104-.13.234-.248.389-.343l6.323-3.906A1.5 1.5 0 0 1 19 6.095v7.81a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.505 1.505 0 0 1-.389-.344v2.973a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.5 1.5 0 0 1 0-2.552l6.323-3.906Z" />
                 </svg>
@@ -246,7 +260,7 @@ pub async fn index() -> HttpResponse {
             </div>
         </div>
     </div>
-    <div id="eventsContainer" class="font-mono max-h-96 p-2 overflow-y-auto bg-white border border-gray-200 mt-1" style="font-size:12px; min-height: 384px;" title="Last 1000 events"></div>
+    <div id="eventsContainer" class="font-mono max-h-96 p-2 overflow-y-auto bg-white border border-gray-200 rounded mt-1" style="font-size:12px; min-height: 384px;" title="Last 1000 events"></div>
     </div>
 </div>
 
@@ -374,6 +388,7 @@ function updateStyleIfChanged(id, prop, value) {
 
 // Time-travel state
 let playbackMode = false; // false = live, true = historical playback
+let isTimelineLoading = false; // Loading state for timeline data fetching
 let currentTimestamp = null; // Current playback timestamp (seconds)
 let firstTimestamp = null; // Earliest available data
 let lastTimestamp = null; // Latest available data
@@ -663,6 +678,9 @@ function drawTimeline() {
 document.getElementById('timelineChart').addEventListener('click', (e) => {
     if(!timelineData || !timelineData.timeline || timelineData.timeline.length === 0) return;
 
+    // Show loading spinner
+    showTimelineLoader();
+
     const canvas = document.getElementById('timelineChart');
     const rect = canvas.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
@@ -829,10 +847,28 @@ function processSecondFromBuffer(timestamp) {
     drawTimeline();
 }
 
+// Show/hide timeline loading spinner
+function showTimelineLoader() {
+    isTimelineLoading = true;
+    const spinner = document.getElementById('timelineLoadingSpinner');
+    if (spinner) spinner.style.display = 'inline-block';
+}
+
+function hideTimelineLoader() {
+    isTimelineLoading = false;
+    const spinner = document.getElementById('timelineLoadingSpinner');
+    if (spinner) spinner.style.display = 'none';
+}
+
 // Jump to a specific timestamp and load data
 // Now uses chunked buffering for efficient playback
 async function jumpToTimestamp(timestamp, incremental = false) {
     if(!timestamp) return;
+
+    // Ensure spinner is visible (in case called directly)
+    if (!incremental) {
+        showTimelineLoader();
+    }
 
     currentTimestamp = timestamp;
     playbackMode = true;
@@ -932,6 +968,8 @@ async function jumpToTimestamp(timestamp, incremental = false) {
         }
     } catch(e) {
         console.error('Failed to load history:', e);
+        // Hide spinner on error
+        hideTimelineLoader();
     }
 
     // Fetch forward buffer for playback (60 seconds ahead)
@@ -945,6 +983,9 @@ async function jumpToTimestamp(timestamp, incremental = false) {
 
     // Update timeline visualization
     drawTimeline();
+
+    // Hide loading spinner
+    hideTimelineLoader();
 }
 
 // Rewind button
@@ -1053,6 +1094,9 @@ function syncHeaderButtons() {
 
 // Shared rewind logic
 function doRewind() {
+    // Show loading spinner
+    showTimelineLoader();
+
     if(playbackInterval) {
         clearTimeout(playbackInterval);
         playbackInterval = null;
@@ -1077,6 +1121,10 @@ function doRewind() {
 // Shared fast-forward logic
 function doFastForward() {
     if(!playbackMode) return;
+
+    // Show loading spinner
+    showTimelineLoader();
+
     if(playbackInterval) {
         clearTimeout(playbackInterval);
         playbackInterval = null;
