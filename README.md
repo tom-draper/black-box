@@ -220,9 +220,8 @@ Most features work as a regular user. For enhanced capabilities:
 
 ## API Endpoints
 
-
-
 ### `/api/events` - REST API
+
 Get recent events (last 1000) with optional filtering.
 
 ```bash
@@ -236,18 +235,8 @@ curl -u admin:admin "http://localhost:8080/api/events?type=anomaly"
 curl -u admin:admin "http://localhost:8080/api/events?filter=ssh"
 ```
 
-### `/ws` - WebSocket Stream
-Real-time event streaming via WebSocket. Requires Basic Auth in the connection request.
-
-```javascript
-const ws = new WebSocket('ws://localhost:8080/ws');
-ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    console.log('Event:', data);
-};
-```
-
 ### `/api/playback/info` - Playback Time Range
+
 Get the time range of available historical data.
 
 ```bash
@@ -267,9 +256,11 @@ Response:
 ```
 
 ### `/api/playback/events` - Historical Events
+
 Query historical events with two modes:
 
 **Mode 1: Count-based** - Get last N SystemMetrics before a timestamp:
+
 ```bash
 # Get last 60 SystemMetrics before timestamp
 curl -u admin:admin "http://localhost:8080/api/playback/events?timestamp=1705323600&count=60"
@@ -278,32 +269,26 @@ curl -u admin:admin "http://localhost:8080/api/playback/events?timestamp=1705323
 curl -u admin:admin "http://localhost:8080/api/playback/events?timestamp=1705323600&count=60&before=true"
 ```
 
-### `/health` - Health Check
-Returns JSON with system status, uptime, event count, and storage usage.
-
-
-
 **Mode 2: Range-based** - Get all events in a time range:
+
 ```bash
 # Get all events between start and end (up to limit)
 curl -u admin:admin "http://localhost:8080/api/playback/events?start=1705320000&end=1705323600&limit=1000"
 ```
 
-### `/api/initial-state` - Initial State
-Get the most recent complete SystemMetrics for page initialization.
+### `/ws` - WebSocket Stream
+Real-time event streaming via WebSocket. Requires Basic Auth in the connection request.
 
-```bash
-curl -u admin:admin http://localhost:8080/api/initial-state
+```javascript
+const ws = new WebSocket('ws://localhost:8080/ws');
+ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    console.log('Event:', data);
+};
 ```
 
-### `/api/timeline` - Event Timeline
-Get event density timeline with CPU and memory usage for visualization.
-
-```bash
-curl -u admin:admin http://localhost:8080/api/timeline
-```
-
-Response includes per-minute buckets with event counts and average CPU/memory usage.
+### `/health` - Health Check
+Returns JSON with system status, uptime, event count, and storage usage.
 
 ```bash
 curl -u admin:admin http://localhost:8080/health
