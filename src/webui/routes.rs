@@ -68,8 +68,8 @@ pub async fn index() -> HttpResponse {
                 <path d="M3.288 4.818A1.5 1.5 0 0 0 1 6.095v7.81a1.5 1.5 0 0 0 2.288 1.276l6.323-3.905c.155-.096.285-.213.389-.344v2.973a1.5 1.5 0 0 0 2.288 1.276l6.323-3.905a1.5 1.5 0 0 0 0-2.552l-6.323-3.906A1.5 1.5 0 0 0 10 6.095v2.972a1.506 1.506 0 0 0-.389-.343L3.288 4.818Z" />
             </svg>
             <div class="border-l border-gray-300 h-4"></div>
-            <div class="flex flex-col text-xs items-end">
-                <input type="datetime-local" id="timePicker" class="px-1 py-0.5 border border-gray-300 rounded text-gray-700 text-xs" style="display:none" title="Select a specific date and time to view" />
+            <div class="flex flex-col text-xs items-end relative">
+                <input type="datetime-local" id="timePicker" class="absolute top-0 right-0 px-1 py-0.5 border border-gray-300 rounded text-gray-700 text-xs bg-white" style="display:none;z-index:20;" title="Select a specific date and time to view" />
                 <span id="timeDisplay" class="cursor-pointer hover:text-gray-700 whitespace-nowrap" style="color:#ef4444;" title="Click to select time, Shift+Click to go Live">Disconnected</span>
                 <span id="timeRange" class="text-gray-400 text-xs whitespace-nowrap" title="Total duration of recorded history"></span>
             </div>
@@ -739,7 +739,36 @@ document.getElementById('timelineChart').addEventListener('mousemove', (e) => {
         ? date.toTimeString().substring(0, 8)
         : formatDate(date);
 
-    canvas.title = `Jump to ${displayText}`;
+    // Find closest timeline data point
+    let closestPoint = null;
+    let minDiff = Infinity;
+    for(const point of timelineData.timeline) {
+        const diff = Math.abs(point.timestamp - hoverTimestamp);
+        if(diff < minDiff) {
+            minDiff = diff;
+            closestPoint = point;
+        }
+    }
+
+    // Build tooltip with metrics
+    let tooltip = `Jump to ${displayText}`;
+    if(closestPoint) {
+        const metrics = [];
+        if(closestPoint.count !== null && closestPoint.count !== undefined) {
+            metrics.push(`Events: ${closestPoint.count}`);
+        }
+        if(closestPoint.cpu !== null && closestPoint.cpu !== undefined) {
+            metrics.push(`CPU: ${closestPoint.cpu.toFixed(1)}%`);
+        }
+        if(closestPoint.mem !== null && closestPoint.mem !== undefined) {
+            metrics.push(`Memory: ${closestPoint.mem.toFixed(1)}%`);
+        }
+        if(metrics.length > 0) {
+            tooltip += '\n' + metrics.join(', ');
+        }
+    }
+
+    canvas.title = tooltip;
 });
 
 // Fetch available time range on load
