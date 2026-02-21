@@ -963,13 +963,16 @@ async function jumpToTimestamp(timestamp, incremental = false) {
             const timeDisplay = document.getElementById('timeDisplay');
             timeDisplay.title = 'Click to select time, Shift+Click to go Live';
 
-            // Build chart history from past events (only SystemMetrics)
+            // Build chart history from past events and populate event log
             historyData.events.forEach(event => {
                 if(event.type === 'SystemMetrics') {
                     cpuHistory.push(event.cpu || 0);
                     memoryHistory.push(event.mem || 0);
                     netDownHistory.push(event.net_recv || 0);
                     netUpHistory.push(event.net_send || 0);
+                } else if(event.type !== 'ProcessSnapshot') {
+                    // Add non-SystemMetrics, non-ProcessSnapshot events to the log
+                    addEventToLog(event);
                 }
             });
 
