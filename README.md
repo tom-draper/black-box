@@ -12,32 +12,32 @@ A lightweight, always-on forensics recorder for Linux servers. Captures system m
 
 Ideal for tracking malicious activity, monitoring AI agents, and reviewing errors.
 
-## Key Features
-
-- Always-on monitoring with minimal overhead
-- Real-time streaming with a web UI
-- Time-travel playback - query historical events by timestamp or time range
-- Tamper protection modes (append-only or immutable log files)
-- Timeline visualization with event density and resource usage
-- Export events to JSON for external analysis
-- Remote monitoring with health checks and auto-export
-- Fixed disk usage (ring buffer)
-- HTTP Basic Authentication for security
-- Systemd integration
-- Single static binary
-
 <p align="center">
   <img width="520" height="890" alt="Screenshot_20260131_105934" src="https://github.com/user-attachments/assets/ff1de6b3-2961-4464-93e1-b7c485efc7c4" />
 </p>
 
+## Key Features
+
+- Continuous monitoring with very low overhead  
+- Real-time streaming via a built-in web UI  
+- Time-travel playback to query historical events by timestamp or range  
+- Tamper-resistant modes (append-only or fully immutable logs)  
+- Timeline view showing event density and resource usage  
+- JSON export for external analysis  
+- Optional remote monitoring with health checks and auto-export  
+- Fixed disk usage using a ring buffer  
+- HTTP Basic Auth support
+- Systemd integration  
+- Ships as a single static binary  
+
 ## What It Captures
 
-- **System Metrics** (1s): CPU (per-core), memory, swap, disk I/O (per-disk + temps), network (I/O, TCP connections, errors/drops), load averages, temperatures, GPU metrics, filesystems (per-mount)
-- **System Info**: Kernel version, CPU model, hardware specs (collected on startup/hourly)
-- **Process Events**: Lifecycle tracking (start/exit/stuck), command lines, resource usage, top consumers
-- **Security Events** (5s): User logins, SSH auth, sudo commands, brute force/port scan detection
-- **File System Events**: File modifications, creations, deletions with paths and sizes
-- **Anomaly Detection**: Resource spikes, disk full, stuck processes, thread/connection leaks
+- **System metrics** (1s): per-core CPU, memory, swap, disk I/O (per disk + temps), network (throughput, TCP connections, errors/drops), load averages, temperatures, GPU stats, and per-mount filesystem usage  
+- **System info**: kernel version, CPU model, and hardware details (captured at startup and hourly)  
+- **Process events**: lifecycle tracking (start/exit/stuck), command lines, resource usage, and top consumers  
+- **Security events** (5s): user logins, SSH activity, sudo usage, and basic brute-force/port-scan detection  
+- **Filesystem events**: file creates, deletes, and modifications with paths and sizes  
+- **Anomaly detection**: resource spikes, disk-full warnings, stuck processes, and thread/connection leaks  
 
 ## Usage
 
