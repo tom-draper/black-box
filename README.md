@@ -56,13 +56,13 @@ Binary will be at `target/release/black-box`.
 ```
 
 This starts:
-- Data recording to `./data/` directory (configurable, see Configuration section)
+- Data recording to `./data/` directory by default (configurable, see Configuration section)
 - Web UI at `http://localhost:8080`
-- REST/WebSocket API for events, playback, and monitoring
+- WebSocket/REST API for events, playback, and monitoring
 
-On first run, Black Box will create a `config.toml` file with default credentials. If using authentication, change the default password immediately. See configuration details below.
+On first run, Black Box will generate a `config.toml` file with default credentials. If using authentication, change the default password immediately. See configuration details below.
 
-**Note:** For production deployments, configure a dedicated data directory like `/var/lib/black-box/` in `config.toml`.
+**Note:** For production deployments, configure a dedicated data directory like `/var/lib/black-box/` or `~/.local/share/black-box/` in `config.toml`.
 
 **Monitor Mode (Lightweight):**
 ```bash
@@ -102,7 +102,7 @@ Runs data collection only, without the web UI or API endpoints. Use this for min
 
 ## Configuration
 
-Black Box uses a `config.toml` file for settings. On first run, it creates a default config:
+Black Box uses a `config.toml` file for settings. On first run, it generates a default config:
 
 ```toml
 [auth]
