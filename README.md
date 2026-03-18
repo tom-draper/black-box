@@ -13,7 +13,7 @@ A lightweight, always-on forensics recorder for Linux servers. Captures system m
 Ideal for tracking malicious activity, monitoring AI agents, and reviewing errors.
 
 <p align="center">
-  <img width="520" height="890" alt="Screenshot_20260131_105934" src="https://github.com/user-attachments/assets/ff1de6b3-2961-4464-93e1-b7c485efc7c4" />
+  <img width="520" height="890" alt="Screenshot_20260131_105934" src="https://github.com/user-attachments/assets/78c9329b-ba8b-4ee9-ac66-bb3818661600" />
 </p>
 
 ## Key Features
