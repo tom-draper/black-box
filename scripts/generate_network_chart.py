@@ -4,15 +4,27 @@ Generate a network speed bar chart image matching the style of black-box's netwo
 Creates an 830px wide, transparent background image for use in README.
 """
 
+from pathlib import Path
 from PIL import Image, ImageDraw
 import random
-import math
 
 # Configuration
 WIDTH = 830
 HEIGHT = 10
 NUM_BARS = 215  # Match original bar width: 60 bars @ 232px = 215 bars @ 830px
 TRANSPARENT = (0, 0, 0, 0)
+BACKGROUND = (249, 250, 251, 255)  # gray-50 from the web UI
+REFERENCE_IMAGE = Path(__file__).resolve().parent.parent / "example.png"
+VERTICAL_SUPERSAMPLE = 4
+_REFERENCE_PROFILE = None
+MANUAL_SEED_PROFILE = [
+    0.50, 0.50, 0.57, 0.80, 0.50, 0.40, 0.70, 0.47, 0.47, 0.70,
+    0.70, 0.70, 0.62, 0.60, 0.60, 0.47, 0.70, 0.60, 0.30, 0.50,
+    0.42, 0.70, 0.53, 0.60, 0.65, 0.80, 0.70, 0.70, 0.55, 0.80,
+    0.62, 0.70, 0.60, 0.40, 0.40, 0.80, 0.72, 0.80, 0.70, 0.40,
+    0.35, 0.80, 1.00, 0.78, 0.40, 0.60, 0.68, 0.90, 0.50, 0.20,
+    0.60, 0.60, 1.00, 0.40, 0.40, 0.35, 0.50, 0.80, 0.80, 0.65,
+]
 
 # Tailwind color mapping (same as getUsageColor function)
 COLOR_MAP = [
@@ -35,78 +47,176 @@ def get_usage_color(pct):
             return color
     return COLOR_MAP[-1][1]  # default green-400
 
-def generate_varied_network_data(num_points):
+
+def lighten_color(color, amount=0.28):
+    """Blend a color toward white for the bar's lighter edge."""
+    return tuple(
+        int(channel + ((255 - channel) * amount))
+        for channel in color
+    )
+
+
+def extract_reference_profile(image_path):
     """
-    Generate simulated network speed data with natural-looking spikes.
-    Creates a low baseline with occasional red and yellow spikes that ramp up/down.
+    Extract a normalized bar-height profile from the example screenshot.
+
+    We sample the screenshot column-by-column so the extracted distribution
+    reflects the visible rhythm of the real chart across its full width.
     """
-    data = []
-    i = 0
+    img = Image.open(image_path).convert("RGBA")
+    width, height = img.size
+    bg_rgb = BACKGROUND[:3]
 
-    while i < num_points:
-        # Normal baseline activity
-        baseline_length = random.randint(5, 15)
+    non_bg = [
+        (x, y)
+        for y in range(height)
+        for x in range(width)
+        if img.getpixel((x, y))[:3] != bg_rgb
+    ]
+    if not non_bg:
+        raise ValueError(f"No chart pixels found in {image_path}")
 
-        for _ in range(min(baseline_length, num_points - i)):
-            # Low baseline with some variation (10-30%)
-            value = random.uniform(10, 30)
-            # Add noise
-            value += random.uniform(-8, 8)
-            value = max(5, value)  # Keep above 5
-            data.append(value)
-            i += 1
-            if i >= num_points:
-                break
+    left = min(x for x, _ in non_bg)
+    right = max(x for x, _ in non_bg)
+    bottom = max(y for _, y in non_bg)
+    profile = []
 
-        # 40% chance of a spike cluster
-        if random.random() > 0.6 and i < num_points:
-            spike_type = random.random()
+    for x in range(left, right + 1):
+        top = height
+        found = False
+        for y in range(height):
+            if img.getpixel((x, y))[:3] != bg_rgb:
+                top = min(top, y)
+                found = True
 
-            if spike_type > 0.7:
-                # Red spike cluster (high activity)
-                peak = random.uniform(75, 100)
-                spike_length = random.randint(2, 5)
-            else:
-                # Yellow spike cluster (medium activity)
-                peak = random.uniform(45, 70)
-                spike_length = random.randint(3, 7)
+        if found:
+            profile.append((bottom - top + 1) / HEIGHT)
 
-            # Ramp up
-            ramp_up = random.randint(2, 4)
-            for j in range(min(ramp_up, num_points - i)):
-                value = random.uniform(20, peak * (j + 1) / ramp_up)
-                # Add noise
-                value += random.uniform(-10, 10)
-                value = max(15, min(peak, value))
-                data.append(value)
-                i += 1
-                if i >= num_points:
-                    break
+    if not profile:
+        raise ValueError(f"Unable to extract a reference profile from {image_path}")
 
-            # Peak
-            for _ in range(min(spike_length, num_points - i)):
-                value = random.uniform(peak * 0.8, peak)
-                # Add noise
-                value += random.uniform(-8, 8)
-                value = max(peak * 0.7, min(100, value))
-                data.append(value)
-                i += 1
-                if i >= num_points:
-                    break
+    max_value = max(profile)
+    return [value / max_value for value in profile]
 
-            # Ramp down
-            ramp_down = random.randint(2, 4)
-            for j in range(min(ramp_down, num_points - i)):
-                value = random.uniform(peak * (ramp_down - j) / ramp_down, 30)
-                # Add noise
-                value += random.uniform(-10, 10)
-                value = max(10, value)
-                data.append(value)
-                i += 1
-                if i >= num_points:
-                    break
 
-    return data[:num_points]
+def default_reference_profile():
+    """
+    Fallback profile measured from example.png.
+
+    Manual 60-bar seed measured from example.png and normalized to the tallest
+    visible bar.
+    """
+    return MANUAL_SEED_PROFILE[:]
+
+
+def load_reference_profile():
+    """Load the measured chart profile from example.png when available."""
+    global _REFERENCE_PROFILE
+    if _REFERENCE_PROFILE is not None:
+        return _REFERENCE_PROFILE
+
+    print(f"Using manual seed profile ({len(MANUAL_SEED_PROFILE)} bars)")
+    _REFERENCE_PROFILE = default_reference_profile()
+    return _REFERENCE_PROFILE
+
+class NetworkActivityModel:
+    """Continuous activity model guided by the measured screenshot profile."""
+
+    def __init__(self, reference):
+        self.reference = reference
+        self.position = random.uniform(0, len(reference) - 1)
+        self.speed = random.uniform(0.85, 1.2)
+        self.current = self._reference_value(self.position)
+        self.drift = 0.0
+        self.micro = 0.0
+        self.impulse = 0.0
+
+    def _reference_value(self, position):
+        left = int(position) % len(self.reference)
+        right = (left + 1) % len(self.reference)
+        frac = position - int(position)
+        return (self.reference[left] * (1.0 - frac)) + (self.reference[right] * frac)
+
+    def next_value(self):
+        if random.random() < 0.035:
+            self.position = random.uniform(0, len(self.reference) - 1)
+            self.speed = random.uniform(0.8, 1.25)
+
+        target = self._reference_value(self.position)
+        self.position = (self.position + self.speed + random.uniform(-0.08, 0.08)) % len(self.reference)
+        self.speed = min(1.3, max(0.7, self.speed + random.uniform(-0.03, 0.03)))
+
+        # Low-frequency drift helps avoid repeated exact plateaus.
+        self.drift = (self.drift * 0.82) + random.uniform(-0.035, 0.035)
+        # High-frequency wobble breaks up equal-height neighbors once the
+        # 60-bar seed is expanded to README width.
+        self.micro = (self.micro * 0.18) + random.uniform(-0.11, 0.11)
+        # Short-lived impulses create the single-bar jumps seen in the sample.
+        self.impulse *= 0.10
+        if random.random() < 0.15:
+            direction = -1.0 if random.random() < 0.6 else 1.0
+            strength = random.uniform(0.18, 0.38) if direction < 0 else random.uniform(0.14, 0.30)
+            self.impulse += direction * strength
+
+        value = (self.current * 0.32) + (target * 0.68)
+        value += self.drift + self.micro + self.impulse + random.uniform(-0.05, 0.05)
+
+        if random.random() < 0.14:
+            value -= random.uniform(0.14, 0.34)
+        if random.random() < 0.035:
+            value += random.uniform(0.08, 0.18)
+
+        # Keep a visible green tail while preserving the screenshot's mostly
+        # warm middle. The UI rescales per frame, so these relative values are
+        # what drives the apparent color distribution.
+        value = min(1.0, max(0.06, value))
+        self.current = value
+        return 100.0 * value
+
+
+def generate_varied_network_data(num_points, model=None):
+    """Generate continuous chart samples shaped by the measured reference."""
+    model = model or NetworkActivityModel(load_reference_profile())
+    return [model.next_value() for _ in range(num_points)]
+
+
+def render_chart_image(data):
+    """
+    Render the chart with extra vertical resolution, then downsample.
+
+    This preserves continuous-looking height variation even though the final
+    README asset is only 10px tall.
+    """
+    render_height = HEIGHT * VERTICAL_SUPERSAMPLE
+    img = Image.new('RGBA', (WIDTH, render_height), BACKGROUND)
+    draw = ImageDraw.Draw(img)
+
+    bar_width = WIDTH / len(data)
+    max_val = max(data) if data else 1
+
+    prev_rendered = None
+    for i, val in enumerate(data):
+        normalized = val / max_val
+        # Small render-time jitter avoids visible plateaus where adjacent bars
+        # fall into the same color band but should not look identical.
+        normalized = min(1.0, max(0.0, normalized + random.uniform(-0.035, 0.035)))
+        if prev_rendered is not None and abs(normalized - prev_rendered) < 0.022:
+            nudge = random.uniform(0.022, 0.055)
+            normalized += nudge if random.random() < 0.5 else -nudge
+            normalized = min(1.0, max(0.0, normalized))
+        bar_height = normalized * render_height
+        pct = normalized * 100
+        color = get_usage_color(pct)
+        edge_color = lighten_color(color)
+        x = i * bar_width
+        y = render_height - bar_height
+        edge_width = max(1.0, bar_width * 0.22)
+        body_end = max(x, (x + bar_width) - edge_width)
+        draw.rectangle([(x, y), (body_end, render_height)], fill=color)
+        draw.rectangle([(body_end, y), (x + bar_width, render_height)], fill=edge_color)
+        prev_rendered = normalized
+
+    return img.resize((WIDTH, HEIGHT), Image.Resampling.BICUBIC)
 
 def draw_network_chart(filename, data):
     """
@@ -116,38 +226,7 @@ def draw_network_chart(filename, data):
         filename: Output PNG filename
         data: List of network speed values (0-100)
     """
-    # Create image with RGBA for transparency
-    img = Image.new('RGBA', (WIDTH, HEIGHT), TRANSPARENT)
-    draw = ImageDraw.Draw(img)
-
-    # Calculate bar width
-    bar_width = WIDTH / len(data)
-
-    # Find max value for scaling
-    max_val = max(data) if data else 1
-
-    # Draw each bar
-    for i, val in enumerate(data):
-        # Calculate bar height (scaled to canvas height)
-        bar_height = (val / max_val) * HEIGHT
-
-        # Calculate percentage for color (relative to max)
-        pct = (val / max_val) * 100
-
-        # Get color
-        color = get_usage_color(pct)
-
-        # Calculate bar position
-        x = i * bar_width
-        y = HEIGHT - bar_height  # Draw from bottom
-
-        # Draw bar (PIL uses x0, y0, x1, y1)
-        draw.rectangle(
-            [(x, y), (x + bar_width, HEIGHT)],
-            fill=color
-        )
-
-    # Save image
+    img = render_chart_image(data)
     img.save(filename, 'PNG')
     print(f"Generated {filename} ({WIDTH}x{HEIGHT}px, {len(data)} bars)")
 
@@ -161,38 +240,7 @@ def create_network_chart_frame(data):
     Returns:
         PIL Image object
     """
-    # Create image with RGBA for transparency
-    img = Image.new('RGBA', (WIDTH, HEIGHT), TRANSPARENT)
-    draw = ImageDraw.Draw(img)
-
-    # Calculate bar width
-    bar_width = WIDTH / len(data)
-
-    # Find max value for scaling
-    max_val = max(data) if data else 1
-
-    # Draw each bar
-    for i, val in enumerate(data):
-        # Calculate bar height (scaled to canvas height)
-        bar_height = (val / max_val) * HEIGHT
-
-        # Calculate percentage for color (relative to max)
-        pct = (val / max_val) * 100
-
-        # Get color
-        color = get_usage_color(pct)
-
-        # Calculate bar position
-        x = i * bar_width
-        y = HEIGHT - bar_height  # Draw from bottom
-
-        # Draw bar (PIL uses x0, y0, x1, y1)
-        draw.rectangle(
-            [(x, y), (x + bar_width, HEIGHT)],
-            fill=color
-        )
-
-    return img
+    return render_chart_image(data)
 
 def generate_animated_chart(filename, num_frames=60):
     """
@@ -204,8 +252,8 @@ def generate_animated_chart(filename, num_frames=60):
     """
     print(f"Generating animated chart with {num_frames} frames...")
 
-    # Start with initial data
-    data = generate_varied_network_data(NUM_BARS)
+    model = NetworkActivityModel(load_reference_profile())
+    data = generate_varied_network_data(NUM_BARS, model=model)
 
     frames = []
 
@@ -214,13 +262,9 @@ def generate_animated_chart(filename, num_frames=60):
         frame = create_network_chart_frame(data)
         frames.append(frame)
 
-        # Shift data left and add new bar on right
+        # Shift data left and add a new value from the same evolving model.
         data = data[1:]  # Remove leftmost bar
-
-        # Generate new bar value using the same pattern generation
-        # We'll generate a small chunk and take the last value to maintain pattern
-        new_chunk = generate_varied_network_data(5)
-        data.append(new_chunk[-1])
+        data.append(model.next_value())
 
         if (frame_num + 1) % 10 == 0:
             print(f"Generated {frame_num + 1}/{num_frames} frames...")
