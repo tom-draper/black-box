@@ -15,6 +15,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use time::OffsetDateTime;
 
+use crate::event::Metadata;
 use crate::indexed_reader::IndexedReader;
 use crate::reader::LogReader;
 use crate::event::Event;
@@ -44,28 +45,44 @@ pub struct PlaybackQuery {
 /// Uses LogReader to read the most recent segment file (avoids old incompatible segments)
 pub async fn api_initial_state(
     reader: web::Data<LogReader>,
+    metadata: web::Data<std::sync::RwLock<Option<Metadata>>>,
 ) -> HttpResponse {
+    let shared_metadata = metadata
+        .read()
+        .ok()
+        .and_then(|guard| guard.clone());
+
     match reader.read_recent_segment() {
         Ok(events) => {
             // Try to find the most recent SystemMetrics with filesystems first
             for event in events.iter().rev() {
                 if let Event::SystemMetrics(m) = event {
                     if m.filesystems.is_some() {
-                        return HttpResponse::Ok().json(format_event_for_api(event));
+                        let merged = merge_system_metrics_with_metadata(m, shared_metadata.as_ref());
+                        return HttpResponse::Ok().json(format_event_for_api(&Event::SystemMetrics(merged)));
                     }
                 }
             }
 
             // If no event with filesystems, return the most recent SystemMetrics anyway
             for event in events.iter().rev() {
-                if let Event::SystemMetrics(_) = event {
-                    return HttpResponse::Ok().json(format_event_for_api(event));
+                if let Event::SystemMetrics(m) = event {
+                    let merged = merge_system_metrics_with_metadata(m, shared_metadata.as_ref());
+                    return HttpResponse::Ok().json(format_event_for_api(&Event::SystemMetrics(merged)));
                 }
+            }
+
+            if let Some(metadata) = shared_metadata.as_ref() {
+                return HttpResponse::Ok().json(format_metadata_as_initial_state(metadata));
             }
 
             HttpResponse::Ok().json(serde_json::json!({}))
         }
         Err(_) => {
+            if let Some(metadata) = shared_metadata.as_ref() {
+                return HttpResponse::Ok().json(format_metadata_as_initial_state(metadata));
+            }
+
             HttpResponse::Ok().json(serde_json::json!({}))
         }
     }
@@ -558,6 +575,96 @@ fn find_missing_metadata(reader: &IndexedReader, events: &[Event], end_time_ns: 
     }
 
     metadata
+}
+
+fn merge_system_metrics_with_metadata(
+    metrics: &crate::event::SystemMetrics,
+    metadata: Option<&Metadata>,
+) -> crate::event::SystemMetrics {
+    let Some(metadata) = metadata else {
+        return metrics.clone();
+    };
+
+    let mut merged = metrics.clone();
+    merged.kernel_version = merged.kernel_version.or_else(|| metadata.kernel_version.clone());
+    merged.cpu_model = merged.cpu_model.or_else(|| metadata.cpu_model.clone());
+    merged.cpu_mhz = merged.cpu_mhz.or(metadata.cpu_mhz);
+    merged.mem_total_bytes = merged.mem_total_bytes.or(metadata.mem_total_bytes);
+    merged.swap_total_bytes = merged.swap_total_bytes.or(metadata.swap_total_bytes);
+    merged.disk_total_bytes = merged.disk_total_bytes.or(metadata.disk_total_bytes);
+    merged.filesystems = merged.filesystems.or_else(|| metadata.filesystems.clone());
+    merged.net_interface = merged.net_interface.or_else(|| metadata.net_interface.clone());
+    merged.net_ip_address = merged.net_ip_address.or_else(|| metadata.net_ip_address.clone());
+    merged.net_gateway = merged.net_gateway.or_else(|| metadata.net_gateway.clone());
+    merged.net_dns = merged.net_dns.or_else(|| metadata.net_dns.clone());
+    merged.fans = merged.fans.or_else(|| metadata.fans.clone());
+    merged.logged_in_users = merged.logged_in_users.or_else(|| metadata.logged_in_users.clone());
+    merged
+}
+
+fn format_metadata_as_initial_state(metadata: &Metadata) -> serde_json::Value {
+    serde_json::json!({
+        "type": "SystemMetrics",
+        "timestamp": metadata.last_updated.unix_timestamp_nanos() / 1_000_000,
+        "kernel": metadata.kernel_version,
+        "cpu_model": metadata.cpu_model,
+        "cpu_mhz": metadata.cpu_mhz,
+        "system_uptime_seconds": 0,
+        "cpu": 0.0,
+        "per_core_cpu": [],
+        "mem": 0.0,
+        "mem_used": 0,
+        "mem_total": metadata.mem_total_bytes,
+        "swap": 0.0,
+        "swap_used": 0,
+        "swap_total": metadata.swap_total_bytes,
+        "load": 0.0,
+        "load5": 0.0,
+        "load15": 0.0,
+        "disk": 0.0,
+        "disk_used": 0,
+        "disk_total": metadata.disk_total_bytes,
+        "disk_read": 0,
+        "disk_write": 0,
+        "per_disk": [],
+        "filesystems": metadata.filesystems.as_ref().map(|fs_list| fs_list.iter().map(|fs| serde_json::json!({
+            "filesystem": fs.filesystem,
+            "mount_point": fs.mount_point,
+            "total_bytes": fs.total_bytes,
+            "used_bytes": fs.used_bytes,
+            "available_bytes": fs.available_bytes,
+        })).collect::<Vec<_>>()).unwrap_or_default(),
+        "users": metadata.logged_in_users.as_ref().map(|user_list| user_list.iter().map(|u| serde_json::json!({
+            "username": u.username,
+            "terminal": u.terminal,
+            "remote_host": u.remote_host,
+        })).collect::<Vec<_>>()).unwrap_or_default(),
+        "net_recv": 0,
+        "net_send": 0,
+        "net_recv_errors": 0,
+        "net_send_errors": 0,
+        "net_recv_drops": 0,
+        "net_send_drops": 0,
+        "net_interface": metadata.net_interface,
+        "net_ip": metadata.net_ip_address,
+        "net_gateway": metadata.net_gateway,
+        "net_dns": metadata.net_dns,
+        "tcp": 0,
+        "tcp_wait": 0,
+        "ctx_switches": 0,
+        "cpu_temp": metadata.temps.as_ref().and_then(|t| t.cpu_temp_celsius),
+        "per_core_temps": metadata.temps.as_ref().map(|t| t.per_core_temps.clone()).unwrap_or_default(),
+        "gpu_temp": metadata.temps.as_ref().and_then(|t| t.gpu_temp_celsius),
+        "mobo_temp": metadata.temps.as_ref().and_then(|t| t.motherboard_temp_celsius),
+        "fans": metadata.fans.as_ref().map(|fan_list| fan_list.iter().map(|f| serde_json::json!({
+            "label": f.label,
+            "rpm": f.rpm,
+        })).collect::<Vec<_>>()).unwrap_or_default(),
+        "gpu_freq": metadata.gpu.as_ref().and_then(|g| g.gpu_freq_mhz),
+        "gpu_mem_freq": metadata.gpu.as_ref().and_then(|g| g.mem_freq_mhz),
+        "gpu_temp2": metadata.gpu.as_ref().and_then(|g| g.gpu_temp_celsius),
+        "gpu_power": metadata.gpu.as_ref().and_then(|g| g.power_watts),
+    })
 }
 
 fn format_event_for_api(event: &Event) -> serde_json::Value {

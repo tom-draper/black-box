@@ -9,6 +9,7 @@ pub async fn health_check(
     reader: web::Data<LogReader>,
     start_time: web::Data<Instant>,
     config: web::Data<Config>,
+    data_dir: web::Data<String>,
 ) -> HttpResponse {
     // Calculate uptime
     let uptime_secs = start_time.elapsed().as_secs();
@@ -20,9 +21,13 @@ pub async fn health_check(
     };
 
     // Calculate storage usage
-    let storage_bytes_used = calculate_storage_usage();
+    let storage_bytes_used = calculate_storage_usage(data_dir.get_ref());
     let max_storage_bytes = config.server.max_storage_mb * 1024 * 1024;
-    let storage_percent = (storage_bytes_used as f64 / max_storage_bytes as f64) * 100.0;
+    let storage_percent = if max_storage_bytes > 0 {
+        (storage_bytes_used as f64 / max_storage_bytes as f64) * 100.0
+    } else {
+        0.0
+    };
 
     let health_status = json!({
         "status": "healthy",
@@ -37,9 +42,7 @@ pub async fn health_check(
     HttpResponse::Ok().json(health_status)
 }
 
-fn calculate_storage_usage() -> u64 {
-    let data_dir = "./data";
-
+fn calculate_storage_usage(data_dir: &str) -> u64 {
     match std::fs::read_dir(data_dir) {
         Ok(entries) => entries
             .filter_map(|entry| entry.ok())
