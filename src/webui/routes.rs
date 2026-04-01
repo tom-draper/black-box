@@ -781,17 +781,13 @@ async function fetchPlaybackInfo() {
 
         if(firstTimestamp && lastTimestamp) {
             const duration = lastTimestamp - firstTimestamp;
-            const hours = Math.floor(duration / 3600);
+            const days = Math.floor(duration / 86400);
+            const hours = Math.floor((duration % 86400) / 3600);
             const mins = Math.floor((duration % 3600) / 60);
 
-            // Show when the data is from
-            const lastDate = new Date(lastTimestamp * 1000);
-            const ageSeconds = Math.floor(Date.now() / 1000) - lastTimestamp;
-            const ageHours = Math.floor(ageSeconds / 3600);
-            const ageMins = Math.floor((ageSeconds % 3600) / 60);
-
-            document.getElementById('timeRange').textContent =
-                `${hours}h ${mins}m`;
+            document.getElementById('timeRange').textContent = days > 0
+                ? `${days}d ${hours}h`
+                : `${hours}h ${mins}m`;
         }
     } catch(e) {
         console.error('Failed to fetch playback info:', e);
