@@ -818,24 +818,28 @@ async function fetchPlaybackBuffer(startTimestamp, endTimestamp) {
         }
 
         // Store metadata if present
-        if (data.metadata) {
-            if(data.metadata.mem_total_bytes) cachedMemTotal = data.metadata.mem_total_bytes;
-            if(data.metadata.swap_total_bytes) cachedSwapTotal = data.metadata.swap_total_bytes;
-            if(data.metadata.disk_total_bytes) cachedDiskTotal = data.metadata.disk_total_bytes;
-            if(data.metadata.filesystems && data.metadata.filesystems.length > 0) cachedFilesystems = data.metadata.filesystems;
-            if(data.metadata.net_ip) cachedNetIp = data.metadata.net_ip;
-            if(data.metadata.net_gateway) cachedNetGateway = data.metadata.net_gateway;
-            if(data.metadata.net_dns) cachedNetDns = data.metadata.net_dns;
-            if(data.metadata.kernel_version) cachedKernel = data.metadata.kernel_version;
-            if(data.metadata.cpu_model) cachedCpuModel = data.metadata.cpu_model;
-            if(data.metadata.cpu_mhz) cachedCpuMhz = data.metadata.cpu_mhz;
-        }
+        applyPlaybackMetadata(data);
 
         return buffer;
     } catch(e) {
         console.error('Failed to fetch playback buffer:', e);
         return {};
     }
+}
+
+function applyPlaybackMetadata(data) {
+    if (!data || !data.metadata) return;
+
+    if(data.metadata.mem_total_bytes) cachedMemTotal = data.metadata.mem_total_bytes;
+    if(data.metadata.swap_total_bytes) cachedSwapTotal = data.metadata.swap_total_bytes;
+    if(data.metadata.disk_total_bytes) cachedDiskTotal = data.metadata.disk_total_bytes;
+    if(data.metadata.filesystems && data.metadata.filesystems.length > 0) cachedFilesystems = data.metadata.filesystems;
+    if(data.metadata.net_ip) cachedNetIp = data.metadata.net_ip;
+    if(data.metadata.net_gateway) cachedNetGateway = data.metadata.net_gateway;
+    if(data.metadata.net_dns) cachedNetDns = data.metadata.net_dns;
+    if(data.metadata.kernel_version) cachedKernel = data.metadata.kernel_version;
+    if(data.metadata.cpu_model) cachedCpuModel = data.metadata.cpu_model;
+    if(data.metadata.cpu_mhz) cachedCpuMhz = data.metadata.cpu_mhz;
 }
 
 // Process events for a specific second from the playback buffer
@@ -952,19 +956,33 @@ async function jumpToTimestamp(timestamp, incremental = false) {
     // Clean up prevValues cache to prevent memory leak
     cleanupPrevValues();
 
-    // Fetch both history and forward buffer in parallel for better performance
+    // Fetch history and forward buffer in a single request to reduce jump latency
     bufferStart = timestamp;
     bufferEnd = timestamp + BUFFER_SIZE;
 
-    const [historyData, forwardBuffer] = await Promise.all([
-        fetch(`/api/playback/events?timestamp=${timestamp}&count=60`).then(r => r.json()).catch(e => {
-            console.error('Failed to load history:', e);
-            return { events: [] };
-        }),
-        fetchPlaybackBuffer(bufferStart, bufferEnd)
-    ]);
+    const jumpData = await fetch(`/api/playback/jump?timestamp=${timestamp}&history_count=60&forward_seconds=${BUFFER_SIZE}`)
+        .then(r => r.json())
+        .catch(e => {
+            console.error('Failed to load playback jump:', e);
+            return {
+                history: { events: [] },
+                forward: { events: [] }
+            };
+        });
 
-    playbackBuffer = forwardBuffer;
+    const historyData = jumpData.history || { events: [] };
+    const forwardData = jumpData.forward || { events: [] };
+    playbackBuffer = {};
+    if (forwardData.events) {
+        forwardData.events.forEach(event => {
+            const second = Math.floor(event.timestamp / 1000);
+            if (!playbackBuffer[second]) {
+                playbackBuffer[second] = [];
+            }
+            playbackBuffer[second].push(event);
+        });
+    }
+    applyPlaybackMetadata(forwardData);
     lastPrefetchEnd = null; // Reset prefetch tracker for new buffer
 
     if(historyData.events && historyData.events.length > 0) {
@@ -1013,19 +1031,7 @@ async function jumpToTimestamp(timestamp, incremental = false) {
             netUpHistory.splice(0, netUpHistory.length - MAX_HISTORY);
         }
 
-        // Handle metadata
-        if(historyData.metadata) {
-            if(historyData.metadata.mem_total_bytes) cachedMemTotal = historyData.metadata.mem_total_bytes;
-            if(historyData.metadata.swap_total_bytes) cachedSwapTotal = historyData.metadata.swap_total_bytes;
-            if(historyData.metadata.disk_total_bytes) cachedDiskTotal = historyData.metadata.disk_total_bytes;
-            if(historyData.metadata.filesystems && historyData.metadata.filesystems.length > 0) cachedFilesystems = historyData.metadata.filesystems;
-            if(historyData.metadata.net_ip) cachedNetIp = historyData.metadata.net_ip;
-            if(historyData.metadata.net_gateway) cachedNetGateway = historyData.metadata.net_gateway;
-            if(historyData.metadata.net_dns) cachedNetDns = historyData.metadata.net_dns;
-            if(historyData.metadata.kernel_version) cachedKernel = historyData.metadata.kernel_version;
-            if(historyData.metadata.cpu_model) cachedCpuModel = historyData.metadata.cpu_model;
-            if(historyData.metadata.cpu_mhz) cachedCpuMhz = historyData.metadata.cpu_mhz;
-        }
+        applyPlaybackMetadata(historyData);
     }
 
     // Process current second from buffer
