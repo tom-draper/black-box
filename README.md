@@ -8,16 +8,16 @@
   <img width="830" height="10" alt="network_chart" src="https://github.com/user-attachments/assets/35499b1c-361d-4d32-8700-95db23476d39" />
 </p>
 
-Black Box is a small always-on recorder for Linux machines.
+<p align="center">A small always-on recorder for Linux machines.</p>
 
-It keeps a rolling history of what the machine was doing so you can go back after something odd happens and answer simple questions: what spiked, what started, who logged in, what changed, and what the box looked like around that time.
+Black Box keeps a rolling history of your system’s activity, so you can quickly answer questions like: what spiked, what started, who logged in, what changed, and how resources looked at any given moment.
 
-It is built for the situations where normal monitoring is not enough:
+It is built for the situations where normal monitoring falls short:
 
-- a process went rogue for a minute and then disappeared
-- an AI agent did something stupid and you want a timeline
-- a server slowed down overnight and you do not know why
-- you suspect tampering and want evidence left behind
+- a process went rogue for a minute and then vanishes
+- an AI agent misbehaves and you need a clear timeline
+- the server slows down overnight and the cause is a mystery
+- you suspect tampering and need an audit trail you can trust
 
 <p align="center">
   <img width="520" height="890" alt="Black Box screenshot" src="https://github.com/user-attachments/assets/78c9329b-ba8b-4ee9-ac66-bb3818661600" />
