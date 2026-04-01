@@ -12,7 +12,7 @@ use crate::event::Event;
 use crate::storage::{RecordHeader, MAGIC};
 
 const SEGMENT_SIZE: u64 = 8 * 1024 * 1024; // 8MB
-const DEFAULT_MAX_SEGMENTS: usize = 12; // 12 * 8MB = ~100MB total
+const FLUSH_INTERVAL_SECONDS: i64 = 30; // Flush every 30 seconds
 
 pub struct Recorder {
     dir: PathBuf,
@@ -22,13 +22,10 @@ pub struct Recorder {
     file: File,
     offset: u64,
     broadcast_tx: Option<SyncSender>,
+    last_flush: OffsetDateTime,
 }
 
 impl Recorder {
-    pub fn open_with_broadcast(dir: impl AsRef<Path>, broadcast_tx: SyncSender) -> Result<Self> {
-        Self::open_with_config(dir, DEFAULT_MAX_SEGMENTS, Some(broadcast_tx))
-    }
-
     pub fn open_with_config(
         dir: impl AsRef<Path>,
         max_segments: usize,
@@ -66,6 +63,7 @@ impl Recorder {
             file,
             offset,
             broadcast_tx,
+            last_flush: OffsetDateTime::now_utc(),
         })
     }
 
@@ -111,10 +109,15 @@ impl Recorder {
 
         self.file.write_all(&header_bytes)?;
         self.file.write_all(&payload)?;
-        // OS buffering is sufficient - no need to flush on every write
-        // Data will be flushed periodically by the OS and on segment rotation
 
         self.offset += record_len as u64;
+
+        // Periodic flush every 30 seconds to make recent data available for playback
+        let now = OffsetDateTime::now_utc();
+        if (now - self.last_flush).whole_seconds() >= FLUSH_INTERVAL_SECONDS {
+            self.file.flush()?;
+            self.last_flush = now;
+        }
 
         // Broadcast event to WebSocket clients (non-blocking)
         if let Some(tx) = &self.broadcast_tx {
@@ -145,6 +148,7 @@ impl Recorder {
 
         self.file.write_all(&MAGIC.to_le_bytes())?;
         self.file.flush()?;  // Ensure magic number is written to disk
+        self.last_flush = OffsetDateTime::now_utc();
         self.offset += 4;
 
         Ok(())

@@ -315,6 +315,7 @@ impl Metadata {
     }
 
     /// Check if metadata fields have changed (ignoring timestamp)
+    #[allow(dead_code)]
     pub fn has_changed(&self, other: &Metadata) -> bool {
         self.kernel_version != other.kernel_version
             || self.cpu_model != other.cpu_model

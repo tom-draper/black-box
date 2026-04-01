@@ -55,8 +55,55 @@ impl IndexBuilder {
         Ok(indexes)
     }
 
-    /// Build index for a single segment
+    /// Build index for a single segment (with persistent caching)
     fn build_segment_index(&self, segment_id: u64, path: &Path) -> Result<SegmentIndex> {
+        // Try to load cached index if it exists and is up-to-date
+        let index_path = path.with_extension("idx");
+        if let Ok(cached_index) = self.load_cached_index(&index_path, path) {
+            return Ok(cached_index);
+        }
+
+        // Cache miss or outdated - build index by scanning segment
+        let index = self.scan_and_build_index(segment_id, path)?;
+
+        // Save index to cache file (ignore errors - caching is optional)
+        let _ = self.save_index_to_cache(&index, &index_path);
+
+        Ok(index)
+    }
+
+    /// Try to load index from cache if it exists and is newer than the segment file
+    fn load_cached_index(&self, index_path: &Path, segment_path: &Path) -> Result<SegmentIndex> {
+        // Check if index file exists
+        if !index_path.exists() {
+            anyhow::bail!("Index file does not exist");
+        }
+
+        // Check if index is newer than segment (segment hasn't been modified)
+        let segment_mtime = fs::metadata(segment_path)?.modified()?;
+        let index_mtime = fs::metadata(index_path)?.modified()?;
+
+        if index_mtime < segment_mtime {
+            anyhow::bail!("Index file is outdated");
+        }
+
+        // Load and deserialize index
+        let index_data = fs::read(index_path)?;
+        let index: SegmentIndex = bincode::deserialize(&index_data)
+            .context("Failed to deserialize cached index")?;
+
+        Ok(index)
+    }
+
+    /// Save index to cache file
+    fn save_index_to_cache(&self, index: &SegmentIndex, index_path: &Path) -> Result<()> {
+        let index_data = bincode::serialize(index)?;
+        fs::write(index_path, index_data)?;
+        Ok(())
+    }
+
+    /// Scan segment and build index (the original expensive operation)
+    fn scan_and_build_index(&self, segment_id: u64, path: &Path) -> Result<SegmentIndex> {
         let mut file = File::open(path).context("Failed to open segment")?;
         let file_size = file.metadata()?.len();
 

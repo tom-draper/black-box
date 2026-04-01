@@ -3,7 +3,8 @@ use memmap2::Mmap;
 use std::{
     fs::File,
     io::Cursor,
-    path::Path,
+    path::{Path, PathBuf},
+    sync::RwLock,
 };
 
 use crate::event::Event;
@@ -12,16 +13,30 @@ use crate::storage::{RecordHeader, SegmentIndex, MAGIC};
 
 /// Efficient reader using memory-mapped I/O and block indexes
 pub struct IndexedReader {
-    indexes: Vec<SegmentIndex>,
+    dir: PathBuf,
+    indexes: RwLock<Vec<SegmentIndex>>,
 }
 
 impl IndexedReader {
     /// Create a new indexed reader and build indexes for all segments
     pub fn new(dir: impl AsRef<Path>) -> Result<Self> {
-        let builder = IndexBuilder::new(&dir);
+        let dir_path = dir.as_ref().to_path_buf();
+        let builder = IndexBuilder::new(&dir_path);
         let indexes = builder.build_index()?;
 
-        Ok(Self { indexes })
+        Ok(Self {
+            dir: dir_path,
+            indexes: RwLock::new(indexes),
+        })
+    }
+
+    /// Refresh the index to pick up new segments
+    pub fn refresh(&self) -> Result<()> {
+        let builder = IndexBuilder::new(&self.dir);
+        let new_indexes = builder.build_index()?;
+        let mut indexes = self.indexes.write().unwrap();
+        *indexes = new_indexes;
+        Ok(())
     }
 
     /// Read events in a time range efficiently using indexes
@@ -30,7 +45,8 @@ impl IndexedReader {
         start_ns: Option<i128>,
         end_ns: Option<i128>,
     ) -> Result<Vec<Event>> {
-        let relevant_segments = find_relevant_segments(&self.indexes, start_ns, end_ns);
+        let indexes = self.indexes.read().unwrap();
+        let relevant_segments = find_relevant_segments(&indexes, start_ns, end_ns);
 
         let mut events = Vec::new();
 
@@ -123,25 +139,27 @@ impl IndexedReader {
     }
 
     /// Get segment metadata (for debugging/UI)
-    pub fn get_segments(&self) -> &[SegmentIndex] {
-        &self.indexes
+    pub fn get_segments(&self) -> Vec<SegmentIndex> {
+        self.indexes.read().unwrap().clone()
     }
 
     /// Get time range covered by all segments
     pub fn get_time_range(&self) -> Option<(i128, i128)> {
-        if self.indexes.is_empty() {
+        let indexes = self.indexes.read().unwrap();
+        if indexes.is_empty() {
             return None;
         }
 
-        let first = self.indexes.first()?.first_timestamp_ns;
-        let last = self.indexes.last()?.last_timestamp_ns;
+        let first = indexes.first()?.first_timestamp_ns;
+        let last = indexes.last()?.last_timestamp_ns;
 
         Some((first, last))
     }
 
     /// Get total number of events (estimated from block counts)
     pub fn estimate_event_count(&self) -> u64 {
-        self.indexes
+        let indexes = self.indexes.read().unwrap();
+        indexes
             .iter()
             .flat_map(|seg| seg.blocks.iter())
             .map(|block| block.event_count as u64)

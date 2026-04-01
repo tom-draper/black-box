@@ -46,8 +46,15 @@ impl LogReader {
         let mut all_events = Vec::new();
 
         for (_id, path) in segments {
-            let events = self.read_segment(&path)?;
-            all_events.extend(events);
+            // Skip segments that fail to deserialize (e.g., corrupted or old format)
+            // This prevents one bad segment from breaking all playback
+            match self.read_segment(&path) {
+                Ok(events) => all_events.extend(events),
+                Err(e) => {
+                    eprintln!("Warning: Skipping segment {:?} due to error: {}", path, e);
+                    continue;
+                }
+            }
         }
 
         Ok(all_events)

@@ -19,30 +19,44 @@ pub async fn index() -> HttpResponse {
     <meta charset="utf-8">
     <title>Black Box</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="This server remembers what just happened.">
+    <meta property="og:description" content="This server remembers what just happened.">
     <meta name="theme-color" content="#ffffff">
-    <script src="https://cdn.tailwindcss.com"></script>
     <link rel="icon" type="image/svg+xml"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect x='10' y='10' width='80' height='80' fill='black'/%3E%3C/svg%3E">
     <style>
+        /*! tailwindcss v4.1.18 | MIT License | https://tailwindcss.com */
+@layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:inline))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-border-style:solid;--tw-font-weight:initial;--tw-shadow:0 0 #0000;--tw-shadow-color:initial;--tw-shadow-alpha:100%;--tw-inset-shadow:0 0 #0000;--tw-inset-shadow-color:initial;--tw-inset-shadow-alpha:100%;--tw-ring-color:initial;--tw-ring-shadow:0 0 #0000;--tw-inset-ring-color:initial;--tw-inset-ring-shadow:0 0 #0000;--tw-ring-inset:initial;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-offset-shadow:0 0 #0000;--tw-blur:initial;--tw-brightness:initial;--tw-contrast:initial;--tw-grayscale:initial;--tw-hue-rotate:initial;--tw-invert:initial;--tw-opacity:initial;--tw-saturate:initial;--tw-sepia:initial;--tw-drop-shadow:initial;--tw-drop-shadow-color:initial;--tw-drop-shadow-alpha:100%;--tw-drop-shadow-size:initial;--tw-backdrop-blur:initial;--tw-backdrop-brightness:initial;--tw-backdrop-contrast:initial;--tw-backdrop-grayscale:initial;--tw-backdrop-hue-rotate:initial;--tw-backdrop-invert:initial;--tw-backdrop-opacity:initial;--tw-backdrop-saturate:initial;--tw-backdrop-sepia:initial;--tw-duration:initial}}}@layer theme{:root,:host{--font-sans:ui-sans-serif,system-ui,sans-serif,"Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol","Noto Color Emoji";--font-mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;--color-red-500:oklch(63.7% .237 25.331);--color-red-600:oklch(57.7% .245 27.325);--color-yellow-500:oklch(79.5% .184 86.047);--color-yellow-600:oklch(68.1% .162 75.834);--color-green-500:oklch(72.3% .219 149.579);--color-green-600:oklch(62.7% .194 149.214);--color-blue-600:oklch(54.6% .245 262.881);--color-gray-50:oklch(98.5% .002 247.839);--color-gray-200:oklch(92.8% .006 264.531);--color-gray-300:oklch(87.2% .01 258.338);--color-gray-400:oklch(70.7% .022 261.325);--color-gray-500:oklch(55.1% .027 264.364);--color-gray-600:oklch(44.6% .03 256.802);--color-gray-700:oklch(37.3% .034 259.733);--color-gray-800:oklch(27.8% .033 256.848);--color-gray-900:oklch(21% .034 264.665);--color-white:#fff;--spacing:.25rem;--text-xs:.75rem;--text-xs--line-height:calc(1/.75);--font-weight-normal:400;--font-weight-medium:500;--font-weight-semibold:600;--default-transition-duration:.15s;--default-transition-timing-function:cubic-bezier(.4,0,.2,1);--default-font-family:var(--font-sans);--default-mono-font-family:var(--font-mono)}}@layer base{*,:after,:before,::backdrop{box-sizing:border-box;border:0 solid;margin:0;padding:0}::file-selector-button{box-sizing:border-box;border:0 solid;margin:0;padding:0}html,:host{-webkit-text-size-adjust:100%;tab-size:4;line-height:1.5;font-family:var(--default-font-family,ui-sans-serif,system-ui,sans-serif,"Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol","Noto Color Emoji");font-feature-settings:var(--default-font-feature-settings,normal);font-variation-settings:var(--default-font-variation-settings,normal);-webkit-tap-highlight-color:transparent}hr{height:0;color:inherit;border-top-width:1px}abbr:where([title]){-webkit-text-decoration:underline dotted;text-decoration:underline dotted}h1,h2,h3,h4,h5,h6{font-size:inherit;font-weight:inherit}a{color:inherit;-webkit-text-decoration:inherit;-webkit-text-decoration:inherit;-webkit-text-decoration:inherit;text-decoration:inherit}b,strong{font-weight:bolder}code,kbd,samp,pre{font-family:var(--default-mono-font-family,ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace);font-feature-settings:var(--default-mono-font-feature-settings,normal);font-variation-settings:var(--default-mono-font-variation-settings,normal);font-size:1em}small{font-size:80%}sub,sup{vertical-align:baseline;font-size:75%;line-height:0;position:relative}sub{bottom:-.25em}sup{top:-.5em}table{text-indent:0;border-color:inherit;border-collapse:collapse}:-moz-focusring{outline:auto}progress{vertical-align:baseline}summary{display:list-item}ol,ul,menu{list-style:none}img,svg,video,canvas,audio,iframe,embed,object{vertical-align:middle;display:block}img,video{max-width:100%;height:auto}button,input,select,optgroup,textarea{font:inherit;font-feature-settings:inherit;font-variation-settings:inherit;letter-spacing:inherit;color:inherit;opacity:1;background-color:#0000;border-radius:0}::file-selector-button{font:inherit;font-feature-settings:inherit;font-variation-settings:inherit;letter-spacing:inherit;color:inherit;opacity:1;background-color:#0000;border-radius:0}:where(select:is([multiple],[size])) optgroup{font-weight:bolder}:where(select:is([multiple],[size])) optgroup option{padding-inline-start:20px}::file-selector-button{margin-inline-end:4px}::placeholder{opacity:1}@supports (not ((-webkit-appearance:-apple-pay-button))) or (contain-intrinsic-size:1px){::placeholder{color:currentColor}@supports (color:color-mix(in lab, red, red)){::placeholder{color:color-mix(in oklab,currentcolor 50%,transparent)}}}textarea{resize:vertical}::-webkit-search-decoration{-webkit-appearance:none}::-webkit-date-and-time-value{min-height:1lh;text-align:inherit}::-webkit-datetime-edit{display:inline-flex}::-webkit-datetime-edit-fields-wrapper{padding:0}::-webkit-datetime-edit{padding-block:0}::-webkit-datetime-edit-year-field{padding-block:0}::-webkit-datetime-edit-month-field{padding-block:0}::-webkit-datetime-edit-day-field{padding-block:0}::-webkit-datetime-edit-hour-field{padding-block:0}::-webkit-datetime-edit-minute-field{padding-block:0}::-webkit-datetime-edit-second-field{padding-block:0}::-webkit-datetime-edit-millisecond-field{padding-block:0}::-webkit-datetime-edit-meridiem-field{padding-block:0}::-webkit-calendar-picker-indicator{line-height:1}:-moz-ui-invalid{box-shadow:none}button,input:where([type=button],[type=reset],[type=submit]){appearance:button}::file-selector-button{appearance:button}::-webkit-inner-spin-button{height:auto}::-webkit-outer-spin-button{height:auto}[hidden]:where(:not([hidden=until-found])){display:none!important}}@layer components;@layer utilities{.absolute{position:absolute}.fixed{position:fixed}.relative{position:relative}.static{position:static}.inset-0{inset:calc(var(--spacing)*0)}.top-0{top:calc(var(--spacing)*0)}.left-0{left:calc(var(--spacing)*0)}.z-10{z-index:10}.container{width:100%}@media (min-width:40rem){.container{max-width:40rem}}@media (min-width:48rem){.container{max-width:48rem}}@media (min-width:64rem){.container{max-width:64rem}}@media (min-width:80rem){.container{max-width:80rem}}@media (min-width:96rem){.container{max-width:96rem}}.mx-auto{margin-inline:auto}.mt-1{margin-top:calc(var(--spacing)*1)}.mr-1{margin-right:calc(var(--spacing)*1)}.ml-1{margin-left:calc(var(--spacing)*1)}.ml-2{margin-left:calc(var(--spacing)*2)}.ml-auto{margin-left:auto}.block{display:block}.contents{display:contents}.flex{display:flex}.grid{display:grid}.hidden{display:none}.inline{display:inline}.inline-block{display:inline-block}.table{display:table}.size-4{width:calc(var(--spacing)*4);height:calc(var(--spacing)*4)}.h-3{height:calc(var(--spacing)*3)}.h-4{height:calc(var(--spacing)*4)}.h-12{height:calc(var(--spacing)*12)}.h-full{height:100%}.max-h-96{max-height:calc(var(--spacing)*96)}.min-h-screen{min-height:100vh}.w-10{width:calc(var(--spacing)*10)}.w-16{width:calc(var(--spacing)*16)}.w-32{width:calc(var(--spacing)*32)}.w-full{width:100%}.flex-1{flex:1}.grow{flex-grow:1}.cursor-pointer{cursor:pointer}.resize{resize:both}.grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.flex-col{flex-direction:column}.items-center{align-items:center}.items-end{align-items:flex-end}.justify-between{justify-content:space-between}.justify-center{justify-content:center}.gap-1{gap:calc(var(--spacing)*1)}.gap-3{gap:calc(var(--spacing)*3)}.gap-4{gap:calc(var(--spacing)*4)}.gap-x-4{column-gap:calc(var(--spacing)*4)}.overflow-hidden{overflow:hidden}.overflow-visible{overflow:visible}.overflow-y-auto{overflow-y:auto}.rounded{border-radius:.25rem}.border{border-style:var(--tw-border-style);border-width:1px}.border-b{border-bottom-style:var(--tw-border-style);border-bottom-width:1px}.border-l{border-left-style:var(--tw-border-style);border-left-width:1px}.border-gray-200{border-color:var(--color-gray-200)}.border-gray-300{border-color:var(--color-gray-300)}.bg-gray-50{background-color:var(--color-gray-50)}.bg-gray-200{background-color:var(--color-gray-200)}.bg-green-500{background-color:var(--color-green-500)}.bg-red-500{background-color:var(--color-red-500)}.bg-white{background-color:var(--color-white)}.bg-yellow-500{background-color:var(--color-yellow-500)}.p-2{padding:calc(var(--spacing)*2)}.px-1{padding-inline:calc(var(--spacing)*1)}.px-2{padding-inline:calc(var(--spacing)*2)}.px-4{padding-inline:calc(var(--spacing)*4)}.px-5{padding-inline:calc(var(--spacing)*5)}.py-0{padding-block:calc(var(--spacing)*0)}.py-0\.5{padding-block:calc(var(--spacing)*.5)}.py-2{padding-block:calc(var(--spacing)*2)}.py-\[80px\]{padding-block:80px}.pr-2{padding-right:calc(var(--spacing)*2)}.text-left{text-align:left}.text-right{text-align:right}.align-middle{vertical-align:middle}.font-mono{font-family:var(--font-mono)}.text-xs{font-size:var(--text-xs);line-height:var(--tw-leading,var(--text-xs--line-height))}.font-medium{--tw-font-weight:var(--font-weight-medium);font-weight:var(--font-weight-medium)}.font-normal{--tw-font-weight:var(--font-weight-normal);font-weight:var(--font-weight-normal)}.font-semibold{--tw-font-weight:var(--font-weight-semibold);font-weight:var(--font-weight-semibold)}.break-all{word-break:break-all}.whitespace-nowrap{white-space:nowrap}.text-blue-600{color:var(--color-blue-600)}.text-gray-400{color:var(--color-gray-400)}.text-gray-500{color:var(--color-gray-500)}.text-gray-500\/60{color:#6a728299}@supports (color:color-mix(in lab, red, red)){.text-gray-500\/60{color:color-mix(in oklab,var(--color-gray-500)60%,transparent)}}.text-gray-600{color:var(--color-gray-600)}.text-gray-700{color:var(--color-gray-700)}.text-gray-800{color:var(--color-gray-800)}.text-gray-900{color:var(--color-gray-900)}.text-green-600{color:var(--color-green-600)}.text-red-600{color:var(--color-red-600)}.text-yellow-600{color:var(--color-yellow-600)}.ring{--tw-ring-shadow:var(--tw-ring-inset,)0 0 0 calc(1px + var(--tw-ring-offset-width))var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.blur{--tw-blur:blur(8px);filter:var(--tw-blur,)var(--tw-brightness,)var(--tw-contrast,)var(--tw-grayscale,)var(--tw-hue-rotate,)var(--tw-invert,)var(--tw-saturate,)var(--tw-sepia,)var(--tw-drop-shadow,)}.\!filter{filter:var(--tw-blur,)var(--tw-brightness,)var(--tw-contrast,)var(--tw-grayscale,)var(--tw-hue-rotate,)var(--tw-invert,)var(--tw-saturate,)var(--tw-sepia,)var(--tw-drop-shadow,)!important}.filter{filter:var(--tw-blur,)var(--tw-brightness,)var(--tw-contrast,)var(--tw-grayscale,)var(--tw-hue-rotate,)var(--tw-invert,)var(--tw-saturate,)var(--tw-sepia,)var(--tw-drop-shadow,)}.backdrop-filter{-webkit-backdrop-filter:var(--tw-backdrop-blur,)var(--tw-backdrop-brightness,)var(--tw-backdrop-contrast,)var(--tw-backdrop-grayscale,)var(--tw-backdrop-hue-rotate,)var(--tw-backdrop-invert,)var(--tw-backdrop-opacity,)var(--tw-backdrop-saturate,)var(--tw-backdrop-sepia,);backdrop-filter:var(--tw-backdrop-blur,)var(--tw-backdrop-brightness,)var(--tw-backdrop-contrast,)var(--tw-backdrop-grayscale,)var(--tw-backdrop-hue-rotate,)var(--tw-backdrop-invert,)var(--tw-backdrop-opacity,)var(--tw-backdrop-saturate,)var(--tw-backdrop-sepia,)}.transition{transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to,opacity,box-shadow,transform,translate,scale,rotate,filter,-webkit-backdrop-filter,backdrop-filter,display,content-visibility,overlay,pointer-events;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.transition-all{transition-property:all;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}.duration-100{--tw-duration:.1s;transition-duration:.1s}.duration-300{--tw-duration:.3s;transition-duration:.3s}@media (hover:hover){.hover\:text-gray-600:hover{color:var(--color-gray-600)}.hover\:text-gray-700:hover{color:var(--color-gray-700)}}.focus\:ring-1:focus{--tw-ring-shadow:var(--tw-ring-inset,)0 0 0 calc(1px + var(--tw-ring-offset-width))var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow),var(--tw-inset-ring-shadow),var(--tw-ring-offset-shadow),var(--tw-ring-shadow),var(--tw-shadow)}.focus\:ring-gray-400:focus{--tw-ring-color:var(--color-gray-400)}.focus\:outline-none:focus{--tw-outline-style:none;outline-style:none}}@property --tw-border-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-font-weight{syntax:"*";inherits:false}@property --tw-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-shadow-color{syntax:"*";inherits:false}@property --tw-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-inset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-shadow-color{syntax:"*";inherits:false}@property --tw-inset-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-ring-color{syntax:"*";inherits:false}@property --tw-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-ring-color{syntax:"*";inherits:false}@property --tw-inset-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-ring-inset{syntax:"*";inherits:false}@property --tw-ring-offset-width{syntax:"<length>";inherits:false;initial-value:0}@property --tw-ring-offset-color{syntax:"*";inherits:false;initial-value:#fff}@property --tw-ring-offset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-blur{syntax:"*";inherits:false}@property --tw-brightness{syntax:"*";inherits:false}@property --tw-contrast{syntax:"*";inherits:false}@property --tw-grayscale{syntax:"*";inherits:false}@property --tw-hue-rotate{syntax:"*";inherits:false}@property --tw-invert{syntax:"*";inherits:false}@property --tw-opacity{syntax:"*";inherits:false}@property --tw-saturate{syntax:"*";inherits:false}@property --tw-sepia{syntax:"*";inherits:false}@property --tw-drop-shadow{syntax:"*";inherits:false}@property --tw-drop-shadow-color{syntax:"*";inherits:false}@property --tw-drop-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-drop-shadow-size{syntax:"*";inherits:false}@property --tw-backdrop-blur{syntax:"*";inherits:false}@property --tw-backdrop-brightness{syntax:"*";inherits:false}@property --tw-backdrop-contrast{syntax:"*";inherits:false}@property --tw-backdrop-grayscale{syntax:"*";inherits:false}@property --tw-backdrop-hue-rotate{syntax:"*";inherits:false}@property --tw-backdrop-invert{syntax:"*";inherits:false}@property --tw-backdrop-opacity{syntax:"*";inherits:false}@property --tw-backdrop-saturate{syntax:"*";inherits:false}@property --tw-backdrop-sepia{syntax:"*";inherits:false}@property --tw-duration{syntax:"*";inherits:false}
+        /* Custom overrides */
         * { line-height: 1.5; }
-        body { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; }
+        body { font-size: 13px; }
         .max-w { max-width: 32rem; }
         th, td { padding: 0; }
         .backdrop-blur-10xl { -webkit-backdrop-filter: blur(1000px); backdrop-filter: blur(1000px); }
+        /* Loading spinner for timeline data fetch */
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .loading-spinner {
+            width: 12px;
+            height: 12px;
+            border: 2px solid rgba(156, 163, 175, 0.3);
+            border-top-color: #9ca3af;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
 <div class="max-w mx-auto px-4 py-[80px]">
     <div class="fixed w-full z-10 left-0 top-0 flex backdrop-blur-10xl">
         <div class="grow">
-            <canvas id="timelineChart" class="w-full h-12 cursor-pointer rounded" style="opacity:0;background:transparent;transition:opacity 0.3s ease-in;" title="Event density timeline"></canvas>
+            <canvas id="timelineChart" class="w-full h-12 cursor-pointer rounded" style="opacity:0;background:transparent;transition:opacity 0.3s ease-in;" title="Click to jump to a point in time"></canvas>
         </div>
         <div class="flex gap-3 px-5 py-2 text-gray-400 items-center">
             <svg id="rewindBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 hover:text-gray-600 transition duration-100 cursor-pointer" title="Rewind 1 minute">
                 <path d="M7.712 4.818A1.5 1.5 0 0 1 10 6.095v2.972c.104-.13.234-.248.389-.343l6.323-3.906A1.5 1.5 0 0 1 19 6.095v7.81a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.505 1.505 0 0 1-.389-.344v2.973a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.5 1.5 0 0 1 0-2.552l6.323-3.906Z" />
-            </svg>
-            <svg id="fastForwardBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 hover:text-gray-600 transition duration-100 cursor-pointer" title="Fast forward 1 minute">
-                <path d="M3.288 4.818A1.5 1.5 0 0 0 1 6.095v7.81a1.5 1.5 0 0 0 2.288 1.276l6.323-3.905c.155-.096.285-.213.389-.344v2.973a1.5 1.5 0 0 0 2.288 1.276l6.323-3.905a1.5 1.5 0 0 0 0-2.552l-6.323-3.906A1.5 1.5 0 0 0 10 6.095v2.972a1.506 1.506 0 0 0-.389-.343L3.288 4.818Z" />
             </svg>
             <svg id="pauseBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 hover:text-gray-600 transition duration-100 cursor-pointer" title="Pause (enable time-travel)">
                 <path d="M5.75 3a.75.75 0 0 0-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 0 0 .75-.75V3.75A.75.75 0 0 0 7.25 3h-1.5ZM12.75 3a.75.75 0 0 0-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 0 0 .75-.75V3.75a.75.75 0 0 0-.75-.75h-1.5Z" />
@@ -50,67 +64,91 @@ pub async fn index() -> HttpResponse {
             <svg id="playBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 text-gray-800 hover:text-gray-600 transition duration-100 cursor-pointer" style="display:none" title="Resume live view">
                 <path d="M6.3 2.84A1.5 1.5 0 0 0 4 4.11v11.78a1.5 1.5 0 0 0 2.3 1.27l9.344-5.891a1.5 1.5 0 0 0 0-2.538L6.3 2.841Z" />
             </svg>
+            <svg id="fastForwardBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 hover:text-gray-600 transition duration-100 cursor-pointer" title="Fast forward 1 minute">
+                <path d="M3.288 4.818A1.5 1.5 0 0 0 1 6.095v7.81a1.5 1.5 0 0 0 2.288 1.276l6.323-3.905c.155-.096.285-.213.389-.344v2.973a1.5 1.5 0 0 0 2.288 1.276l6.323-3.905a1.5 1.5 0 0 0 0-2.552l-6.323-3.906A1.5 1.5 0 0 0 10 6.095v2.972a1.506 1.506 0 0 0-.389-.343L3.288 4.818Z" />
+            </svg>
             <div class="border-l border-gray-300 h-4"></div>
-            <div class="flex flex-col text-xs">
-                <input type="datetime-local" id="timePicker" class="px-1 py-0.5 border border-gray-300 rounded text-gray-700 text-xs" style="display:none" title="Select a specific date and time to view" />
-                <span id="timeDisplay" class="cursor-pointer hover:text-gray-700" style="color:#ef4444;" title="Click to select time, Shift+Click to go Live">Disconnected</span>
-                <span id="timeRange" class="text-gray-400 text-xs whitespace-nowrap" title="Total time range of available historical data"></span>
+            <div class="flex flex-col text-xs items-end relative">
+                <input type="datetime-local" id="timePicker" class="absolute top-0 right-0 px-1 py-0.5 border border-gray-300 rounded text-gray-700 text-xs bg-white" style="display:none;z-index:20;" title="Select a specific date and time to view" />
+                <span id="timeDisplay" class="cursor-pointer hover:text-gray-700 whitespace-nowrap" style="color:#ef4444;" title="Click to select time, Shift+Click to go Live">Disconnected</span>
+                <span id="timeRange" class="text-gray-400 text-xs whitespace-nowrap" title="Total duration of recorded history"></span>
             </div>
         </div>
     </div>
     <div id="mainContent" style="display:none;">
     <div class="flex justify-between items-center">
-        <div class="text-gray-900 font-semibold" title="Black Box - Linux System Monitor">Black Box</div>
+        <div class="text-gray-900 font-semibold" title="Black Box">Black Box</div>
+        <div id="headerControlsWrapper">
+            <div id="headerControls" class="flex items-center gap-1 text-gray-400">
+                <div id="playbackTimeDisplay" class="flex items-center gap-1 text-xs mr-1" style="display:none;color:#f59e0b;" title="Viewing historical data at this time">
+                    <span id="playbackTime" style="display: none;"></span>
+                </div>
+                <div id="timelineLoadingSpinner" class="loading-spinner" style="display:none;"></div>
+                <svg id="headerRewindBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="hover:text-gray-600 transition duration-100 cursor-pointer" style="width:14px;height:14px" title="Rewind 1 minute">
+                    <path d="M7.712 4.818A1.5 1.5 0 0 1 10 6.095v2.972c.104-.13.234-.248.389-.343l6.323-3.906A1.5 1.5 0 0 1 19 6.095v7.81a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.505 1.505 0 0 1-.389-.344v2.973a1.5 1.5 0 0 1-2.288 1.276l-6.323-3.905a1.5 1.5 0 0 1 0-2.552l6.323-3.906Z" />
+                </svg>
+                <svg id="headerPauseBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="hover:text-gray-600 transition duration-100 cursor-pointer" style="width:14px;height:14px" title="Pause (enable time-travel)">
+                    <path d="M5.75 3a.75.75 0 0 0-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 0 0 .75-.75V3.75A.75.75 0 0 0 7.25 3h-1.5ZM12.75 3a.75.75 0 0 0-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 0 0 .75-.75V3.75a.75.75 0 0 0-.75-.75h-1.5Z" />
+                </svg>
+                <svg id="headerPlayBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="text-gray-800 hover:text-gray-600 transition duration-100 cursor-pointer" style="width:14px;height:14px;display:none" title="Resume live view">
+                    <path d="M6.3 2.84A1.5 1.5 0 0 0 4 4.11v11.78a1.5 1.5 0 0 0 2.3 1.27l9.344-5.891a1.5 1.5 0 0 0 0-2.538L6.3 2.841Z" />
+                </svg>
+                <svg id="headerFastForwardBtn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="hover:text-gray-600 transition duration-100 cursor-pointer" style="width:14px;height:14px" title="Fast forward 1 minute">
+                    <path d="M3.288 4.818A1.5 1.5 0 0 0 1 6.095v7.81a1.5 1.5 0 0 0 2.288 1.276l6.323-3.905c.155-.096.285-.213.389-.344v2.973a1.5 1.5 0 0 0 2.288 1.276l6.323-3.905a1.5 1.5 0 0 0 0-2.552l-6.323-3.906A1.5 1.5 0 0 0 10 6.095v2.972a1.506 1.506 0 0 0-.389-.343L3.288 4.818Z" />
+                </svg>
+            </div>
+            <span id="headerDisconnected" class="text-xs" style="display:none;color:#ef4444;">Disconnected</span>
+        </div>
     </div>
     <div class="flex justify-between text-gray-500">
-        <span id="datetime" title="Current system date and time"></span>
-        <span id="uptime" title="Time since system boot"></span>
+        <span id="datetime" title="System date and time"></span>
+        <span id="uptime" title="System uptime"></span>
     </div>
     <div></div>
     <div class="flex items-center text-gray-900 font-semibold">
         <span class="pr-2">System</span>
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
-    <div id="kernelRow" class="text-gray-500" title="Linux kernel version"></div>
-    <div id="cpuDetailsRow" class="text-gray-500" title="CPU model and frequency"></div>
+    <div id="kernelRow" class="text-gray-500" title="Kernel version"></div>
+    <div id="cpuDetailsRow" class="text-gray-500" title="CPU model and clock speed"></div>
     <div class="text-gray-500 flex items-center gap-4">
         <div class="flex-1 flex items-center gap-4">
-            <span class="w-10" title="Overall CPU usage across all cores">CPU</span>
+            <span class="w-10" title="Total CPU usage across all cores">CPU</span>
             <span class="relative flex-1 bg-gray-200" style="height:10px;border-radius:1px">
                 <span id="cpuBar" class="block h-full transition-all duration-300" style="width:0%;border-radius:1px"></span>
                 <span id="cpuPct" class="absolute inset-0 flex items-center justify-center text-gray-500/60 overflow-visible"></span>
             </span>
         </div>
-        <span id="loadVal" class="flex-1 text-right text-gray-500" title="System load average over 1, 5, and 15 minutes">Load average: --% --% --%</span>
+        <span id="loadVal" class="flex-1 text-right text-gray-500" title="1, 5, and 15 minute load averages">Load average: --% --% --%</span>
     </div>
-    <div id="cpuCoresContainer" class="grid grid-cols-2 gap-x-4" title="Per-core CPU usage"></div>
+    <div id="cpuCoresContainer" class="grid grid-cols-2 gap-x-4" title="Usage breakdown by CPU core"></div>
     <div class="flex items-center" style="height:19.5px;width:100%;">
-        <canvas id="cpuChart" style="height:10px;width:100%;" title="CPU usage over last 60 seconds"></canvas>
+        <canvas id="cpuChart" style="height:10px;width:100%;" title="CPU usage history (60s)"></canvas>
     </div>
     <div class="flex justify-between gap-4">
-        <div class="text-gray-500 flex-1" id="ramUsed" title="Amount of RAM currently in use"></div>
-        <div class="text-gray-500 flex-1 text-right" id="cpuTemp" title="CPU temperature sensor reading"></div>
+        <div class="text-gray-500 flex-1" id="ramUsed" title="RAM in use"></div>
+        <div class="text-gray-500 flex-1 text-right" id="cpuTemp" title="CPU package temperature"></div>
     </div>
     <div class="flex justify-between gap-4">
-        <div class="text-gray-500 flex-1" id="ramAvail" title="Amount of RAM available for use"></div>
-        <div class="text-gray-500 flex-1 text-right" id="moboTemp" title="Motherboard temperature or fan speed"></div>
+        <div class="text-gray-500 flex-1" id="ramAvail" title="RAM available"></div>
+        <div class="text-gray-500 flex-1 text-right" id="moboTemp" title="Motherboard temperature"></div>
     </div>
     <div class="flex items-center" style="height:19.5px;width:100%;">
-        <canvas id="memoryChart" style="height:10px;width:100%;" title="Memory usage over last 60 seconds"></canvas>
+        <canvas id="memoryChart" style="height:10px;width:100%;" title="Memory usage history (60s)"></canvas>
     </div>
 
     <div></div>
-    <div class="flex items-center text-gray-900 font-semibold" id="graphicsSection" style="display:none" title="GPU metrics (only shown if GPU detected)">
+    <div class="flex items-center text-gray-900 font-semibold" id="graphicsSection" style="display:none" title="GPU metrics">
         <span class="pr-2">Graphics</span>
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
     <div class="flex justify-between gap-4" id="graphicsRow1" style="display:none">
-        <div class="text-gray-500" id="gpuFreq" title="GPU core frequency"></div>
+        <div class="text-gray-500" id="gpuFreq" title="GPU clock speed"></div>
         <div class="text-gray-500 text-right" id="gpuTemp" title="GPU temperature"></div>
     </div>
     <div class="flex justify-between gap-4" id="graphicsRow2" style="display:none">
-        <div class="text-gray-500" id="memFreq" title="GPU memory frequency"></div>
-        <div class="text-gray-500 text-right" id="imgQuality" title="GPU power consumption"></div>
+        <div class="text-gray-500" id="memFreq" title="VRAM clock speed"></div>
+        <div class="text-gray-500 text-right" id="imgQuality" title="GPU power draw"></div>
     </div>
 
     <div></div>
@@ -121,50 +159,50 @@ pub async fn index() -> HttpResponse {
     <div class="text-gray-500 flex gap-4">
         <div class="flex-1">
             <div>
-                <span id="netName" title="Primary network interface"></span>
-                <span id="netSpeedDown" title="Download speed in bytes per second"></span>
+                <span id="netName" title="Network interface name"></span>
+                <span id="netSpeedDown" title="Current download rate"></span>
             </div>
             <div class="flex items-center" style="height:19.5px;width:100%;">
-                <canvas id="netDownChart" style="height:10px;width:100%;" title="Download speed over last 60 seconds"></canvas>
+                <canvas id="netDownChart" style="height:10px;width:100%;" title="Download rate history (60s)"></canvas>
             </div>
         </div>
         <div class="flex-1">
-            <div id="netSpeedUp" title="Upload speed in bytes per second"></div>
+            <div id="netSpeedUp" title="Current upload rate"></div>
             <div class="flex items-center" style="height:19.5px;width:100%;">
-                <canvas id="netUpChart" style="height:10px;width:100%;" title="Upload speed over last 60 seconds"></canvas>
+                <canvas id="netUpChart" style="height:10px;width:100%;" title="Upload rate history (60s)"></canvas>
             </div>
         </div>
     </div>
     <div class="text-gray-500 flex gap-4">
-        <span class="flex-1" id="netRxStats" title="Receive errors and dropped packets per second"></span>
-        <span class="flex-1" id="netTxStats" title="Transmit errors and dropped packets per second"></span>
+        <span class="flex-1" id="netRxStats" title="RX errors and drops per second"></span>
+        <span class="flex-1" id="netTxStats" title="TX errors and drops per second"></span>
     </div>
     <div class="grid grid-cols-2 gap-x-4 text-gray-500">
-        <div id="netAddress" title="IP address of primary interface"></div>
-        <div id="netTcp" title="Number of active TCP connections"></div>
-        <div id="netGateway" title="Default gateway IP address"></div>
-        <div id="netDns" title="DNS server IP address"></div>
+        <div id="netAddress" title="Interface IP address"></div>
+        <div id="netTcp" title="Active TCP connections"></div>
+        <div id="netGateway" title="Default gateway"></div>
+        <div id="netDns" title="DNS server"></div>
     </div>
 
     <div></div>
     <div class="flex items-center text-gray-900 font-semibold">
-        <span class="pr-2" title="Mounted filesystems and their usage">Storage</span>
+        <span class="pr-2" title="Mounted filesystem usage">Storage</span>
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
-    <div id="diskContainer" title="Filesystem mount points with usage bars"></div>
+    <div id="diskContainer" title="Disk space used per mount point"></div>
 
     <div></div>
-    <div class="flex items-center text-gray-900 font-semibold" id="diskIoSection" style="display:none" title="Per-device disk I/O statistics">
+    <div class="flex items-center text-gray-900 font-semibold" id="diskIoSection" style="display:none" title="Read/write throughput per block device">
         <span class="pr-2">Disk IO</span>
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
     <table class="w-full text-gray-500" id="diskIoTable" style="display:none">
         <thead><tr class="text-left text-gray-400">
-            <th class="font-normal" style="width:60px" title="Block device name">Device</th>
-            <th class="font-normal text-right" style="width:80px" title="Read speed in bytes per second">Read</th>
-            <th class="font-normal text-right" style="width:80px" title="Write speed in bytes per second">Write</th>
-            <th class="font-normal text-right" style="width:50px" title="Disk temperature in Celsius">Temp</th>
-            <th style="width:128px" title="I/O activity over last 60 seconds"></th>
+            <th class="font-normal" style="width:60px" title="Device">Device</th>
+            <th class="font-normal text-right" style="width:80px" title="Read throughput">Read</th>
+            <th class="font-normal text-right" style="width:80px" title="Write throughput">Write</th>
+            <th class="font-normal text-right" style="width:50px" title="Drive temperature">Temp</th>
+            <th style="width:128px" title="I/O activity (60s)"></th>
         </tr></thead>
         <tbody id="diskIoTableBody"></tbody>
     </table>
@@ -172,47 +210,47 @@ pub async fn index() -> HttpResponse {
     <div></div>
     <div class="flex items-center text-gray-900 font-semibold">
         <span class="pr-2">Processes</span>
-        <span id="procCount" class="text-gray-500 font-normal pr-2" title="Total process count and running count"></span>
+        <span id="procCount" class="text-gray-500 font-normal pr-2" title="Total and running process count"></span>
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
-    <table class="w-full text-gray-500" title="Top 5 processes by CPU usage">
+    <table class="w-full text-gray-500" title="Processes sorted by CPU usage">
         <thead><tr class="text-left text-gray-400">
             <th class="font-medium text-gray-700">Top CPU</th>
-            <th class="font-normal w-16" title="Process owner">User</th>
-            <th class="font-normal w-16" title="Process ID">PID</th>
-            <th class="font-normal w-16 text-right" title="CPU usage percentage">CPU%</th>
-            <th class="font-normal w-16 text-right" title="Memory usage percentage">MEM%</th>
+            <th class="font-normal w-16" title="Owner">User</th>
+            <th class="font-normal w-16" title="Process ID (PID)">PID</th>
+            <th class="font-normal w-16 text-right" title="CPU usage">CPU%</th>
+            <th class="font-normal w-16 text-right" title="Memory usage">MEM%</th>
         </tr></thead>
         <tbody id="topCpuTable"></tbody>
     </table>
-    <table class="w-full text-gray-500" title="Top 5 processes by memory usage">
+    <table class="w-full text-gray-500" title="Processes sorted by memory usage">
         <thead><tr class="text-left text-gray-400">
             <th class="font-medium text-gray-700">Top Memory</th>
-            <th class="font-normal w-16" title="Process owner">User</th>
-            <th class="font-normal w-16" title="Process ID">PID</th>
-            <th class="font-normal w-16 text-right" title="CPU usage percentage">CPU%</th>
-            <th class="font-normal w-16 text-right" title="Memory usage percentage">MEM%</th>
+            <th class="font-normal w-16" title="Owner">User</th>
+            <th class="font-normal w-16" title="Process ID (PID)">PID</th>
+            <th class="font-normal w-16 text-right" title="CPU usage">CPU%</th>
+            <th class="font-normal w-16 text-right" title="Memory usage">MEM%</th>
         </tr></thead>
         <tbody id="topMemTable"></tbody>
     </table>
 
     <div></div>
-    <div class="flex items-center text-gray-900 font-semibold" id="usersSection" style="display:none" title="Currently logged in users">
+    <div class="flex items-center text-gray-900 font-semibold" id="usersSection" style="display:none" title="Logged in users">
         <span class="pr-2">Users</span>
-        <span id="userCount" class="text-gray-500 font-normal pr-2" title="Number of logged in users"></span>
+        <span id="userCount" class="text-gray-500 font-normal pr-2" title="User count"></span>
         <div class="flex-1 border-b border-gray-200"></div>
     </div>
     <div id="usersContainer"></div>
 
     <div></div>
     <div class="flex items-center text-gray-900 font-semibold">
-        <span class="pr-2" title="Real-time event log for processes, security events, and anomalies">Events</span>
+        <span class="pr-2" title="Process, security, and system events">Events</span>
         <div class="flex-1 flex items-center">
             <div class="flex-1 border-b border-gray-200"></div>
             <div class="flex gap-1 items-center font-normal ml-2">
-                <input type="text" id="filterInput" placeholder="Search..." title="Filter events by text search"
+                <input type="text" id="filterInput" placeholder="Search..." title="Search events"
                     class="px-2 py-0 border border-gray-300 rounded text-gray-700 focus:outline-none focus:ring-1 focus:ring-gray-400" />
-                <select id="eventType" class="px-2 py-0 border border-gray-300 rounded text-gray-700 focus:outline-none" title="Filter by event type">
+                <select id="eventType" class="px-2 py-0 border border-gray-300 rounded text-gray-700 focus:outline-none" title="Show only this event type">
                     <option value="">All</option>
                     <option value="process">Process</option>
                     <option value="security">Security</option>
@@ -222,7 +260,7 @@ pub async fn index() -> HttpResponse {
             </div>
         </div>
     </div>
-    <div id="eventsContainer" class="font-mono max-h-96 p-2 overflow-y-auto bg-white border border-gray-200 mt-1" style="font-size:12px; min-height: 384px;" title="Scrollable event log (last 1000 events)"></div>
+    <div id="eventsContainer" class="font-mono max-h-96 p-2 overflow-y-auto bg-white border border-gray-200 rounded mt-1" style="font-size:12px; min-height: 384px;" title="Last 1000 events"></div>
     </div>
 </div>
 
@@ -350,6 +388,7 @@ function updateStyleIfChanged(id, prop, value) {
 
 // Time-travel state
 let playbackMode = false; // false = live, true = historical playback
+let isTimelineLoading = false; // Loading state for timeline data fetching
 let currentTimestamp = null; // Current playback timestamp (seconds)
 let firstTimestamp = null; // Earliest available data
 let lastTimestamp = null; // Latest available data
@@ -639,6 +678,9 @@ function drawTimeline() {
 document.getElementById('timelineChart').addEventListener('click', (e) => {
     if(!timelineData || !timelineData.timeline || timelineData.timeline.length === 0) return;
 
+    // Show loading spinner
+    showTimelineLoader();
+
     const canvas = document.getElementById('timelineChart');
     const rect = canvas.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
@@ -662,6 +704,7 @@ document.getElementById('timelineChart').addEventListener('click', (e) => {
     isPaused = true;
     document.getElementById('pauseBtn').style.display = 'none';
     document.getElementById('playBtn').style.display = 'block';
+    syncHeaderButtons();
 
     // Jump to the timestamp
     jumpToTimestamp(Math.floor(targetTimestamp));
@@ -696,7 +739,36 @@ document.getElementById('timelineChart').addEventListener('mousemove', (e) => {
         ? date.toTimeString().substring(0, 8)
         : formatDate(date);
 
-    canvas.title = `Jump to ${displayText}`;
+    // Find closest timeline data point
+    let closestPoint = null;
+    let minDiff = Infinity;
+    for(const point of timelineData.timeline) {
+        const diff = Math.abs(point.timestamp - hoverTimestamp);
+        if(diff < minDiff) {
+            minDiff = diff;
+            closestPoint = point;
+        }
+    }
+
+    // Build tooltip with metrics
+    let tooltip = `Jump to ${displayText}`;
+    if(closestPoint) {
+        const metrics = [];
+        if(closestPoint.count !== null && closestPoint.count !== undefined) {
+            metrics.push(`Events: ${closestPoint.count}`);
+        }
+        if(closestPoint.cpu !== null && closestPoint.cpu !== undefined) {
+            metrics.push(`CPU: ${closestPoint.cpu.toFixed(1)}%`);
+        }
+        if(closestPoint.mem !== null && closestPoint.mem !== undefined) {
+            metrics.push(`Memory: ${closestPoint.mem.toFixed(1)}%`);
+        }
+        if(metrics.length > 0) {
+            tooltip += '\n' + metrics.join(', ');
+        }
+    }
+
+    canvas.title = tooltip;
 });
 
 // Fetch available time range on load
@@ -718,13 +790,8 @@ async function fetchPlaybackInfo() {
             const ageHours = Math.floor(ageSeconds / 3600);
             const ageMins = Math.floor((ageSeconds % 3600) / 60);
 
-            if(ageSeconds < 60) {
-                document.getElementById('timeRange').textContent =
-                    `${hours}h ${mins}m (current)`;
-            } else {
-                document.getElementById('timeRange').textContent =
-                    `${hours}h ${mins}m (${ageHours}h ${ageMins}m old)`;
-            }
+            document.getElementById('timeRange').textContent =
+                `${hours}h ${mins}m`;
         }
     } catch(e) {
         console.error('Failed to fetch playback info:', e);
@@ -809,10 +876,28 @@ function processSecondFromBuffer(timestamp) {
     drawTimeline();
 }
 
+// Show/hide timeline loading spinner
+function showTimelineLoader() {
+    isTimelineLoading = true;
+    const spinner = document.getElementById('timelineLoadingSpinner');
+    if (spinner) spinner.style.display = 'inline-block';
+}
+
+function hideTimelineLoader() {
+    isTimelineLoading = false;
+    const spinner = document.getElementById('timelineLoadingSpinner');
+    if (spinner) spinner.style.display = 'none';
+}
+
 // Jump to a specific timestamp and load data
 // Now uses chunked buffering for efficient playback
 async function jumpToTimestamp(timestamp, incremental = false) {
     if(!timestamp) return;
+
+    // Ensure spinner is visible (in case called directly)
+    if (!incremental) {
+        showTimelineLoader();
+    }
 
     currentTimestamp = timestamp;
     playbackMode = true;
@@ -822,6 +907,13 @@ async function jumpToTimestamp(timestamp, incremental = false) {
     document.getElementById('timeDisplay').textContent =
         '⏱ ' + dt.toLocaleTimeString();
     document.getElementById('timeDisplay').style.color = '#f59e0b'; // amber color
+
+    // Update playback time display
+    document.getElementById('playbackTimeDisplay').style.display = 'flex';
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const formatted = `${days[dt.getDay()]}, ${dt.getDate()} ${months[dt.getMonth()]} ${dt.getFullYear()}, ${dt.toLocaleTimeString()}`;
+    document.getElementById('playbackTime').textContent = '⏱ ' + formatted;
 
     // Check if timestamp is in current buffer
     const inBuffer = bufferStart && bufferEnd && timestamp >= bufferStart && timestamp <= bufferEnd;
@@ -860,140 +952,109 @@ async function jumpToTimestamp(timestamp, incremental = false) {
     // Clean up prevValues cache to prevent memory leak
     cleanupPrevValues();
 
-    // Fetch past 60 seconds for chart history using the count API
-    try {
-        const historyUrl = `/api/playback/events?timestamp=${timestamp}&count=60`;
-        const historyResp = await fetch(historyUrl);
-        const historyData = await historyResp.json();
-
-
-        if(historyData.events && historyData.events.length > 0) {
-            const timeDisplay = document.getElementById('timeDisplay');
-            timeDisplay.title = 'Click to select time, Shift+Click to go Live';
-
-            // Build chart history from past events (only SystemMetrics)
-            historyData.events.forEach(event => {
-                if(event.type === 'SystemMetrics') {
-                    cpuHistory.push(event.cpu || 0);
-                    memoryHistory.push(event.mem || 0);
-                    netDownHistory.push(event.net_recv || 0);
-                    netUpHistory.push(event.net_send || 0);
-                }
-            });
-
-            // Trim to MAX_HISTORY
-            if(cpuHistory.length > MAX_HISTORY) {
-                cpuHistory.splice(0, cpuHistory.length - MAX_HISTORY);
-                memoryHistory.splice(0, memoryHistory.length - MAX_HISTORY);
-                netDownHistory.splice(0, netDownHistory.length - MAX_HISTORY);
-                netUpHistory.splice(0, netUpHistory.length - MAX_HISTORY);
-            }
-
-            // Handle metadata
-            if(historyData.metadata) {
-                if(historyData.metadata.mem_total_bytes) cachedMemTotal = historyData.metadata.mem_total_bytes;
-                if(historyData.metadata.swap_total_bytes) cachedSwapTotal = historyData.metadata.swap_total_bytes;
-                if(historyData.metadata.disk_total_bytes) cachedDiskTotal = historyData.metadata.disk_total_bytes;
-                if(historyData.metadata.filesystems && historyData.metadata.filesystems.length > 0) cachedFilesystems = historyData.metadata.filesystems;
-                if(historyData.metadata.net_ip) cachedNetIp = historyData.metadata.net_ip;
-                if(historyData.metadata.net_gateway) cachedNetGateway = historyData.metadata.net_gateway;
-                if(historyData.metadata.net_dns) cachedNetDns = historyData.metadata.net_dns;
-                if(historyData.metadata.kernel_version) cachedKernel = historyData.metadata.kernel_version;
-                if(historyData.metadata.cpu_model) cachedCpuModel = historyData.metadata.cpu_model;
-                if(historyData.metadata.cpu_mhz) cachedCpuMhz = historyData.metadata.cpu_mhz;
-            }
-        }
-    } catch(e) {
-        console.error('Failed to load history:', e);
-    }
-
-    // Fetch forward buffer for playback (60 seconds ahead)
+    // Fetch both history and forward buffer in parallel for better performance
     bufferStart = timestamp;
     bufferEnd = timestamp + BUFFER_SIZE;
-    playbackBuffer = await fetchPlaybackBuffer(bufferStart, bufferEnd);
+
+    const [historyData, forwardBuffer] = await Promise.all([
+        fetch(`/api/playback/events?timestamp=${timestamp}&count=60`).then(r => r.json()).catch(e => {
+            console.error('Failed to load history:', e);
+            return { events: [] };
+        }),
+        fetchPlaybackBuffer(bufferStart, bufferEnd)
+    ]);
+
+    playbackBuffer = forwardBuffer;
     lastPrefetchEnd = null; // Reset prefetch tracker for new buffer
+
+    if(historyData.events && historyData.events.length > 0) {
+        const timeDisplay = document.getElementById('timeDisplay');
+        timeDisplay.title = 'Click to select time, Shift+Click to go Live';
+
+        // Batch event log updates for better DOM performance
+        const fragment = document.createDocumentFragment();
+        const filter = document.getElementById('filterInput').value.toLowerCase();
+        const evType = document.getElementById('eventType').value;
+
+        // Build chart history from past events and prepare event log entries
+        historyData.events.forEach(event => {
+            if(event.type === 'SystemMetrics') {
+                cpuHistory.push(event.cpu || 0);
+                memoryHistory.push(event.mem || 0);
+                netDownHistory.push(event.net_recv || 0);
+                netUpHistory.push(event.net_send || 0);
+            } else if(event.type !== 'ProcessSnapshot') {
+                // Add to buffer for deduplication tracking
+                const eventKey = `${event.timestamp}_${event.type}_${event.pid || event.path || event.message || ''}`;
+                if(!eventKeys.has(eventKey)) {
+                    eventBuffer.push(event);
+                    eventKeys.add(eventKey);
+
+                    // Create DOM entry if it matches filter
+                    if(matchesFilter(event, filter, evType)) {
+                        const entry = createEventEntry(event);
+                        if(entry) fragment.appendChild(entry);
+                    }
+                }
+            }
+        });
+
+        // Append all events at once (single DOM operation)
+        if(fragment.children.length > 0) {
+            const container = document.getElementById('eventsContainer');
+            container.appendChild(fragment);
+        }
+
+        // Trim to MAX_HISTORY
+        if(cpuHistory.length > MAX_HISTORY) {
+            cpuHistory.splice(0, cpuHistory.length - MAX_HISTORY);
+            memoryHistory.splice(0, memoryHistory.length - MAX_HISTORY);
+            netDownHistory.splice(0, netDownHistory.length - MAX_HISTORY);
+            netUpHistory.splice(0, netUpHistory.length - MAX_HISTORY);
+        }
+
+        // Handle metadata
+        if(historyData.metadata) {
+            if(historyData.metadata.mem_total_bytes) cachedMemTotal = historyData.metadata.mem_total_bytes;
+            if(historyData.metadata.swap_total_bytes) cachedSwapTotal = historyData.metadata.swap_total_bytes;
+            if(historyData.metadata.disk_total_bytes) cachedDiskTotal = historyData.metadata.disk_total_bytes;
+            if(historyData.metadata.filesystems && historyData.metadata.filesystems.length > 0) cachedFilesystems = historyData.metadata.filesystems;
+            if(historyData.metadata.net_ip) cachedNetIp = historyData.metadata.net_ip;
+            if(historyData.metadata.net_gateway) cachedNetGateway = historyData.metadata.net_gateway;
+            if(historyData.metadata.net_dns) cachedNetDns = historyData.metadata.net_dns;
+            if(historyData.metadata.kernel_version) cachedKernel = historyData.metadata.kernel_version;
+            if(historyData.metadata.cpu_model) cachedCpuModel = historyData.metadata.cpu_model;
+            if(historyData.metadata.cpu_mhz) cachedCpuMhz = historyData.metadata.cpu_mhz;
+        }
+    }
 
     // Process current second from buffer
     processSecondFromBuffer(timestamp);
 
     // Update timeline visualization
     drawTimeline();
+
+    // Hide loading spinner
+    hideTimelineLoader();
 }
 
 // Rewind button
-document.getElementById('rewindBtn').addEventListener('click', () => {
-    // Stop auto-playback
-    if(playbackInterval) {
-        clearTimeout(playbackInterval);
-        playbackInterval = null;
-    }
-
-    if(!playbackMode) {
-        // First click: pause and go back 1 minute from now
-        const now = Math.floor(Date.now() / 1000);
-        jumpToTimestamp(now - REWIND_STEP);
-        isPaused = true;
-        document.getElementById('pauseBtn').style.display = 'none';
-        document.getElementById('playBtn').style.display = 'block';
-    } else {
-        // Go back 1 minute from current position
-        const newTime = Math.max(firstTimestamp || 0, currentTimestamp - REWIND_STEP);
-        jumpToTimestamp(newTime);
-        // Show pause button after seeking
-        isPaused = true;
-        document.getElementById('pauseBtn').style.display = 'none';
-        document.getElementById('playBtn').style.display = 'block';
-    }
-});
+document.getElementById('rewindBtn').addEventListener('click', doRewind);
 
 // Fast-forward button
-document.getElementById('fastForwardBtn').addEventListener('click', () => {
-    if(!playbackMode) return; // Only works in playback mode
-
-    // Stop auto-playback
-    if(playbackInterval) {
-        clearTimeout(playbackInterval);
-        playbackInterval = null;
-    }
-
-    // Advance forward by REWIND_STEP, but don't go past the latest available timestamp (or now)
-    const target = currentTimestamp + REWIND_STEP;
-    const maxTime = lastTimestamp || Math.floor(Date.now() / 1000);
-    const newTime = Math.min(target, maxTime);
-    jumpToTimestamp(newTime);
-    // Show pause button after seeking
-    isPaused = true;
-    document.getElementById('pauseBtn').style.display = 'none';
-    document.getElementById('playBtn').style.display = 'block';
-});
+document.getElementById('fastForwardBtn').addEventListener('click', doFastForward);
 
 // Pause button
-document.getElementById('pauseBtn').addEventListener('click', () => {
-    isPaused = true;
-    document.getElementById('pauseBtn').style.display = 'none';
-    document.getElementById('playBtn').style.display = 'block';
+document.getElementById('pauseBtn').addEventListener('click', doPause);
 
-    // Stop auto-playback if running
-    if(playbackInterval) {
-        clearTimeout(playbackInterval);
-        playbackInterval = null;
-    }
-
-    // Enter playback mode at current time
-    if(!playbackMode) {
-        const now = Math.floor(Date.now() / 1000);
-        currentTimestamp = now;
-        playbackMode = true;
-    }
-});
-
-// Play button - either resume playback or return to live
-document.getElementById('playBtn').addEventListener('click', async () => {
+// Shared play logic
+async function doPlay() {
     if(playbackMode && currentTimestamp) {
         // Resume playback: auto-advance through history
         isPaused = false;
         document.getElementById('playBtn').style.display = 'none';
         document.getElementById('pauseBtn').style.display = 'block';
+        syncHeaderButtons();
 
         // Calculate a reasonable "live" threshold - within 10 seconds of now
         const liveThreshold = Math.floor(Date.now() / 1000) - 10;
@@ -1023,7 +1084,10 @@ document.getElementById('playBtn').addEventListener('click', async () => {
         // Not in playback mode, just unpause
         goLive();
     }
-});
+}
+
+// Play button - either resume playback or return to live
+document.getElementById('playBtn').addEventListener('click', doPlay);
 
 // Return to live mode
 function goLive() {
@@ -1038,6 +1102,9 @@ function goLive() {
 
     document.getElementById('playBtn').style.display = 'none';
     document.getElementById('pauseBtn').style.display = 'block';
+
+    // Hide playback time display when going live
+    document.getElementById('playbackTimeDisplay').style.display = 'none';
 
     // Show "Live" or "Disconnected" based on connection status
     const isConnected = ws && ws.readyState === 1;
@@ -1063,7 +1130,94 @@ function goLive() {
 
     // Update timeline visualization (clears vertical line)
     drawTimeline();
+
+    // Update header controls visibility
+    updateConnectionStatus();
 }
+
+// Sync header play/pause buttons with main buttons
+function syncHeaderButtons() {
+    const mainPauseVisible = document.getElementById('pauseBtn').style.display !== 'none';
+    document.getElementById('headerPauseBtn').style.display = mainPauseVisible ? 'inline' : 'none';
+    document.getElementById('headerPlayBtn').style.display = mainPauseVisible ? 'none' : 'inline';
+}
+
+// Shared rewind logic
+function doRewind() {
+    // Show loading spinner
+    showTimelineLoader();
+
+    if(playbackInterval) {
+        clearTimeout(playbackInterval);
+        playbackInterval = null;
+    }
+    if(!playbackMode) {
+        const now = Math.floor(Date.now() / 1000);
+        jumpToTimestamp(now - REWIND_STEP);
+        isPaused = true;
+        document.getElementById('pauseBtn').style.display = 'none';
+        document.getElementById('playBtn').style.display = 'block';
+        syncHeaderButtons();
+    } else {
+        const newTime = Math.max(firstTimestamp || 0, currentTimestamp - REWIND_STEP);
+        jumpToTimestamp(newTime);
+        isPaused = true;
+        document.getElementById('pauseBtn').style.display = 'none';
+        document.getElementById('playBtn').style.display = 'block';
+        syncHeaderButtons();
+    }
+}
+
+// Shared fast-forward logic
+function doFastForward() {
+    if(!playbackMode) return;
+
+    // Show loading spinner
+    showTimelineLoader();
+
+    if(playbackInterval) {
+        clearTimeout(playbackInterval);
+        playbackInterval = null;
+    }
+    const target = currentTimestamp + REWIND_STEP;
+    const maxTime = lastTimestamp || Math.floor(Date.now() / 1000);
+    const newTime = Math.min(target, maxTime);
+    jumpToTimestamp(newTime);
+    isPaused = true;
+    document.getElementById('pauseBtn').style.display = 'none';
+    document.getElementById('playBtn').style.display = 'block';
+    syncHeaderButtons();
+}
+
+// Shared pause logic
+function doPause() {
+    isPaused = true;
+    document.getElementById('pauseBtn').style.display = 'none';
+    document.getElementById('playBtn').style.display = 'block';
+    syncHeaderButtons();
+    if(playbackInterval) {
+        clearTimeout(playbackInterval);
+        playbackInterval = null;
+    }
+    if(!playbackMode) {
+        const now = Math.floor(Date.now() / 1000);
+        currentTimestamp = now;
+        playbackMode = true;
+        // Update playback time display when pausing from live mode
+        const dt = new Date(now * 1000);
+        document.getElementById('playbackTimeDisplay').style.display = 'flex';
+        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const formatted = `${days[dt.getDay()]}, ${dt.getDate()} ${months[dt.getMonth()]} ${dt.getFullYear()}, ${dt.toLocaleTimeString()}`;
+        document.getElementById('playbackTime').textContent = '⏱ ' + formatted;
+    }
+}
+
+// Header button handlers
+document.getElementById('headerRewindBtn').addEventListener('click', doRewind);
+document.getElementById('headerFastForwardBtn').addEventListener('click', doFastForward);
+document.getElementById('headerPauseBtn').addEventListener('click', doPause);
+document.getElementById('headerPlayBtn').addEventListener('click', doPlay);
 
 // Time display click - either go live or open picker
 document.getElementById('timeDisplay').addEventListener('click', (e) => {
@@ -1103,6 +1257,7 @@ document.getElementById('timePicker').addEventListener('change', (e) => {
     isPaused = true;
     document.getElementById('pauseBtn').style.display = 'none';
     document.getElementById('playBtn').style.display = 'block';
+    syncHeaderButtons();
 });
 
 document.getElementById('timePicker').addEventListener('blur', (e) => {
@@ -1156,7 +1311,7 @@ function updateBar(id, pct, container, labelText, rightLabel){
 function updateCoreBar(id, pct, container, coreNum){
     let el = document.getElementById(id);
     if(!el){
-        container.insertAdjacentHTML('beforeend', `<div class="text-gray-500 flex items-center gap-4" id="row_${id}">
+        container.insertAdjacentHTML('beforeend', `<div class="text-gray-500 flex items-center gap-4" id="row_${id}" title="CPU usage for core ${coreNum}">
             <span class="w-10">CPU${coreNum}</span>
             <span class="relative flex-1 bg-gray-200" style="height:10px;border-radius:1px">
                 <span id="${id}" class="block h-full transition-all duration-300" style="width:0%;border-radius:1px"></span>
@@ -1522,7 +1677,7 @@ function render(){
         });
         updateTextIfChanged('cpuPct', e.cpu.toFixed(1) + '%');
 
-        const loadText = `Load average: ${e.load?.toFixed(2) || '--'}% ${e.load5?.toFixed(2) || '--'}% ${e.load15?.toFixed(2) || '--'}%`;
+        const loadText = `Load average: ${e.load?.toFixed(2) || '--'} ${e.load5?.toFixed(2) || '--'} ${e.load15?.toFixed(2) || '--'}`;
         updateTextIfChanged('loadVal', loadText);
 
         // Update CPU history
@@ -1701,6 +1856,17 @@ function updateProcs(event){
 
 function updateConnectionStatus(){
     const isConnected = ws && ws.readyState === 1;
+
+    // Update header controls visibility
+    const headerControls = document.getElementById('headerControls');
+    const headerDisconnected = document.getElementById('headerDisconnected');
+    if(!isConnected && !playbackMode) {
+        headerControls.style.display = 'none';
+        headerDisconnected.style.display = 'inline';
+    } else {
+        headerControls.style.display = 'flex';
+        headerDisconnected.style.display = 'none';
+    }
 
     // Update timeDisplay to show "Disconnected" when not connected (only in live mode)
     if(!playbackMode) {

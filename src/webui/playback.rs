@@ -74,7 +74,7 @@ pub async fn api_initial_state(
 /// Mode 1: Fetch last N SystemMetrics before a timestamp
 /// If `before` is true, fetch events strictly BEFORE the timestamp (for progressive loading)
 async fn fetch_events_by_count(
-    log_reader: &LogReader,
+    _log_reader: &LogReader,
     indexed_reader: &Arc<IndexedReader>,
     timestamp: i64,
     target_count: usize,
@@ -88,10 +88,6 @@ async fn fetch_events_by_count(
         ((timestamp + 1) as i128) * 1_000_000_000  // Include events at timestamp
     };
 
-    // Determine if this is recent data (use LogReader) or historical (use IndexedReader)
-    let now_ns = OffsetDateTime::now_utc().unix_timestamp_nanos();
-    let use_log_reader = (now_ns - end_ns) < (5 * 60 * 1_000_000_000i128); // Last 5 minutes
-
     // Progressive search: start with 90 seconds, expand if needed
     let search_durations = vec![90, 120, 180, 300]; // seconds to search back
 
@@ -101,19 +97,8 @@ async fn fetch_events_by_count(
     for duration in search_durations {
         search_start_ns = end_ns - ((duration as i128) * 1_000_000_000);
 
-        let events_result = if use_log_reader {
-            log_reader.read_all_events()
-                .map(|all| {
-                    all.into_iter()
-                        .filter(|e| {
-                            let ts = e.timestamp().unix_timestamp_nanos();
-                            ts >= search_start_ns && ts <= end_ns
-                        })
-                        .collect()
-                })
-        } else {
-            indexed_reader.read_time_range(Some(search_start_ns), Some(end_ns))
-        };
+        // Always use IndexedReader - it efficiently reads only relevant segments
+        let events_result = indexed_reader.read_time_range(Some(search_start_ns), Some(end_ns));
 
         match events_result {
             Ok(events) => {
@@ -128,6 +113,7 @@ async fn fetch_events_by_count(
                 all_events = events;
             }
             Err(e) => {
+                eprintln!("ERROR in fetch_events_by_count: Failed to read events: {}", e);
                 return HttpResponse::InternalServerError().json(serde_json::json!({
                     "error": format!("Failed to read events: {}", e),
                 }));
@@ -141,7 +127,6 @@ async fn fetch_events_by_count(
         .cloned()
         .collect();
 
-    let metrics_count = system_metrics.len();
     let selected_metrics: Vec<Event> = if system_metrics.len() > target_count {
         system_metrics.split_off(system_metrics.len() - target_count)
     } else {
@@ -182,10 +167,6 @@ async fn fetch_events_by_count(
         .map(format_event_for_api)
         .collect();
 
-    let system_metrics_count = final_events.iter()
-        .filter(|e| matches!(e, Event::SystemMetrics(_)))
-        .count();
-
     HttpResponse::Ok().json(serde_json::json!({
         "count": formatted_events.len(),
         "events": formatted_events,
@@ -197,8 +178,9 @@ async fn fetch_events_by_count(
 pub async fn api_playback_info(
     reader: web::Data<Arc<IndexedReader>>,
 ) -> HttpResponse {
-    // NOTE: Index is built at startup, so this reflects segments at that time
-    // TODO: Implement automatic index refresh for new segments
+    // Refresh index to pick up any new segments written since server start
+    let _ = reader.refresh();
+
     if let Some((first_ns, last_ns)) = reader.get_time_range() {
         let first_secs = (first_ns / 1_000_000_000) as i64;
         let last_secs = (last_ns / 1_000_000_000) as i64;
@@ -228,6 +210,9 @@ pub async fn api_playback_info(
 pub async fn api_timeline(
     reader: web::Data<Arc<IndexedReader>>,
 ) -> HttpResponse {
+    // Refresh index to pick up any new segments written since server start
+    let _ = reader.refresh();
+
     if let Some((first_ns, last_ns)) = reader.get_time_range() {
         // Read all events (this might be expensive for very large datasets)
         match reader.read_time_range(Some(first_ns), Some(last_ns)) {
@@ -343,6 +328,9 @@ pub async fn api_playback_events(
     indexed_reader: web::Data<Arc<IndexedReader>>,
     query: web::Query<PlaybackQuery>,
 ) -> HttpResponse {
+    // Refresh index to pick up any new segments written since server start
+    let _ = indexed_reader.refresh();
+
     // Mode 1: Count-based query (timestamp + count)
     if let Some(timestamp) = query.timestamp {
         let target_count = query.count.unwrap_or(60);
@@ -356,40 +344,15 @@ pub async fn api_playback_events(
 
 /// Mode 2: Fetch all events in a time range (start to end)
 async fn fetch_events_by_range(
-    log_reader: &LogReader,
+    _log_reader: &LogReader,
     indexed_reader: &Arc<IndexedReader>,
     query: &PlaybackQuery,
 ) -> HttpResponse {
     let start_ns = query.start_timestamp.map(|s| (s as i128) * 1_000_000_000);
     let end_ns = query.end_timestamp.map(|s| (s as i128) * 1_000_000_000);
 
-    // Try LogReader first for recent data (always up-to-date), fallback to IndexedReader for historical
-    let now_ns = OffsetDateTime::now_utc().unix_timestamp_nanos();
-    let use_log_reader = match end_ns {
-        Some(end) => (now_ns - end) < (5 * 60 * 1_000_000_000i128), // Last 5 minutes
-        None => true, // No end time specified, assume recent
-    };
-
-    let events_result = if use_log_reader {
-        log_reader.read_all_events()
-            .map(|all_events| {
-                // Filter by time range
-                all_events.into_iter()
-                    .filter(|e| {
-                        let ts = e.timestamp().unix_timestamp_nanos();
-                        if let Some(start) = start_ns {
-                            if ts < start { return false; }
-                        }
-                        if let Some(end) = end_ns {
-                            if ts > end { return false; }
-                        }
-                        true
-                    })
-                    .collect()
-            })
-    } else {
-        indexed_reader.read_time_range(start_ns, end_ns)
-    };
+    // Always use IndexedReader - it efficiently reads only relevant segments
+    let events_result = indexed_reader.read_time_range(start_ns, end_ns);
 
     match events_result {
         Ok(mut events) => {
@@ -430,8 +393,6 @@ async fn fetch_events_by_range(
                 .map(format_event_for_api)
                 .collect();
 
-            let system_metrics_count = events.iter().filter(|e| matches!(e, crate::event::Event::SystemMetrics(_))).count();
-
             HttpResponse::Ok().json(serde_json::json!({
                 "count": formatted_events.len(),
                 "events": formatted_events,
@@ -439,9 +400,12 @@ async fn fetch_events_by_range(
                 "metadata": metadata,
             }))
         }
-        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
-            "error": format!("Failed to read events: {}", e),
-        })),
+        Err(e) => {
+            eprintln!("ERROR in fetch_events_by_range: Failed to read events: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("Failed to read events: {}", e),
+            }))
+        }
     }
 }
 
@@ -489,8 +453,9 @@ fn find_missing_metadata(reader: &IndexedReader, events: &[Event], end_time_ns: 
         return serde_json::json!({});
     }
 
-    // Look back up to 24 hours to find missing fields
-    let lookback_start = end_time_ns - (24 * 3600 * 1_000_000_000i128);
+    // Look back up to 1 hour to find missing fields (reduced from 24h for performance)
+    // Metadata fields (kernel, CPU model, etc.) are typically available within minutes
+    let lookback_start = end_time_ns - (3600 * 1_000_000_000i128);
     let lookback_events = reader.read_time_range(Some(lookback_start), Some(end_time_ns))
         .unwrap_or_default();
 

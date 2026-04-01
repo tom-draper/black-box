@@ -4,73 +4,40 @@
 
 <h1 align="center">Black Box</h1>
 
+<p align="center" height="10">
+  <img width="830" height="10" alt="network_chart" src="https://github.com/user-attachments/assets/28889f14-6a8a-46b2-b885-3088d07facb6" />
+</p>
+
 A lightweight, always-on forensics recorder for Linux servers. Captures system metrics, process events, and security events to help with post-incident analysis.
 
 Ideal for tracking malicious activity, monitoring AI agents, and reviewing errors.
 
+<p align="center">
+  <img width="520" height="890" alt="Screenshot_20260131_105934" src="https://github.com/user-attachments/assets/78c9329b-ba8b-4ee9-ac66-bb3818661600" />
+</p>
+
 ## Key Features
 
-- Always-on monitoring with minimal overhead
-- Real-time streaming with a web UI
-- Time-travel playback - query historical events by timestamp or time range
-- Tamper protection modes (append-only or immutable log files)
-- Timeline visualization with event density and resource usage
-- Export events to JSON for external analysis
-- Remote monitoring with health checks and auto-export
-- Fixed disk usage (ring buffer)
-- HTTP Basic Authentication for security
-- Systemd integration
-- Single static binary
-
-<p align="center">
-  <img width="520" height="890" alt="Screenshot_20260131_105934" src="https://github.com/user-attachments/assets/ff1de6b3-2961-4464-93e1-b7c485efc7c4" />
-</p>
+- Continuous monitoring with very low overhead  
+- Real-time streaming via a built-in web UI  
+- Time-travel playback to query historical events by timestamp or range  
+- Tamper-resistant modes (append-only or fully immutable logs)  
+- Timeline view showing event density and resource usage  
+- JSON export for external analysis  
+- Optional remote monitoring with health checks and auto-export  
+- Fixed disk usage using a ring buffer  
+- HTTP Basic Auth support
+- Systemd integration  
+- Ships as a single static binary  
 
 ## What It Captures
 
-### System Metrics (1s interval)
-- CPU, Memory, Swap usage (overall and per-core)
-- Disk I/O and space (per-disk metrics and temperatures)
-- Network I/O (bytes sent/received, errors, drops)
-- Load average (1m, 5m, 15m)
-- TCP connections and time-wait states
-- Context switches
-- Hardware monitoring (CPU/GPU/motherboard temperatures, fan speeds)
-- GPU metrics (frequency, memory frequency, power consumption)
-- Filesystem usage (per mount point)
-- System uptime
-
-### Process Intelligence
-- Lifecycle events (start/exit/stuck/zombie)
-- Full command lines and working directories
-- Process metadata (PID, PPID, user, UID, exit codes)
-- Thread counts and resource usage
-- Memory and CPU usage per process
-- Top resource consumers snapshot (every 5s)
-- Total and running process counts
-
-### Security Events (5s interval)
-- Logged-in users
-- SSH authentication (success/failure)
-- Sudo commands
-- Failed login attempts
-- Brute force detection (5+ failures in 5 minutes)
-- Port scan detection (20+ ports from same IP)
-
-### File System Events
-- File modifications, creations, deletions
-- File paths and sizes
-
-### Anomaly Detection
-- CPU spike (>80%)
-- Memory spike (>90%)
-- Swap usage (>50%)
-- Disk full (>90%)
-- Disk I/O spike (>100MB/s)
-- Network spike (>500MB/s)
-- Context switch spike (>50k/s)
-- Process stuck in D state
-- Thread/connection leaks
+- **System metrics** (1s): per-core CPU, memory, swap, disk I/O (per disk + temps), network (throughput, TCP connections, errors/drops), load averages, temperatures, GPU stats, and per-mount filesystem usage  
+- **System info**: kernel version, CPU model, and hardware details (captured at startup and hourly)  
+- **Process events**: lifecycle tracking (start/exit/stuck), command lines, resource usage, and top consumers  
+- **Security events** (5s): user logins, SSH activity, sudo usage, and basic brute-force/port-scan detection  
+- **Filesystem events**: file creates, deletes, and modifications with paths and sizes  
+- **Anomaly detection**: resource spikes, disk-full warnings, stuck processes, and thread/connection leaks  
 
 ## Usage
 
@@ -80,7 +47,7 @@ Ideal for tracking malicious activity, monitoring AI agents, and reviewing error
 cargo build --release
 ```
 
-Binary will be at `target/release/black-box` (single file, ~3.5MB).
+Binary will be at `target/release/black-box`.
 
 ### Start Black Box
 
@@ -89,12 +56,20 @@ Binary will be at `target/release/black-box` (single file, ~3.5MB).
 ```
 
 This starts:
-- Data recording to `./data/` directory
-- Web UI at `http://localhost:8080` with authentication (default: admin/admin)
-- Events API at `http://localhost:8080/api/events` with authentication (default: admin/admin)
-- Health endpoint at `http://localhost:8080/health`
+- Data recording to `./data/` directory by default (configurable, see Configuration section)
+- Web UI at `http://localhost:8080`
+- WebSocket/REST API for events, playback, and monitoring
 
-On first run, Black Box will create a `config.toml` file with default credentials. If using authentication, change the default password immediately. See configuration details below.
+On first run, Black Box will generate a `config.toml` file with default credentials. If using authentication, change the default password immediately. See configuration details below.
+
+**Note:** For production deployments, configure a dedicated data directory like `/var/lib/black-box/` or `~/.local/share/black-box/` in `config.toml`.
+
+**Monitor Mode (Lightweight):**
+```bash
+./black-box monitor
+```
+
+Runs data collection only, without the web UI or API endpoints. Use this for minimal overhead when you only need recording.
 
 #### Command Line Options
 
@@ -102,8 +77,8 @@ On first run, Black Box will create a `config.toml` file with default credential
 # Run with custom port
 ./black-box --port 9000
 
-# Run in headless mode (no web UI, data collection only)
-./black-box --headless
+# Run in monitor mode (lightweight, no web UI)
+./black-box monitor
 
 # Run with tamper protection (append-only files)
 ./black-box --protected
@@ -111,17 +86,15 @@ On first run, Black Box will create a `config.toml` file with default credential
 # Run with hardened protection (immutable until stop)
 ./black-box --hardened
 
-# Export recorded events to JSON
+# Export events (supports --compress, --format csv, --event-type filter)
 ./black-box export -o events.json
+./black-box export --start "2026-01-15T10:00:00Z" --end "2026-01-15T11:00:00Z" -o range.json
 
-# Export events from a time range
-./black-box export --start "2026-01-15T10:00:00Z" --end "2026-01-15T11:00:00Z"
-
-# Check status of running instance
+# Check status (supports --format json, --username/--password for auth)
 ./black-box status
 
-# Monitor health and auto-export on failure
-./black-box monitor --interval 60 --export-dir ./backups
+# Watch remote instance (health checks + auto-export on failure)
+./black-box watch http://server:8080 --interval 60 --export-dir ./backups
 
 # Generate systemd service
 ./black-box systemd generate
@@ -129,7 +102,7 @@ On first run, Black Box will create a `config.toml` file with default credential
 
 ## Configuration
 
-Black Box uses a `config.toml` file for settings. On first run, it creates a default config:
+Black Box uses a `config.toml` file for settings. On first run, it generates a default config:
 
 ```toml
 [auth]
@@ -139,7 +112,8 @@ password_hash = "$2b$12$..."  # bcrypt hash of "admin"
 
 [server]
 port = 8080
-data_dir = "./data"
+data_dir = "./data"  # For development. Use "/var/lib/black-box" for production
+max_storage_mb = 100  # Maximum storage size in MB (default: 100MB)
 ```
 
 ### Changing the Password
@@ -164,6 +138,46 @@ To disable authentication (not recommended for production):
 [auth]
 enabled = false
 ```
+
+### Data Directory
+
+**Default:** `./data` (current directory)
+
+For production deployments, use a dedicated system directory:
+
+```toml
+[server]
+port = 8080
+data_dir = "/var/lib/black-box"  # Recommended for production
+max_storage_mb = 100
+```
+
+**Recommended locations:**
+- **Production (systemd service):** `/var/lib/black-box/`
+- **User service:** `~/.local/share/black-box/`
+- **Development/testing:** `./data` (default)
+
+Create the directory and set permissions:
+```bash
+sudo mkdir -p /var/lib/black-box
+sudo chown black-box:black-box /var/lib/black-box  # If running as dedicated user
+```
+
+### Configuring Storage Size
+
+The ring buffer size can be adjusted based on your needs:
+
+```toml
+[server]
+max_storage_mb = 100  # Default: 100MB
+
+# Examples:
+# max_storage_mb = 50   # Low disk usage (50MB)
+# max_storage_mb = 500  # Medium retention (500MB)
+# max_storage_mb = 1000 # High retention (1GB)
+```
+
+Storage is organized into 8MB segments. The system keeps approximately `max_storage_mb / 8` segments in a ring buffer, automatically deleting the oldest when the limit is reached.
 
 ## Protection Modes
 
@@ -204,213 +218,11 @@ Most features work as a regular user. For enhanced capabilities:
 - Uses `chattr` filesystem attributes to prevent log tampering
 - Requires ext4 or similar filesystem with extended attribute support
 
-## API Endpoints
-
-
-
-### `/api/events` - REST API
-Get recent events (last 1000) with optional filtering.
-
-```bash
-# All events
-curl -u admin:admin http://localhost:8080/api/events
-
-# Filter by type
-curl -u admin:admin "http://localhost:8080/api/events?type=anomaly"
-
-# Search events
-curl -u admin:admin "http://localhost:8080/api/events?filter=ssh"
-```
-
-### `/ws` - WebSocket Stream
-Real-time event streaming via WebSocket. Requires Basic Auth in the connection request.
-
-```javascript
-const ws = new WebSocket('ws://localhost:8080/ws');
-ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    console.log('Event:', data);
-};
-```
-
-### `/api/playback/info` - Playback Time Range
-Get the time range of available historical data.
-
-```bash
-curl -u admin:admin http://localhost:8080/api/playback/info
-```
-
-Response:
-```json
-{
-  "first_timestamp": 1705320000,
-  "last_timestamp": 1705323600,
-  "first_timestamp_iso": "2026-01-15T10:00:00Z",
-  "last_timestamp_iso": "2026-01-15T11:00:00Z",
-  "segment_count": 5,
-  "estimated_event_count": 3600
-}
-```
-
-### `/api/playback/events` - Historical Events
-Query historical events with two modes:
-
-**Mode 1: Count-based** - Get last N SystemMetrics before a timestamp:
-```bash
-# Get last 60 SystemMetrics before timestamp
-curl -u admin:admin "http://localhost:8080/api/playback/events?timestamp=1705323600&count=60"
-
-# Get events BEFORE timestamp (for progressive loading)
-curl -u admin:admin "http://localhost:8080/api/playback/events?timestamp=1705323600&count=60&before=true"
-```
-
-### `/health` - Health Check
-Returns JSON with system status, uptime, event count, and storage usage.
-
-
-
-**Mode 2: Range-based** - Get all events in a time range:
-```bash
-# Get all events between start and end (up to limit)
-curl -u admin:admin "http://localhost:8080/api/playback/events?start=1705320000&end=1705323600&limit=1000"
-```
-
-### `/api/initial-state` - Initial State
-Get the most recent complete SystemMetrics for page initialization.
-
-```bash
-curl -u admin:admin http://localhost:8080/api/initial-state
-```
-
-### `/api/timeline` - Event Timeline
-Get event density timeline with CPU and memory usage for visualization.
-
-```bash
-curl -u admin:admin http://localhost:8080/api/timeline
-```
-
-Response includes per-minute buckets with event counts and average CPU/memory usage.
-
-```bash
-curl -u admin:admin http://localhost:8080/health
-```
-
-Response:
-```json
-{
-  "status": "healthy",
-  "uptime_seconds": 3600,
-  "event_count": 15000,
-  "storage_bytes_used": 52428800,
-  "storage_bytes_max": 104857600,
-  "storage_percent": "50.00",
-  "timestamp": "2026-01-15T10:30:00Z"
-}
-```
-
-## CLI Commands
-
-### Export Events
-
-Export recorded events to JSON for external analysis or archival:
-
-```bash
-# Export all events to JSON file
-./black-box export -o events.json
-
-# Export with compression
-./black-box export -o events.json.gz --compress
-
-# Export specific time range
-./black-box export \
-  --start "2026-01-15T10:00:00Z" \
-  --end "2026-01-15T11:00:00Z" \
-  -o events.json
-
-# Export only specific event type
-./black-box export --event-type SystemMetrics -o metrics.json
-
-# Export from custom data directory
-./black-box export --data-dir /path/to/data -o events.json
-```
-
-### Monitor Health
-
-Monitor a Black Box instance and automatically export data on failure:
-
-```bash
-# Monitor with 60 second intervals
-./black-box monitor --interval 60 --export-dir ./backups
-
-# Monitor with authentication
-./black-box monitor \
-  --url http://server:8080 \
-  --username admin \
-  --password secret \
-  --export-dir ./backups
-
-# Continuous backup (export on every check, not just failures)
-./black-box monitor --continuous --export-dir ./backups
-```
-
-### Check Status
-
-Query the health endpoint and display status:
-
-```bash
-# Check local instance
-./black-box status
-
-# Check remote instance with authentication
-./black-box status \
-  --url http://server:8080 \
-  --username admin \
-  --password secret
-
-# JSON output for scripting
-./black-box status --format json
-```
-
-## Binary Format
-
-```
-Segment file:
-[MAGIC: 0xBB10_0001 (4 bytes)]
-[Record Header: timestamp_ns (16 bytes) + payload_len (4 bytes)]
-[Payload: bincode-serialized Event]
-[Record Header...]
-[Payload...]
-...
-```
-
-## Use Cases
-
-- Post-incident forensics ("what happened before the crash?")
-- Performance debugging ("why was the server slow at 3am?")
-- Security investigation ("who logged in and what did they do?")
-- Capacity planning (historical resource usage)
-- Detecting stuck database queries, memory leaks, connection leaks
-
-## Example Incident Response
-
-Server crashed at 3am. You have Black Box running.
-
-1. Open web UI: `http://localhost:8080` (login with your credentials)
-2. Click the timeline at the top to see event density and resource usage over time
-3. Use the time picker or rewind/fast-forward buttons to navigate to 3am
-4. Look for anomalies flagged automatically (red highlights)
-5. Check what processes were running at that time (Process events)
-6. Review security events (SSH logins, sudo usage)
-7. See exact resource usage before crash (System metrics with CPU/memory graphs)
-8. Export data via `/api/playback/events` for external analysis
-
-All data is timestamped and correlated - you can travel back to any point in time within the retention window.
-
 ## Contributions
 
 Contributions, issues and feature requests are welcome.
 
-- Fork it (https://github.com/tom-draper/nginx-analytics)
+- Fork it (https://github.com/tom-draper/black-box)
 - Create your feature branch (`git checkout -b my-new-feature`)
 - Commit your changes (`git commit -am 'Add some feature'`)
 - Push to the branch (`git push origin my-new-feature`)
