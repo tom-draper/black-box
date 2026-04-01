@@ -175,13 +175,17 @@ It is not trying to replace a full observability stack, SIEM, or centralized log
 
 ## Contributions
 
-Issues and pull requests are welcome.
+Contributions, issues and feature requests are welcome.
 
-Repository: https://github.com/tom-draper/black-box
+- Fork it (https://github.com/tom-draper/black-box)
+- Create your feature branch (`git checkout -b my-new-feature`)
+- Commit your changes (`git commit -am 'Add some feature'`)
+- Push to the branch (`git push origin my-new-feature`)
+- Create a new Pull Request
 
 ---
 
-If you find the project useful:
+If you find value in my work, consider supporting me.
 
 Buy Me a Coffee: https://www.buymeacoffee.com/tomdraper  
 PayPal: https://www.paypal.com/paypalme/tomdraper
