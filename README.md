@@ -4,11 +4,13 @@
 
 <h1 align="center">Black Box</h1>
 
+
+
+<p align="center">A small always-on recorder for Linux machines.</p>
+
 <p align="center" height="10">
   <img width="830" height="10" alt="network_chart" src="https://github.com/user-attachments/assets/35499b1c-361d-4d32-8700-95db23476d39" />
 </p>
-
-<p align="center">A small always-on recorder for Linux machines.</p>
 
 Black Box keeps a rolling history of your system’s activity, so you can quickly answer questions like: what spiked, what started, who logged in, what changed, and how resources looked at any given moment.
 
