@@ -7,12 +7,9 @@ use std::thread;
 use std::time::Duration;
 
 #[derive(Deserialize)]
-#[allow(dead_code)]
 struct HealthResponse {
     uptime_seconds: u64,
     event_count: usize,
-    storage_bytes_used: u64,
-    storage_bytes_max: u64,
     storage_percent: f32,
 }
 
@@ -47,14 +44,8 @@ pub fn run_monitor(
     loop {
         let check_time = chrono::Utc::now();
 
-        // Build request with optional auth
-        let mut req = client.get(&health_url);
-        if let (Some(u), Some(p)) = (&username, &password) {
-            req = req.basic_auth(u, Some(p));
-        }
-
         // Check health
-        match req.send() {
+        match super::with_auth(client.get(&health_url), &username, &password).send() {
             Ok(response) if response.status().is_success() => {
                 match response.json::<HealthResponse>() {
                     Ok(health) => {
@@ -141,13 +132,9 @@ fn perform_export(
 
     eprintln!("  Exporting to: {}", filepath.display());
 
-    // Build request with optional auth
-    let mut req = client.get(api_url);
-    if let (Some(u), Some(p)) = (username, password) {
-        req = req.basic_auth(u, Some(p));
-    }
-
-    let response = req.send().context("Failed to fetch events from API")?;
+    let response = super::with_auth(client.get(api_url), username, password)
+        .send()
+        .context("Failed to fetch events from API")?;
 
     if !response.status().is_success() {
         anyhow::bail!("API returned status {}", response.status());

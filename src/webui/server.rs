@@ -24,10 +24,7 @@ pub async fn start_server(
         Ok(r) => Arc::new(r),
         Err(e) => {
             eprintln!("Warning: Failed to build index: {}. Time-travel features disabled.", e);
-            Arc::new(IndexedReader::new(&data_dir).unwrap_or_else(|_| {
-                // Create empty reader as fallback
-                IndexedReader::new(std::env::temp_dir()).unwrap()
-            }))
+            Arc::new(IndexedReader::new(std::env::temp_dir()).unwrap())
         }
     };
     let indexed_reader_data = web::Data::new(indexed_reader);

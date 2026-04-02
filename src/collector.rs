@@ -336,8 +336,6 @@ fn is_physical_disk(dev_name: &str) -> bool {
 // Per-disk stats structure (for internal use)
 #[derive(Debug, Clone)]
 pub struct DiskStatsDetailed {
-    #[allow(dead_code)]
-    pub device_name: String,
     pub read_bytes: u64,
     pub write_bytes: u64,
 }
@@ -382,7 +380,6 @@ pub fn read_disk_stats_per_device() -> Result<AllDisksStats> {
         total_write_sectors += write_sectors;
 
         by_device.insert(dev_name.to_string(), DiskStatsDetailed {
-            device_name: dev_name.to_string(),
             read_bytes: read_sectors * 512,
             write_bytes: write_sectors * 512,
         });
@@ -779,7 +776,6 @@ pub struct ProcessDetail {
     pub cmdline: String,
     pub state: String,
     pub user: String,
-    #[allow(dead_code)]
     pub cpu_time_jiffies: u64, // Total CPU time (user + system)
     pub mem_bytes: u64,
     pub read_bytes: u64,
@@ -1071,8 +1067,6 @@ pub fn diff_processes(prev: &ProcessSnapshot, current: &ProcessSnapshot) -> Proc
 pub struct LoggedInUser {
     pub username: String,
     pub terminal: String,
-    #[allow(dead_code)]
-    pub login_time: String,
     pub remote_host: Option<String>,
 }
 
@@ -1092,7 +1086,6 @@ pub fn read_logged_in_users() -> Result<Vec<LoggedInUser>> {
         if parts.len() >= 4 {
             let terminal = parts[1].to_string();
             let from = parts[2].to_string();
-            let login_time = parts[3].to_string();
 
             // Get full username via stat on the tty device (w truncates usernames)
             let tty_path = if terminal.starts_with("pts/") {
@@ -1117,7 +1110,6 @@ pub fn read_logged_in_users() -> Result<Vec<LoggedInUser>> {
             users.push(LoggedInUser {
                 username,
                 terminal,
-                login_time,
                 remote_host,
             });
         }
@@ -1128,8 +1120,6 @@ pub fn read_logged_in_users() -> Result<Vec<LoggedInUser>> {
 
 #[derive(Debug, Clone)]
 pub struct AuthLogEntry {
-    #[allow(dead_code)]
-    pub timestamp: String,
     pub event_type: AuthEventType,
     pub user: String,
     pub source_ip: Option<String>,
@@ -1141,11 +1131,7 @@ pub enum AuthEventType {
     SshSuccess,
     SshFailure,
     SudoCommand,
-    #[allow(dead_code)]
-    FailedPassword,
     InvalidUser,
-    #[allow(dead_code)]
-    Other,
 }
 
 pub fn tail_auth_log(last_position: &mut u64) -> Result<Vec<AuthLogEntry>> {
@@ -1195,7 +1181,6 @@ fn parse_auth_log_line(line: &str) -> Option<AuthLogEntry> {
         return None;
     }
 
-    let timestamp = format!("{} {} {}", parts[0], parts[1], parts[2]);
     let rest = parts[3];
 
     let (event_type, user, source_ip) = if rest.contains("sshd") {
@@ -1232,7 +1217,6 @@ fn parse_auth_log_line(line: &str) -> Option<AuthLogEntry> {
     };
 
     Some(AuthLogEntry {
-        timestamp,
         event_type,
         user,
         source_ip,
@@ -1325,110 +1309,6 @@ fn parse_tcp_line(line: &str) -> Option<(String, u16)> {
     }
 
     None
-}
-
-// ===== Per-Process Network Connections =====
-
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct ProcessConnection {
-    pub local_addr: String,
-    pub local_port: u16,
-    pub remote_addr: String,
-    pub remote_port: u16,
-    pub state: String,
-}
-
-#[allow(dead_code)]
-pub fn read_process_connections(pid: u32) -> Result<Vec<ProcessConnection>> {
-    let mut connections = Vec::new();
-
-    // Read TCP connections
-    let tcp_path = format!("/proc/{}/net/tcp", pid);
-    if let Ok(content) = fs::read_to_string(&tcp_path) {
-        for line in content.lines().skip(1) {
-            if let Some(conn) = parse_connection_line(line) {
-                connections.push(conn);
-            }
-        }
-    }
-
-    // Read TCP6 connections
-    let tcp6_path = format!("/proc/{}/net/tcp6", pid);
-    if let Ok(content) = fs::read_to_string(&tcp6_path) {
-        for line in content.lines().skip(1) {
-            if let Some(conn) = parse_connection_line(line) {
-                connections.push(conn);
-            }
-        }
-    }
-
-    Ok(connections)
-}
-
-#[allow(dead_code)]
-fn parse_connection_line(line: &str) -> Option<ProcessConnection> {
-    let parts: Vec<&str> = line.split_whitespace().collect();
-    if parts.len() < 4 {
-        return None;
-    }
-
-    // Parse local address
-    let local: Vec<&str> = parts[1].split(':').collect();
-    if local.len() != 2 {
-        return None;
-    }
-
-    // Parse remote address
-    let remote: Vec<&str> = parts[2].split(':').collect();
-    if remote.len() != 2 {
-        return None;
-    }
-
-    let local_addr = parse_hex_addr(local[0])?;
-    let local_port = u16::from_str_radix(local[1], 16).ok()?;
-    let remote_addr = parse_hex_addr(remote[0])?;
-    let remote_port = u16::from_str_radix(remote[1], 16).ok()?;
-
-    // Parse state
-    let state = match parts[3] {
-        "01" => "ESTABLISHED",
-        "02" => "SYN_SENT",
-        "03" => "SYN_RECV",
-        "04" => "FIN_WAIT1",
-        "05" => "FIN_WAIT2",
-        "06" => "TIME_WAIT",
-        "07" => "CLOSE",
-        "08" => "CLOSE_WAIT",
-        "09" => "LAST_ACK",
-        "0A" => "LISTEN",
-        "0B" => "CLOSING",
-        _ => "UNKNOWN",
-    };
-
-    Some(ProcessConnection {
-        local_addr,
-        local_port,
-        remote_addr,
-        remote_port,
-        state: state.to_string(),
-    })
-}
-
-#[allow(dead_code)]
-fn parse_hex_addr(hex: &str) -> Option<String> {
-    if hex.len() == 8 {
-        // IPv4
-        let bytes = (0..4)
-            .map(|i| u8::from_str_radix(&hex[i*2..(i+1)*2], 16).unwrap_or(0))
-            .collect::<Vec<_>>();
-        Some(format!("{}.{}.{}.{}", bytes[3], bytes[2], bytes[1], bytes[0]))
-    } else if hex.len() == 32 {
-        // IPv6 - simplified display
-        Some("::".to_string())
-    } else {
-        None
-    }
 }
 
 // ===== Top Processes =====

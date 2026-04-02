@@ -314,21 +314,5 @@ impl Metadata {
         }
     }
 
-    /// Check if metadata fields have changed (ignoring timestamp)
-    #[allow(dead_code)]
-    pub fn has_changed(&self, other: &Metadata) -> bool {
-        self.kernel_version != other.kernel_version
-            || self.cpu_model != other.cpu_model
-            || self.cpu_mhz != other.cpu_mhz
-            || self.mem_total_bytes != other.mem_total_bytes
-            || self.swap_total_bytes != other.swap_total_bytes
-            || self.disk_total_bytes != other.disk_total_bytes
-            || self.filesystems != other.filesystems
-            || self.net_interface != other.net_interface
-            || self.net_ip_address != other.net_ip_address
-            || self.net_gateway != other.net_gateway
-            || self.net_dns != other.net_dns
-            || self.fans != other.fans
-    }
 }
 
