@@ -86,25 +86,31 @@ impl Default for ProtectionConfig {
     }
 }
 
+const CONFIG_PATH: &str = "./config.toml";
+
 impl Config {
     // Load config from file, or create default if not exists
     pub fn load() -> Result<Self> {
-        let config_path = "./config.toml";
-
-        if !std::path::Path::new(config_path).exists() {
-            return Self::create_default();
+        if !std::path::Path::new(CONFIG_PATH).exists() {
+            let config = Self::create_default()?;
+            println!("Config file not found. Creating default config.toml...");
+            println!("\nSECURITY WARNING");
+            println!("Created config.toml with default credentials:");
+            println!("  Username: admin");
+            println!("  Password: admin");
+            println!("\nPLEASE CHANGE THE DEFAULT PASSWORD IMMEDIATELY!");
+            println!("Run: cargo run --bin hashpw <your-password>");
+            println!("Then update the password_hash in config.toml\n");
+            return Ok(config);
         }
 
-        let content = fs::read_to_string(config_path).context("Failed to read config.toml")?;
+        let content = fs::read_to_string(CONFIG_PATH).context("Failed to read config.toml")?;
         let config: Config = toml::from_str(&content).context("Failed to parse config.toml")?;
         Ok(config)
     }
 
-    // Create default config with admin/admin credentials
+    // Create default config with admin/admin credentials and write it to disk
     fn create_default() -> Result<Self> {
-        println!("Config file not found. Creating default config.toml...");
-
-        // Generate bcrypt hash for default password "admin"
         let default_hash = bcrypt::hash("admin", bcrypt::DEFAULT_COST)
             .context("Failed to generate default password hash")?;
 
@@ -125,16 +131,7 @@ impl Config {
 
         let toml_content = toml::to_string_pretty(&config)
             .context("Failed to serialize default config")?;
-
-        fs::write("./config.toml", toml_content).context("Failed to write config.toml")?;
-
-        println!("\nSECURITY WARNING");
-        println!("Created config.toml with default credentials:");
-        println!("  Username: admin");
-        println!("  Password: admin");
-        println!("\nPLEASE CHANGE THE DEFAULT PASSWORD IMMEDIATELY!");
-        println!("Run: cargo run --bin hashpw <your-password>");
-        println!("Then update the password_hash in config.toml\n");
+        fs::write(CONFIG_PATH, toml_content).context("Failed to write config.toml")?;
 
         Ok(config)
     }
