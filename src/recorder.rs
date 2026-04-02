@@ -1,6 +1,6 @@
 use std::{
     fs::{File, OpenOptions},
-    io::{Seek, SeekFrom, Write},
+    io::{BufWriter, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 
@@ -16,7 +16,7 @@ pub struct Recorder {
     current_segment: u64,
     oldest_segment: u64,
     max_segments: usize,
-    file: File,
+    file: BufWriter<File>,
     offset: u64,
     broadcast_tx: Option<SyncSender>,
     last_flush: OffsetDateTime,
@@ -36,13 +36,14 @@ impl Recorder {
 
         let path = segment_path(dir, current_segment);
 
-        let mut file = OpenOptions::new()
+        let raw_file = OpenOptions::new()
             .create(true)
             .read(true)
             .write(true)
             .open(&path)?;
 
-        let mut offset = file.metadata()?.len();
+        let mut offset = raw_file.metadata()?.len();
+        let mut file = BufWriter::new(raw_file);
 
         if offset == 0 {
             file.write_all(&MAGIC.to_le_bytes())?;
@@ -121,11 +122,11 @@ impl Recorder {
         }
 
         let path = segment_path(&self.dir, self.current_segment);
-        self.file = OpenOptions::new()
+        self.file = BufWriter::new(OpenOptions::new()
             .create(true)
             .read(true)
             .write(true)
-            .open(&path)?;
+            .open(&path)?);
 
         self.file.write_all(&MAGIC.to_le_bytes())?;
         self.file.flush()?;  // Ensure magic number is written to disk

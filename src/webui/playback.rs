@@ -143,7 +143,7 @@ pub async fn api_playback_info(
             "last_timestamp": last_secs,
             "first_timestamp_iso": first_dt.map(|dt| dt.to_string()),
             "last_timestamp_iso": last_dt.map(|dt| dt.to_string()),
-            "segment_count": reader.get_segments().len(),
+            "segment_count": reader.segment_count(),
             "estimated_event_count": reader.estimate_event_count(),
         }))
     } else {
@@ -378,11 +378,8 @@ fn collect_events_by_count(
 
     let all_events = indexed_reader.read_time_range(Some(search_start_ns), Some(end_ns))?;
 
-    let mut system_metrics: Vec<Event> = all_events
-        .iter()
-        .filter(|e| matches!(e, Event::SystemMetrics(_)))
-        .cloned()
-        .collect();
+    let (mut system_metrics, other_events_all): (Vec<Event>, Vec<Event>) =
+        all_events.into_iter().partition(|e| matches!(e, Event::SystemMetrics(_)));
 
     let selected_metrics: Vec<Event> = if system_metrics.len() > target_count {
         system_metrics.split_off(system_metrics.len() - target_count)
@@ -401,12 +398,9 @@ fn collect_events_by_count(
         (search_start_ns, end_ns)
     };
 
-    let other_events: Vec<Event> = all_events
+    let other_events: Vec<Event> = other_events_all
         .into_iter()
         .filter(|e| {
-            if matches!(e, Event::SystemMetrics(_)) {
-                return false;
-            }
             let ts = e.timestamp().unix_timestamp_nanos();
             ts >= metrics_start_ns && ts <= metrics_end_ns
         })

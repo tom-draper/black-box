@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::{
     fs::{self, File},
-    io::Read,
+    io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
 };
 
@@ -120,8 +120,7 @@ impl IndexBuilder {
             last_timestamp_ns = header.timestamp_unix_ns;
 
             // Skip payload
-            let mut _payload = vec![0u8; header.payload_len as usize];
-            file.read_exact(&mut _payload)?;
+            file.seek(SeekFrom::Current(header.payload_len as i64))?;
 
             block_event_count += 1;
             if block_first_timestamp.is_none() {

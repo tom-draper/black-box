@@ -138,9 +138,9 @@ impl IndexedReader {
         Ok(events)
     }
 
-    /// Get segment metadata (for debugging/UI)
-    pub fn get_segments(&self) -> Vec<SegmentIndex> {
-        self.indexes.read().unwrap().clone()
+    /// Get the number of indexed segments without cloning
+    pub fn segment_count(&self) -> usize {
+        self.indexes.read().unwrap().len()
     }
 
     /// Get time range covered by all segments
@@ -176,7 +176,7 @@ mod tests {
     fn test_indexed_reader_empty_dir() {
         let temp_dir = TempDir::new().unwrap();
         let reader = IndexedReader::new(temp_dir.path()).unwrap();
-        assert_eq!(reader.get_segments().len(), 0);
+        assert_eq!(reader.segment_count(), 0);
         assert!(reader.get_time_range().is_none());
     }
 }
