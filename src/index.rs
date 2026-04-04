@@ -1,12 +1,11 @@
 use anyhow::{Context, Result};
 use std::{
     fs::{self, File},
-    io::Read,
+    io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
 };
 
-use crate::event::Event;
-use crate::storage::{BlockIndex, EventTypeBloom, RecordHeader, SegmentIndex, BLOCK_SIZE, MAGIC};
+use crate::storage::{find_segment_files, BlockIndex, RecordHeader, SegmentIndex, BLOCK_SIZE, MAGIC};
 
 /// Builds an in-memory index of all segments
 pub struct IndexBuilder {
@@ -22,29 +21,7 @@ impl IndexBuilder {
 
     /// Scan all segments and build indexes
     pub fn build_index(&self) -> Result<Vec<SegmentIndex>> {
-        let mut segment_files = Vec::new();
-
-        // Find all segment files
-        if let Ok(entries) = fs::read_dir(&self.dir) {
-            for entry in entries.flatten() {
-                let name = entry.file_name();
-                let name_str = name.to_string_lossy();
-                if name_str.starts_with("segment_") && name_str.ends_with(".dat") {
-                    if let Some(id_str) = name_str
-                        .strip_prefix("segment_")
-                        .and_then(|s| s.strip_suffix(".dat"))
-                    {
-                        if let Ok(id) = id_str.parse::<u64>() {
-                            segment_files.push((id, entry.path()));
-                        }
-                    }
-                }
-            }
-        }
-
-        // Sort by segment ID
-        segment_files.sort_by_key(|(id, _)| *id);
-
+        let segment_files = find_segment_files(&self.dir);
         let mut indexes = Vec::new();
         for (segment_id, path) in segment_files {
             if let Ok(index) = self.build_segment_index(segment_id, &path) {
@@ -117,7 +94,6 @@ impl IndexBuilder {
         }
 
         let mut blocks = Vec::new();
-        let mut event_type_bloom = EventTypeBloom::new();
         let mut first_timestamp_ns = None;
         let mut last_timestamp_ns = 0i128;
         let mut current_offset = 4u64; // After magic number
@@ -143,14 +119,8 @@ impl IndexBuilder {
             }
             last_timestamp_ns = header.timestamp_unix_ns;
 
-            // Read payload to get event type
-            let mut payload = vec![0u8; header.payload_len as usize];
-            file.read_exact(&mut payload)?;
-
-            if let Ok(event) = bincode::deserialize::<Event>(&payload) {
-                let event_type = event_type_id(&event);
-                event_type_bloom.insert(event_type);
-            }
+            // Skip payload
+            file.seek(SeekFrom::Current(header.payload_len as i64))?;
 
             block_event_count += 1;
             if block_first_timestamp.is_none() {
@@ -194,7 +164,6 @@ impl IndexBuilder {
             last_timestamp_ns,
             file_size,
             blocks,
-            event_type_bloom,
         })
     }
 }
@@ -203,18 +172,6 @@ fn read_record_header(file: &mut File) -> Result<RecordHeader> {
     let header: RecordHeader = bincode::deserialize_from(file)
         .context("Failed to deserialize header")?;
     Ok(header)
-}
-
-/// Map event to a type ID for bloom filter
-fn event_type_id(event: &Event) -> u8 {
-    match event {
-        Event::SystemMetrics(_) => 0,
-        Event::ProcessLifecycle(_) => 1,
-        Event::ProcessSnapshot(_) => 2,
-        Event::SecurityEvent(_) => 3,
-        Event::Anomaly(_) => 4,
-        Event::FileSystemEvent(_) => 5,
-    }
 }
 
 /// Query helper: find segments that might contain events in time range

@@ -1,6 +1,6 @@
 use std::{
     fs::{File, OpenOptions},
-    io::{Seek, SeekFrom, Write},
+    io::{BufWriter, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 
@@ -9,17 +9,14 @@ use time::OffsetDateTime;
 
 use crate::broadcast::SyncSender;
 use crate::event::Event;
-use crate::storage::{RecordHeader, MAGIC};
-
-const SEGMENT_SIZE: u64 = 8 * 1024 * 1024; // 8MB
-const FLUSH_INTERVAL_SECONDS: i64 = 30; // Flush every 30 seconds
+use crate::storage::{find_segment_files, RecordHeader, FLUSH_INTERVAL_SECONDS, MAGIC, SEGMENT_SIZE};
 
 pub struct Recorder {
     dir: PathBuf,
     current_segment: u64,
     oldest_segment: u64,
     max_segments: usize,
-    file: File,
+    file: BufWriter<File>,
     offset: u64,
     broadcast_tx: Option<SyncSender>,
     last_flush: OffsetDateTime,
@@ -39,13 +36,14 @@ impl Recorder {
 
         let path = segment_path(dir, current_segment);
 
-        let mut file = OpenOptions::new()
+        let raw_file = OpenOptions::new()
             .create(true)
             .read(true)
             .write(true)
             .open(&path)?;
 
-        let mut offset = file.metadata()?.len();
+        let mut offset = raw_file.metadata()?.len();
+        let mut file = BufWriter::new(raw_file);
 
         if offset == 0 {
             file.write_all(&MAGIC.to_le_bytes())?;
@@ -68,27 +66,11 @@ impl Recorder {
     }
 
     fn find_segment_range(dir: &Path) -> Result<(u64, u64)> {
-        let mut segments = Vec::new();
-
-        if dir.exists() {
-            for entry in std::fs::read_dir(dir)? {
-                let entry = entry?;
-                let name = entry.file_name();
-                let name = name.to_string_lossy();
-
-                if let Some(id_str) = name.strip_prefix("segment_").and_then(|s| s.strip_suffix(".dat")) {
-                    if let Ok(id) = id_str.parse::<u64>() {
-                        segments.push(id);
-                    }
-                }
-            }
-        }
-
+        let segments = find_segment_files(dir);
         if segments.is_empty() {
             Ok((0, 0))
         } else {
-            segments.sort_unstable();
-            Ok((*segments.last().unwrap(), *segments.first().unwrap()))
+            Ok((segments.last().unwrap().0, segments.first().unwrap().0))
         }
     }
 
@@ -140,11 +122,11 @@ impl Recorder {
         }
 
         let path = segment_path(&self.dir, self.current_segment);
-        self.file = OpenOptions::new()
+        self.file = BufWriter::new(OpenOptions::new()
             .create(true)
             .read(true)
             .write(true)
-            .open(&path)?;
+            .open(&path)?);
 
         self.file.write_all(&MAGIC.to_le_bytes())?;
         self.file.flush()?;  // Ensure magic number is written to disk

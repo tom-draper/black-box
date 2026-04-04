@@ -403,6 +403,103 @@ const BUFFER_SIZE = 60; // Fetch 60 seconds at a time
 const PREFETCH_THRESHOLD = 50; // Prefetch when 50 seconds into current buffer
 let lastPrefetchEnd = null; // Track last prefetched segment to avoid redundant fetches
 
+const domCache = {};
+function el(id) {
+    if(!domCache[id]) {
+        domCache[id] = document.getElementById(id);
+    }
+    return domCache[id];
+}
+
+function clearMetricHistories() {
+    cpuHistory.length = 0;
+    memoryHistory.length = 0;
+    netDownHistory.length = 0;
+    netUpHistory.length = 0;
+    Object.keys(diskIoHistoryMap).forEach(k => delete diskIoHistoryMap[k]);
+}
+
+function clearEventLogState() {
+    eventBuffer.length = 0;
+    eventKeys.clear();
+    el('eventsContainer').innerHTML = '';
+}
+
+function groupEventsBySecond(events) {
+    const grouped = {};
+    if (!events) return grouped;
+
+    events.forEach(event => {
+        const second = Math.floor(event.timestamp / 1000);
+        if (!grouped[second]) {
+            grouped[second] = [];
+        }
+        grouped[second].push(event);
+    });
+
+    return grouped;
+}
+
+const playbackController = {
+    stopAutoAdvance() {
+        if(playbackInterval) {
+            clearTimeout(playbackInterval);
+            playbackInterval = null;
+        }
+    },
+
+    setPausedState(paused) {
+        isPaused = paused;
+        el('pauseBtn').style.display = paused ? 'none' : 'block';
+        el('playBtn').style.display = paused ? 'block' : 'none';
+        syncHeaderButtons();
+    },
+
+    updateDisplayedTimestamp(timestamp) {
+        const dt = new Date(timestamp * 1000);
+        el('timeDisplay').textContent = '⏱ ' + dt.toLocaleTimeString();
+        el('timeDisplay').style.color = '#f59e0b';
+        el('playbackTimeDisplay').style.display = 'flex';
+        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const formatted = `${days[dt.getDay()]}, ${dt.getDate()} ${months[dt.getMonth()]} ${dt.getFullYear()}, ${dt.toLocaleTimeString()}`;
+        el('playbackTime').textContent = '⏱ ' + formatted;
+    },
+
+    enterPlayback(timestamp) {
+        currentTimestamp = timestamp;
+        playbackMode = true;
+        this.updateDisplayedTimestamp(timestamp);
+    },
+
+    resetJumpState() {
+        clearMetricHistories();
+        clearEventLogState();
+        cleanupPrevValues();
+    },
+
+    setBufferRange(start, end) {
+        bufferStart = start;
+        bufferEnd = end;
+        lastPrefetchEnd = null;
+    },
+
+    replaceBuffer(events, start, end) {
+        playbackBuffer = groupEventsBySecond(events);
+        this.setBufferRange(start, end);
+    },
+
+    extendBuffer(events, end) {
+        Object.assign(playbackBuffer, groupEventsBySecond(events));
+        bufferEnd = end;
+        lastPrefetchEnd = end;
+    },
+
+    inBuffer(timestamp) {
+        return bufferStart !== null && bufferEnd !== null && timestamp >= bufferStart && timestamp <= bufferEnd;
+    }
+};
+
 // Fetch the most recent complete system state on load to initialize caches
 async function fetchInitialState() {
     try {
@@ -427,18 +524,18 @@ async function fetchInitialState() {
                 const filesystems = data.filesystems;
                 filesystems.forEach((fs, i) => {
                     const pct = fs.total_bytes > 0 ? Math.round((fs.used_bytes / fs.total_bytes) * 100) : 0;
-                    updateDiskBar(`disk_${i}`, pct, document.getElementById('diskContainer'), fs.mount_point, fs.used_bytes, fs.total_bytes);
+                    updateDiskBar(`disk_${i}`, pct, el('diskContainer'), fs.mount_point, fs.used_bytes, fs.total_bytes);
                 });
             }
 
             // Render network info immediately
-            if(cachedNetIp) document.getElementById('netAddress').textContent = `Address: ${cachedNetIp}`;
-            if(cachedNetGateway) document.getElementById('netGateway').textContent = `Gateway: ${cachedNetGateway}`;
-            if(cachedNetDns) document.getElementById('netDns').textContent = `DNS: ${cachedNetDns}`;
+            if(cachedNetIp) el('netAddress').textContent = `Address: ${cachedNetIp}`;
+            if(cachedNetGateway) el('netGateway').textContent = `Gateway: ${cachedNetGateway}`;
+            if(cachedNetDns) el('netDns').textContent = `DNS: ${cachedNetDns}`;
 
             // Render kernel and CPU info immediately
-            if(cachedKernel) document.getElementById('kernelRow').textContent = `Linux Kernel: ${cachedKernel}`;
-            if(cachedCpuModel) document.getElementById('cpuDetailsRow').textContent = `CPU Details: ${cachedCpuModel}${cachedCpuMhz ? `, ${cachedCpuMhz}MHz` : ''}`;
+            if(cachedKernel) el('kernelRow').textContent = `Linux Kernel: ${cachedKernel}`;
+            if(cachedCpuModel) el('cpuDetailsRow').textContent = `CPU Details: ${cachedCpuModel}${cachedCpuMhz ? `, ${cachedCpuMhz}MHz` : ''}`;
         }
     } catch(e) {
         console.error('Failed to load initial state:', e);
@@ -457,7 +554,7 @@ async function fetchTimeline() {
         timelineData = data;
 
         if(data.timeline && data.timeline.length > 0) {
-            const canvas = document.getElementById('timelineChart');
+            const canvas = el('timelineChart');
             canvas.style.opacity = '1';
 
             if(!timelineHoverSetup) {
@@ -473,7 +570,7 @@ async function fetchTimeline() {
 }
 
 function setupTimelineHover() {
-    const canvas = document.getElementById('timelineChart');
+    const canvas = el('timelineChart');
 
     canvas.addEventListener('mousemove', (e) => {
         const rect = canvas.getBoundingClientRect();
@@ -520,123 +617,96 @@ function drawSegment(ctx, points) {
     ctx.stroke();
 }
 
-function drawTimeline() {
-    if(!timelineData || !timelineData.timeline || timelineData.timeline.length === 0) return;
+function buildTimelineSegments(points, maxGapSeconds) {
+    const segments = [];
+    if(points.length === 0) return segments;
 
-    const canvas = document.getElementById('timelineChart');
-    const ctx = canvas.getContext('2d');
+    let segmentStart = 0;
+    for(let i = 0; i < points.length - 1; i++) {
+        const timeDiff = points[i + 1].timestamp - points[i].timestamp;
+        if(timeDiff > maxGapSeconds) {
+            segments.push(points.slice(segmentStart, i + 1));
+            segmentStart = i + 1;
+        }
+    }
+    segments.push(points.slice(segmentStart));
+    return segments;
+}
 
-    // Set canvas internal dimensions to match display size (prevents stretching)
-    const rect = canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    ctx.scale(dpr, dpr);
-
-    // Use display dimensions for drawing
-    const width = rect.width;
-    const height = rect.height;
-
-    // Clear canvas with transparent background
-    ctx.clearRect(0, 0, width, height);
+function buildTimelineRenderData(width, height) {
+    if(!timelineData || !timelineData.timeline || timelineData.timeline.length === 0) return null;
 
     const timeline = timelineData.timeline;
     const firstTs = timelineData.first_timestamp;
     const lastTs = timelineData.last_timestamp;
     const timeRange = lastTs - firstTs;
 
-    if(timeRange <= 0 || timeline.length === 0) return;
+    if(timeRange <= 0 || timeline.length === 0) return null;
 
-    // Determine if we're hovering
     const isHovering = timelineHoverX !== null && timelineHoverX !== undefined;
 
-    // Draw CPU usage line (blue) - with gap detection
-    const cpuData = timeline
+    const toX = (timestamp) => ((timestamp - firstTs) / timeRange) * width;
+    const toY = (value, scaleMax) => height - ((value / scaleMax) * (height - 8)) - 4;
+
+    const cpuPoints = timeline
         .filter(p => p.cpu !== null && p.cpu !== undefined)
-        .map(p => ({
-            x: ((p.timestamp - firstTs) / timeRange) * width,
-            y: height - ((p.cpu / 100) * (height - 8)) - 4,
-            timestamp: p.timestamp
-        }));
+        .map(p => ({ x: toX(p.timestamp), y: toY(p.cpu, 100), timestamp: p.timestamp }));
 
-    if(cpuData.length > 0) {
-        ctx.strokeStyle = isHovering ? 'rgba(59, 130, 246, 1)' : 'rgba(59, 130, 246, 0.5)'; // blue-500
-        ctx.lineWidth = 1.5;
-
-        // Draw with gap detection (break line when timestamps are more than 10 minutes apart)
-        let segmentStart = 0;
-        for(let i = 0; i < cpuData.length - 1; i++) {
-            const timeDiff = cpuData[i + 1].timestamp - cpuData[i].timestamp;
-            if(timeDiff > 600) { // Gap of more than 10 minutes
-                // Draw segment from segmentStart to i
-                drawSegment(ctx, cpuData.slice(segmentStart, i + 1));
-                segmentStart = i + 1;
-            }
-        }
-        // Draw final segment
-        drawSegment(ctx, cpuData.slice(segmentStart));
-    }
-
-    // Draw Memory usage line (yellow) - with gap detection
-    const memData = timeline
+    const memPoints = timeline
         .filter(p => p.mem !== null && p.mem !== undefined)
-        .map(p => ({
-            x: ((p.timestamp - firstTs) / timeRange) * width,
-            y: height - ((p.mem / 100) * (height - 8)) - 4,
-            timestamp: p.timestamp
-        }));
+        .map(p => ({ x: toX(p.timestamp), y: toY(p.mem, 100), timestamp: p.timestamp }));
 
-    if(memData.length > 0) {
-        ctx.strokeStyle = isHovering ? 'rgba(234, 179, 8, 1)' : 'rgba(234, 179, 8, 0.5)'; // yellow-500
+    const maxCount = Math.max(...timeline.map(p => p.count), 1);
+    const countPoints = timeline.map(p => ({
+        x: toX(p.timestamp),
+        y: toY(p.count, maxCount),
+        timestamp: p.timestamp,
+    }));
+
+    return {
+        width,
+        height,
+        isHovering,
+        cpuSegments: buildTimelineSegments(cpuPoints, 600),
+        memSegments: buildTimelineSegments(memPoints, 600),
+        countPoints,
+        hoverX: timelineHoverX,
+        currentX: (playbackMode && currentTimestamp) ? toX(currentTimestamp) : null,
+    };
+}
+
+function paintTimeline(ctx, plot) {
+    const { width, height, isHovering, cpuSegments, memSegments, countPoints, hoverX, currentX } = plot;
+
+    ctx.clearRect(0, 0, width, height);
+
+    if(cpuSegments.length > 0) {
+        ctx.strokeStyle = isHovering ? 'rgba(59, 130, 246, 1)' : 'rgba(59, 130, 246, 0.5)';
         ctx.lineWidth = 1.5;
-
-        // Draw with gap detection (break line when timestamps are more than 10 minutes apart)
-        let segmentStart = 0;
-        for(let i = 0; i < memData.length - 1; i++) {
-            const timeDiff = memData[i + 1].timestamp - memData[i].timestamp;
-            if(timeDiff > 600) { // Gap of more than 10 minutes
-                // Draw segment from segmentStart to i
-                drawSegment(ctx, memData.slice(segmentStart, i + 1));
-                segmentStart = i + 1;
-            }
-        }
-        // Draw final segment
-        drawSegment(ctx, memData.slice(segmentStart));
+        cpuSegments.forEach(segment => drawSegment(ctx, segment));
     }
 
-    // Find max count for scaling event count line
-    const maxCount = Math.max(...timeline.map(p => p.count), 1);
+    if(memSegments.length > 0) {
+        ctx.strokeStyle = isHovering ? 'rgba(234, 179, 8, 1)' : 'rgba(234, 179, 8, 0.5)';
+        ctx.lineWidth = 1.5;
+        memSegments.forEach(segment => drawSegment(ctx, segment));
+    }
 
-    // Map event count data points to canvas coordinates
-    const points = timeline.map(p => {
-        const x = ((p.timestamp - firstTs) / timeRange) * width;
-        const y = height - ((p.count / maxCount) * (height - 8)) - 4; // Leave 4px padding at top/bottom
-        return { x, y, timestamp: p.timestamp };
-    });
-
-    // Draw event count curve using cubic Bezier curves
     ctx.beginPath();
-    // gray-500/60: rgba(107, 114, 128, 0.6) - normal
-    // gray-400: rgba(156, 163, 175, 1) - hover
     ctx.strokeStyle = isHovering ? 'rgba(107, 114, 128, 1)' : 'rgba(156, 163, 175, 0.8)';
     ctx.lineWidth = 1.5;
 
-    if(points.length > 0) {
-        ctx.moveTo(points[0].x, points[0].y);
+    if(countPoints.length > 0) {
+        ctx.moveTo(countPoints[0].x, countPoints[0].y);
 
-        if(points.length === 2) {
-            // Just draw a line for 2 points
-            ctx.lineTo(points[1].x, points[1].y);
-        } else if(points.length > 2) {
-            // Use cubic Bezier curves for smooth interpolation
-            for(let i = 0; i < points.length - 1; i++) {
-                const curr = points[i];
-                const next = points[i + 1];
-
-                // Calculate control points for smooth curve
-                // Use neighboring points to determine tangent direction
-                const prev = i > 0 ? points[i - 1] : curr;
-                const after = i < points.length - 2 ? points[i + 2] : next;
+        if(countPoints.length === 2) {
+            ctx.lineTo(countPoints[1].x, countPoints[1].y);
+        } else if(countPoints.length > 2) {
+            for(let i = 0; i < countPoints.length - 1; i++) {
+                const curr = countPoints[i];
+                const next = countPoints[i + 1];
+                const prev = i > 0 ? countPoints[i - 1] : curr;
+                const after = i < countPoints.length - 2 ? countPoints[i + 2] : next;
 
                 const cp1x = curr.x + (next.x - prev.x) / 6;
                 const cp1y = curr.y + (next.y - prev.y) / 6;
@@ -650,38 +720,54 @@ function drawTimeline() {
 
     ctx.stroke();
 
-    // Draw vertical line at hover position
-    if(isHovering && timelineHoverX >= 0 && timelineHoverX <= width) {
+    if(isHovering && hoverX >= 0 && hoverX <= width) {
         ctx.beginPath();
-        ctx.strokeStyle = 'rgba(156, 163, 175, 1)'; // gray-400 with transparency
+        ctx.strokeStyle = 'rgba(156, 163, 175, 1)';
         ctx.lineWidth = 1;
-        ctx.moveTo(timelineHoverX, 0);
-        ctx.lineTo(timelineHoverX, height);
+        ctx.moveTo(hoverX, 0);
+        ctx.lineTo(hoverX, height);
         ctx.stroke();
     }
 
-    // Draw vertical line for current playback position
-    if(playbackMode && currentTimestamp) {
-        const currentX = ((currentTimestamp - firstTs) / timeRange) * width;
-        if(currentX >= 0 && currentX <= width) {
-            ctx.beginPath();
-            ctx.strokeStyle = 'rgba(59, 130, 246, 0.8)'; // blue-500
-            ctx.lineWidth = 1.5;
-            ctx.moveTo(currentX, 0);
-            ctx.lineTo(currentX, height);
-            ctx.stroke();
-        }
+    if(currentX !== null && currentX >= 0 && currentX <= width) {
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(59, 130, 246, 0.8)';
+        ctx.lineWidth = 1.5;
+        ctx.moveTo(currentX, 0);
+        ctx.lineTo(currentX, height);
+        ctx.stroke();
     }
 }
 
+function drawTimeline() {
+    if(!timelineData || !timelineData.timeline || timelineData.timeline.length === 0) return;
+
+    const canvas = el('timelineChart');
+    const ctx = canvas.getContext('2d');
+
+    // Set canvas internal dimensions to match display size (prevents stretching)
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+
+    // Use display dimensions for drawing
+    const width = rect.width;
+    const height = rect.height;
+    const plot = buildTimelineRenderData(width, height);
+    if(!plot) return;
+    paintTimeline(ctx, plot);
+}
+
 // Handle timeline click to jump to timestamp
-document.getElementById('timelineChart').addEventListener('click', (e) => {
+el('timelineChart').addEventListener('click', (e) => {
     if(!timelineData || !timelineData.timeline || timelineData.timeline.length === 0) return;
 
     // Show loading spinner
     showTimelineLoader();
 
-    const canvas = document.getElementById('timelineChart');
+    const canvas = el('timelineChart');
     const rect = canvas.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
     const width = rect.width;
@@ -695,26 +781,18 @@ document.getElementById('timelineChart').addEventListener('click', (e) => {
     const targetTimestamp = firstTs + (clickRatio * timeRange);
 
     // Stop any auto-playback
-    if(playbackInterval) {
-        clearTimeout(playbackInterval);
-        playbackInterval = null;
-    }
-
-    // Update button states to show paused
-    isPaused = true;
-    document.getElementById('pauseBtn').style.display = 'none';
-    document.getElementById('playBtn').style.display = 'block';
-    syncHeaderButtons();
+    playbackController.stopAutoAdvance();
+    playbackController.setPausedState(true);
 
     // Jump to the timestamp
     jumpToTimestamp(Math.floor(targetTimestamp));
 });
 
 // Handle timeline hover to show timestamp
-document.getElementById('timelineChart').addEventListener('mousemove', (e) => {
+el('timelineChart').addEventListener('mousemove', (e) => {
     if(!timelineData || !timelineData.timeline || timelineData.timeline.length === 0) return;
 
-    const canvas = document.getElementById('timelineChart');
+    const canvas = el('timelineChart');
     const rect = canvas.getBoundingClientRect();
     const hoverX = e.clientX - rect.left;
     const width = rect.width;
@@ -781,17 +859,13 @@ async function fetchPlaybackInfo() {
 
         if(firstTimestamp && lastTimestamp) {
             const duration = lastTimestamp - firstTimestamp;
-            const hours = Math.floor(duration / 3600);
+            const days = Math.floor(duration / 86400);
+            const hours = Math.floor((duration % 86400) / 3600);
             const mins = Math.floor((duration % 3600) / 60);
 
-            // Show when the data is from
-            const lastDate = new Date(lastTimestamp * 1000);
-            const ageSeconds = Math.floor(Date.now() / 1000) - lastTimestamp;
-            const ageHours = Math.floor(ageSeconds / 3600);
-            const ageMins = Math.floor((ageSeconds % 3600) / 60);
-
-            document.getElementById('timeRange').textContent =
-                `${hours}h ${mins}m`;
+            el('timeRange').textContent = days > 0
+                ? `${days}d ${hours}h`
+                : `${hours}h ${mins}m`;
         }
     } catch(e) {
         console.error('Failed to fetch playback info:', e);
@@ -806,36 +880,31 @@ async function fetchPlaybackBuffer(startTimestamp, endTimestamp) {
         const data = await resp.json();
 
         // Group events by second (rounded timestamp)
-        const buffer = {};
-        if (data.events) {
-            data.events.forEach(event => {
-                const second = Math.floor(event.timestamp / 1000); // Convert ms to seconds
-                if (!buffer[second]) {
-                    buffer[second] = [];
-                }
-                buffer[second].push(event);
-            });
-        }
+        const buffer = groupEventsBySecond(data.events);
 
         // Store metadata if present
-        if (data.metadata) {
-            if(data.metadata.mem_total_bytes) cachedMemTotal = data.metadata.mem_total_bytes;
-            if(data.metadata.swap_total_bytes) cachedSwapTotal = data.metadata.swap_total_bytes;
-            if(data.metadata.disk_total_bytes) cachedDiskTotal = data.metadata.disk_total_bytes;
-            if(data.metadata.filesystems && data.metadata.filesystems.length > 0) cachedFilesystems = data.metadata.filesystems;
-            if(data.metadata.net_ip) cachedNetIp = data.metadata.net_ip;
-            if(data.metadata.net_gateway) cachedNetGateway = data.metadata.net_gateway;
-            if(data.metadata.net_dns) cachedNetDns = data.metadata.net_dns;
-            if(data.metadata.kernel_version) cachedKernel = data.metadata.kernel_version;
-            if(data.metadata.cpu_model) cachedCpuModel = data.metadata.cpu_model;
-            if(data.metadata.cpu_mhz) cachedCpuMhz = data.metadata.cpu_mhz;
-        }
+        applyPlaybackMetadata(data);
 
         return buffer;
     } catch(e) {
         console.error('Failed to fetch playback buffer:', e);
         return {};
     }
+}
+
+function applyPlaybackMetadata(data) {
+    if (!data || !data.metadata) return;
+
+    if(data.metadata.mem_total_bytes) cachedMemTotal = data.metadata.mem_total_bytes;
+    if(data.metadata.swap_total_bytes) cachedSwapTotal = data.metadata.swap_total_bytes;
+    if(data.metadata.disk_total_bytes) cachedDiskTotal = data.metadata.disk_total_bytes;
+    if(data.metadata.filesystems && data.metadata.filesystems.length > 0) cachedFilesystems = data.metadata.filesystems;
+    if(data.metadata.net_ip) cachedNetIp = data.metadata.net_ip;
+    if(data.metadata.net_gateway) cachedNetGateway = data.metadata.net_gateway;
+    if(data.metadata.net_dns) cachedNetDns = data.metadata.net_dns;
+    if(data.metadata.kernel_version) cachedKernel = data.metadata.kernel_version;
+    if(data.metadata.cpu_model) cachedCpuModel = data.metadata.cpu_model;
+    if(data.metadata.cpu_mhz) cachedCpuMhz = data.metadata.cpu_mhz;
 }
 
 // Process events for a specific second from the playback buffer
@@ -879,44 +948,30 @@ function processSecondFromBuffer(timestamp) {
 // Show/hide timeline loading spinner
 function showTimelineLoader() {
     isTimelineLoading = true;
-    const spinner = document.getElementById('timelineLoadingSpinner');
+    const spinner = el('timelineLoadingSpinner');
     if (spinner) spinner.style.display = 'inline-block';
 }
 
 function hideTimelineLoader() {
     isTimelineLoading = false;
-    const spinner = document.getElementById('timelineLoadingSpinner');
+    const spinner = el('timelineLoadingSpinner');
     if (spinner) spinner.style.display = 'none';
 }
 
 // Jump to a specific timestamp and load data
 // Now uses chunked buffering for efficient playback
 async function jumpToTimestamp(timestamp, incremental = false) {
-    if(!timestamp) return;
+    if(timestamp == null) return;
 
     // Ensure spinner is visible (in case called directly)
     if (!incremental) {
         showTimelineLoader();
     }
 
-    currentTimestamp = timestamp;
-    playbackMode = true;
-
-    // Update time display - add visual indicator for playback mode
-    const dt = new Date(timestamp * 1000);
-    document.getElementById('timeDisplay').textContent =
-        '⏱ ' + dt.toLocaleTimeString();
-    document.getElementById('timeDisplay').style.color = '#f59e0b'; // amber color
-
-    // Update playback time display
-    document.getElementById('playbackTimeDisplay').style.display = 'flex';
-    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const formatted = `${days[dt.getDay()]}, ${dt.getDate()} ${months[dt.getMonth()]} ${dt.getFullYear()}, ${dt.toLocaleTimeString()}`;
-    document.getElementById('playbackTime').textContent = '⏱ ' + formatted;
+    playbackController.enterPlayback(timestamp);
 
     // Check if timestamp is in current buffer
-    const inBuffer = bufferStart && bufferEnd && timestamp >= bufferStart && timestamp <= bufferEnd;
+    const inBuffer = playbackController.inBuffer(timestamp);
 
     if(incremental && inBuffer) {
         // Just process this second from the buffer (already loaded)
@@ -928,47 +983,35 @@ async function jumpToTimestamp(timestamp, incremental = false) {
             // Only prefetch if we haven't already fetched this segment
             if(lastPrefetchEnd !== nextSegmentEnd) {
                 const nextBuffer = await fetchPlaybackBuffer(bufferEnd + 1, nextSegmentEnd);
-                // Merge into existing buffer
-                Object.assign(playbackBuffer, nextBuffer);
-                bufferEnd = nextSegmentEnd;
-                lastPrefetchEnd = nextSegmentEnd;
+                playbackController.extendBuffer(Object.values(nextBuffer).flat(), nextSegmentEnd);
             }
         }
         return;
     }
 
     // Full jump - clear everything and reload
-    cpuHistory.length = 0;
-    memoryHistory.length = 0;
-    netDownHistory.length = 0;
-    netUpHistory.length = 0;
-    Object.keys(diskIoHistoryMap).forEach(k => delete diskIoHistoryMap[k]);
+    playbackController.resetJumpState();
 
-    // Clear event buffer, keys, and container
-    eventBuffer.length = 0;
-    eventKeys.clear();
-    document.getElementById('eventsContainer').innerHTML = '';
+    // Fetch history and forward buffer in a single request to reduce jump latency
+    playbackController.setBufferRange(timestamp, timestamp + BUFFER_SIZE);
 
-    // Clean up prevValues cache to prevent memory leak
-    cleanupPrevValues();
+    const jumpData = await fetch(`/api/playback/jump?timestamp=${timestamp}&history_count=60&forward_seconds=${BUFFER_SIZE}`)
+        .then(r => r.json())
+        .catch(e => {
+            console.error('Failed to load playback jump:', e);
+            return {
+                history: { events: [] },
+                forward: { events: [] }
+            };
+        });
 
-    // Fetch both history and forward buffer in parallel for better performance
-    bufferStart = timestamp;
-    bufferEnd = timestamp + BUFFER_SIZE;
-
-    const [historyData, forwardBuffer] = await Promise.all([
-        fetch(`/api/playback/events?timestamp=${timestamp}&count=60`).then(r => r.json()).catch(e => {
-            console.error('Failed to load history:', e);
-            return { events: [] };
-        }),
-        fetchPlaybackBuffer(bufferStart, bufferEnd)
-    ]);
-
-    playbackBuffer = forwardBuffer;
-    lastPrefetchEnd = null; // Reset prefetch tracker for new buffer
+    const historyData = jumpData.history || { events: [] };
+    const forwardData = jumpData.forward || { events: [] };
+    playbackController.replaceBuffer(forwardData.events, timestamp, timestamp + BUFFER_SIZE);
+    applyPlaybackMetadata(forwardData);
 
     if(historyData.events && historyData.events.length > 0) {
-        const timeDisplay = document.getElementById('timeDisplay');
+        const timeDisplay = el('timeDisplay');
         timeDisplay.title = 'Click to select time, Shift+Click to go Live';
 
         // Batch event log updates for better DOM performance
@@ -1001,7 +1044,7 @@ async function jumpToTimestamp(timestamp, incremental = false) {
 
         // Append all events at once (single DOM operation)
         if(fragment.children.length > 0) {
-            const container = document.getElementById('eventsContainer');
+            const container = el('eventsContainer');
             container.appendChild(fragment);
         }
 
@@ -1013,19 +1056,7 @@ async function jumpToTimestamp(timestamp, incremental = false) {
             netUpHistory.splice(0, netUpHistory.length - MAX_HISTORY);
         }
 
-        // Handle metadata
-        if(historyData.metadata) {
-            if(historyData.metadata.mem_total_bytes) cachedMemTotal = historyData.metadata.mem_total_bytes;
-            if(historyData.metadata.swap_total_bytes) cachedSwapTotal = historyData.metadata.swap_total_bytes;
-            if(historyData.metadata.disk_total_bytes) cachedDiskTotal = historyData.metadata.disk_total_bytes;
-            if(historyData.metadata.filesystems && historyData.metadata.filesystems.length > 0) cachedFilesystems = historyData.metadata.filesystems;
-            if(historyData.metadata.net_ip) cachedNetIp = historyData.metadata.net_ip;
-            if(historyData.metadata.net_gateway) cachedNetGateway = historyData.metadata.net_gateway;
-            if(historyData.metadata.net_dns) cachedNetDns = historyData.metadata.net_dns;
-            if(historyData.metadata.kernel_version) cachedKernel = historyData.metadata.kernel_version;
-            if(historyData.metadata.cpu_model) cachedCpuModel = historyData.metadata.cpu_model;
-            if(historyData.metadata.cpu_mhz) cachedCpuMhz = historyData.metadata.cpu_mhz;
-        }
+        applyPlaybackMetadata(historyData);
     }
 
     // Process current second from buffer
@@ -1039,22 +1070,20 @@ async function jumpToTimestamp(timestamp, incremental = false) {
 }
 
 // Rewind button
-document.getElementById('rewindBtn').addEventListener('click', doRewind);
+el('rewindBtn').addEventListener('click', doRewind);
 
 // Fast-forward button
-document.getElementById('fastForwardBtn').addEventListener('click', doFastForward);
+el('fastForwardBtn').addEventListener('click', doFastForward);
 
 // Pause button
-document.getElementById('pauseBtn').addEventListener('click', doPause);
+el('pauseBtn').addEventListener('click', doPause);
 
 // Shared play logic
 async function doPlay() {
     if(playbackMode && currentTimestamp) {
         // Resume playback: auto-advance through history
         isPaused = false;
-        document.getElementById('playBtn').style.display = 'none';
-        document.getElementById('pauseBtn').style.display = 'block';
-        syncHeaderButtons();
+        playbackController.setPausedState(false);
 
         // Calculate a reasonable "live" threshold - within 10 seconds of now
         const liveThreshold = Math.floor(Date.now() / 1000) - 10;
@@ -1087,7 +1116,7 @@ async function doPlay() {
 }
 
 // Play button - either resume playback or return to live
-document.getElementById('playBtn').addEventListener('click', doPlay);
+el('playBtn').addEventListener('click', doPlay);
 
 // Return to live mode
 function goLive() {
@@ -1095,37 +1124,22 @@ function goLive() {
     playbackMode = false;
     currentTimestamp = null;
 
-    if(playbackInterval) {
-        clearTimeout(playbackInterval);
-        playbackInterval = null;
-    }
-
-    document.getElementById('playBtn').style.display = 'none';
-    document.getElementById('pauseBtn').style.display = 'block';
+    playbackController.stopAutoAdvance();
+    playbackController.setPausedState(false);
 
     // Hide playback time display when going live
-    document.getElementById('playbackTimeDisplay').style.display = 'none';
+    el('playbackTimeDisplay').style.display = 'none';
 
     // Show "Live" or "Disconnected" based on connection status
     const isConnected = ws && ws.readyState === 1;
-    const timeDisplay = document.getElementById('timeDisplay');
+    const timeDisplay = el('timeDisplay');
     timeDisplay.textContent = isConnected ? 'Live' : 'Disconnected';
     timeDisplay.style.color = isConnected ? '#6b7280' : '#ef4444'; // gray-500 or red-500
     timeDisplay.title = 'Click to select time, Shift+Click to go Live';
 
     // Clear history buffers so they rebuild from live data
-    cpuHistory.length = 0;
-    memoryHistory.length = 0;
-    netDownHistory.length = 0;
-    netUpHistory.length = 0;
-    Object.keys(diskIoHistoryMap).forEach(k => delete diskIoHistoryMap[k]);
-
-    // Clear event buffer, keys, and container
-    eventBuffer.length = 0;
-    eventKeys.clear();
-    document.getElementById('eventsContainer').innerHTML = '';
-
-    // Clean up prevValues cache to prevent memory leak
+    clearMetricHistories();
+    clearEventLogState();
     cleanupPrevValues();
 
     // Update timeline visualization (clears vertical line)
@@ -1137,9 +1151,9 @@ function goLive() {
 
 // Sync header play/pause buttons with main buttons
 function syncHeaderButtons() {
-    const mainPauseVisible = document.getElementById('pauseBtn').style.display !== 'none';
-    document.getElementById('headerPauseBtn').style.display = mainPauseVisible ? 'inline' : 'none';
-    document.getElementById('headerPlayBtn').style.display = mainPauseVisible ? 'none' : 'inline';
+    const mainPauseVisible = el('pauseBtn').style.display !== 'none';
+    el('headerPauseBtn').style.display = mainPauseVisible ? 'inline' : 'none';
+    el('headerPlayBtn').style.display = mainPauseVisible ? 'none' : 'inline';
 }
 
 // Shared rewind logic
@@ -1147,24 +1161,15 @@ function doRewind() {
     // Show loading spinner
     showTimelineLoader();
 
-    if(playbackInterval) {
-        clearTimeout(playbackInterval);
-        playbackInterval = null;
-    }
+    playbackController.stopAutoAdvance();
     if(!playbackMode) {
         const now = Math.floor(Date.now() / 1000);
         jumpToTimestamp(now - REWIND_STEP);
-        isPaused = true;
-        document.getElementById('pauseBtn').style.display = 'none';
-        document.getElementById('playBtn').style.display = 'block';
-        syncHeaderButtons();
+        playbackController.setPausedState(true);
     } else {
         const newTime = Math.max(firstTimestamp || 0, currentTimestamp - REWIND_STEP);
         jumpToTimestamp(newTime);
-        isPaused = true;
-        document.getElementById('pauseBtn').style.display = 'none';
-        document.getElementById('playBtn').style.display = 'block';
-        syncHeaderButtons();
+        playbackController.setPausedState(true);
     }
 }
 
@@ -1175,59 +1180,39 @@ function doFastForward() {
     // Show loading spinner
     showTimelineLoader();
 
-    if(playbackInterval) {
-        clearTimeout(playbackInterval);
-        playbackInterval = null;
-    }
+    playbackController.stopAutoAdvance();
     const target = currentTimestamp + REWIND_STEP;
     const maxTime = lastTimestamp || Math.floor(Date.now() / 1000);
     const newTime = Math.min(target, maxTime);
     jumpToTimestamp(newTime);
-    isPaused = true;
-    document.getElementById('pauseBtn').style.display = 'none';
-    document.getElementById('playBtn').style.display = 'block';
-    syncHeaderButtons();
+    playbackController.setPausedState(true);
 }
 
 // Shared pause logic
 function doPause() {
-    isPaused = true;
-    document.getElementById('pauseBtn').style.display = 'none';
-    document.getElementById('playBtn').style.display = 'block';
-    syncHeaderButtons();
-    if(playbackInterval) {
-        clearTimeout(playbackInterval);
-        playbackInterval = null;
-    }
+    playbackController.setPausedState(true);
+    playbackController.stopAutoAdvance();
     if(!playbackMode) {
         const now = Math.floor(Date.now() / 1000);
-        currentTimestamp = now;
-        playbackMode = true;
-        // Update playback time display when pausing from live mode
-        const dt = new Date(now * 1000);
-        document.getElementById('playbackTimeDisplay').style.display = 'flex';
-        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const formatted = `${days[dt.getDay()]}, ${dt.getDate()} ${months[dt.getMonth()]} ${dt.getFullYear()}, ${dt.toLocaleTimeString()}`;
-        document.getElementById('playbackTime').textContent = '⏱ ' + formatted;
+        playbackController.enterPlayback(now);
     }
 }
 
 // Header button handlers
-document.getElementById('headerRewindBtn').addEventListener('click', doRewind);
-document.getElementById('headerFastForwardBtn').addEventListener('click', doFastForward);
-document.getElementById('headerPauseBtn').addEventListener('click', doPause);
-document.getElementById('headerPlayBtn').addEventListener('click', doPlay);
+el('headerRewindBtn').addEventListener('click', doRewind);
+el('headerFastForwardBtn').addEventListener('click', doFastForward);
+el('headerPauseBtn').addEventListener('click', doPause);
+el('headerPlayBtn').addEventListener('click', doPlay);
 
 // Time display click - either go live or open picker
-document.getElementById('timeDisplay').addEventListener('click', (e) => {
+el('timeDisplay').addEventListener('click', (e) => {
     if(e.shiftKey && playbackMode) {
         // Shift+click: Go live
         goLive();
         return;
     }
 
-    const picker = document.getElementById('timePicker');
+    const picker = el('timePicker');
 
     if(firstTimestamp && lastTimestamp) {
         // Set picker range
@@ -1246,7 +1231,7 @@ document.getElementById('timeDisplay').addEventListener('click', (e) => {
     }
 });
 
-document.getElementById('timePicker').addEventListener('change', (e) => {
+el('timePicker').addEventListener('change', (e) => {
     const selectedDate = new Date(e.target.value);
     const timestamp = Math.floor(selectedDate.getTime() / 1000);
 
@@ -1254,13 +1239,10 @@ document.getElementById('timePicker').addEventListener('change', (e) => {
     e.target.style.display = 'none';
 
     // Enable pause mode
-    isPaused = true;
-    document.getElementById('pauseBtn').style.display = 'none';
-    document.getElementById('playBtn').style.display = 'block';
-    syncHeaderButtons();
+    playbackController.setPausedState(true);
 });
 
-document.getElementById('timePicker').addEventListener('blur', (e) => {
+el('timePicker').addEventListener('blur', (e) => {
     setTimeout(() => e.target.style.display = 'none', 200);
 });
 
@@ -1638,7 +1620,7 @@ function render(){
     const e=lastStats;
 
     // Show content on first data load
-    const mainContent = document.getElementById('mainContent');
+    const mainContent = el('mainContent');
     if(mainContent.style.display === 'none'){
         mainContent.style.display = 'block';
     }
@@ -1685,7 +1667,7 @@ function render(){
         if(cpuHistory.length > MAX_HISTORY) cpuHistory.shift();
         queueChartUpdate('cpu');
     }
-    (e.per_core_cpu || []).forEach((v, i) => updateCoreBar(`core_${i}`, v, document.getElementById('cpuCoresContainer'), i));
+    (e.per_core_cpu || []).forEach((v, i) => updateCoreBar(`core_${i}`, v, el('cpuCoresContainer'), i));
 
     // Update cached total values when present
     if(e.mem_total != null) cachedMemTotal = e.mem_total;
@@ -1699,7 +1681,7 @@ function render(){
     // Memory display - percentage is always calculated by backend
     if(e.mem !== undefined && e.mem_used !== undefined){
         const memTotal = e.mem_total ?? cachedMemTotal ?? 0;
-        updateRamBar(e.mem, e.mem_used, document.getElementById('ramUsed'));
+        updateRamBar(e.mem, e.mem_used, el('ramUsed'));
         if(memTotal > 0) {
             const availText = `Available RAM: ${fmt(memTotal - e.mem_used)}`;
             updateTextIfChanged('ramAvail', availText);
@@ -1791,7 +1773,7 @@ function render(){
     if(filesystems && filesystems.length > 0) {
         filesystems.forEach((fs, i) => {
             const pct = fs.total_bytes > 0 ? Math.round((fs.used_bytes / fs.total_bytes) * 100) : 0;
-            updateDiskBar(`disk_${i}`, pct, document.getElementById('diskContainer'), fs.mount_point, fs.used_bytes, fs.total_bytes);
+            updateDiskBar(`disk_${i}`, pct, el('diskContainer'), fs.mount_point, fs.used_bytes, fs.total_bytes);
         });
     }
 
@@ -1858,8 +1840,8 @@ function updateConnectionStatus(){
     const isConnected = ws && ws.readyState === 1;
 
     // Update header controls visibility
-    const headerControls = document.getElementById('headerControls');
-    const headerDisconnected = document.getElementById('headerDisconnected');
+    const headerControls = el('headerControls');
+    const headerDisconnected = el('headerDisconnected');
     if(!isConnected && !playbackMode) {
         headerControls.style.display = 'none';
         headerDisconnected.style.display = 'inline';
@@ -1870,7 +1852,7 @@ function updateConnectionStatus(){
 
     // Update timeDisplay to show "Disconnected" when not connected (only in live mode)
     if(!playbackMode) {
-        const timeDisplay = document.getElementById('timeDisplay');
+        const timeDisplay = el('timeDisplay');
         if(!isConnected) {
             timeDisplay.textContent = 'Disconnected';
             timeDisplay.style.color = '#ef4444'; // red-500
@@ -1967,7 +1949,7 @@ function addEventToLog(event){
     const filter = document.getElementById('filterInput').value.toLowerCase();
     const evType = document.getElementById('eventType').value;
     if(matchesFilter(event, filter, evType)){
-        const container = document.getElementById('eventsContainer');
+        const container = el('eventsContainer');
         // Check if user is near bottom before adding (within 50px)
         const wasNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
         const entry = createEventEntry(event);
@@ -2029,9 +2011,9 @@ function createEventEntry(e){
 }
 
 function reloadEvents(){
-    const container = document.getElementById('eventsContainer');
-    const filter = document.getElementById('filterInput').value.toLowerCase();
-    const evType = document.getElementById('eventType').value;
+    const container = el('eventsContainer');
+    const filter = el('filterInput').value.toLowerCase();
+    const evType = el('eventType').value;
 
     // Use document fragment for smoother batch update
     const fragment = document.createDocumentFragment();
@@ -2049,8 +2031,8 @@ function reloadEvents(){
     container.scrollTop = container.scrollHeight;
 }
 
-document.getElementById('filterInput').addEventListener('input', reloadEvents);
-document.getElementById('eventType').addEventListener('change', reloadEvents);
+el('filterInput').addEventListener('input', reloadEvents);
+el('eventType').addEventListener('change', reloadEvents);
 
 // Connect WebSocket (initial state will be sent as first message)
 connectWebSocket();
@@ -2066,9 +2048,9 @@ setInterval(() => {
         // In live mode, update the display using the live timestamp
         const eventDate = new Date(lastStats.timestamp);
         if(!isNaN(eventDate.getTime())) {
-            document.getElementById('datetime').textContent = formatDate(eventDate);
+            el('datetime').textContent = formatDate(eventDate);
         } else {
-            document.getElementById('datetime').textContent = formatDate(new Date());
+            el('datetime').textContent = formatDate(new Date());
         }
     }
 }, 1000);

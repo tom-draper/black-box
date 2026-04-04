@@ -15,9 +15,19 @@ use serde::Deserialize;
 use std::sync::Arc;
 use time::OffsetDateTime;
 
+use crate::event::Metadata;
+use crate::event::Event;
 use crate::indexed_reader::IndexedReader;
 use crate::reader::LogReader;
-use crate::event::Event;
+
+const MIN_HISTORY_LOOKBACK_SECS: i64 = 600;
+const HISTORY_LOOKBACK_MULTIPLIER_SECS: i64 = 10;
+
+struct PlaybackResult {
+    events: Vec<Event>,
+    metadata: serde_json::Value,
+    fallback: bool,
+}
 
 #[derive(Deserialize)]
 pub struct PlaybackQuery {
@@ -40,32 +50,55 @@ pub struct PlaybackQuery {
     limit: Option<usize>,          // Max total events to return
 }
 
+#[derive(Deserialize)]
+pub struct PlaybackJumpQuery {
+    timestamp: i64,
+    history_count: Option<usize>,
+    forward_seconds: Option<i64>,
+}
+
 /// Get the most recent complete SystemMetrics (with static/semi-static fields) for page initialization
 /// Uses LogReader to read the most recent segment file (avoids old incompatible segments)
 pub async fn api_initial_state(
     reader: web::Data<LogReader>,
+    metadata: web::Data<std::sync::RwLock<Option<Metadata>>>,
 ) -> HttpResponse {
+    let shared_metadata = metadata
+        .read()
+        .ok()
+        .and_then(|guard| guard.clone());
+
     match reader.read_recent_segment() {
         Ok(events) => {
             // Try to find the most recent SystemMetrics with filesystems first
             for event in events.iter().rev() {
                 if let Event::SystemMetrics(m) = event {
                     if m.filesystems.is_some() {
-                        return HttpResponse::Ok().json(format_event_for_api(event));
+                        let merged = merge_system_metrics_with_metadata(m, shared_metadata.as_ref());
+                        return HttpResponse::Ok().json(format_event_for_api(&Event::SystemMetrics(merged)));
                     }
                 }
             }
 
             // If no event with filesystems, return the most recent SystemMetrics anyway
             for event in events.iter().rev() {
-                if let Event::SystemMetrics(_) = event {
-                    return HttpResponse::Ok().json(format_event_for_api(event));
+                if let Event::SystemMetrics(m) = event {
+                    let merged = merge_system_metrics_with_metadata(m, shared_metadata.as_ref());
+                    return HttpResponse::Ok().json(format_event_for_api(&Event::SystemMetrics(merged)));
                 }
+            }
+
+            if let Some(metadata) = shared_metadata.as_ref() {
+                return HttpResponse::Ok().json(format_metadata_as_initial_state(metadata));
             }
 
             HttpResponse::Ok().json(serde_json::json!({}))
         }
         Err(_) => {
+            if let Some(metadata) = shared_metadata.as_ref() {
+                return HttpResponse::Ok().json(format_metadata_as_initial_state(metadata));
+            }
+
             HttpResponse::Ok().json(serde_json::json!({}))
         }
     }
@@ -80,98 +113,15 @@ async fn fetch_events_by_count(
     target_count: usize,
     before: bool,
 ) -> HttpResponse {
-    // For normal mode: include events AT the requested timestamp
-    // For before mode: get events strictly before the timestamp
-    let end_ns = if before {
-        (timestamp as i128) * 1_000_000_000  // Strictly before
-    } else {
-        ((timestamp + 1) as i128) * 1_000_000_000  // Include events at timestamp
-    };
-
-    // Progressive search: start with 90 seconds, expand if needed
-    let search_durations = vec![90, 120, 180, 300]; // seconds to search back
-
-    let mut all_events = Vec::new();
-    let mut search_start_ns = end_ns;
-
-    for duration in search_durations {
-        search_start_ns = end_ns - ((duration as i128) * 1_000_000_000);
-
-        // Always use IndexedReader - it efficiently reads only relevant segments
-        let events_result = indexed_reader.read_time_range(Some(search_start_ns), Some(end_ns));
-
-        match events_result {
-            Ok(events) => {
-                let sm_count = events.iter().filter(|e| matches!(e, Event::SystemMetrics(_))).count();
-
-                if sm_count >= target_count {
-                    all_events = events;
-                    break;
-                }
-
-                // Keep searching if we don't have enough yet
-                all_events = events;
-            }
-            Err(e) => {
-                eprintln!("ERROR in fetch_events_by_count: Failed to read events: {}", e);
-                return HttpResponse::InternalServerError().json(serde_json::json!({
-                    "error": format!("Failed to read events: {}", e),
-                }));
-            }
+    match collect_events_by_count(indexed_reader, timestamp, target_count, before) {
+        Ok(result) => HttpResponse::Ok().json(playback_result_json(&result)),
+        Err(e) => {
+            eprintln!("ERROR in fetch_events_by_count: Failed to read events: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("Failed to read events: {}", e),
+            }))
         }
     }
-
-    // Extract SystemMetrics and take the last target_count
-    let mut system_metrics: Vec<Event> = all_events.iter()
-        .filter(|e| matches!(e, Event::SystemMetrics(_)))
-        .cloned()
-        .collect();
-
-    let selected_metrics: Vec<Event> = if system_metrics.len() > target_count {
-        system_metrics.split_off(system_metrics.len() - target_count)
-    } else {
-        system_metrics
-    };
-
-    // Get time range of selected metrics
-    let (metrics_start_ns, metrics_end_ns) = if !selected_metrics.is_empty() {
-        let first_ts = selected_metrics.first().unwrap().timestamp().unix_timestamp_nanos();
-        let last_ts = selected_metrics.last().unwrap().timestamp().unix_timestamp_nanos();
-        (first_ts, last_ts)
-    } else {
-        (search_start_ns, end_ns)
-    };
-
-    // Include all other events within the selected metrics timespan
-    let other_events: Vec<Event> = all_events.into_iter()
-        .filter(|e| {
-            if matches!(e, Event::SystemMetrics(_)) {
-                return false;
-            }
-            let ts = e.timestamp().unix_timestamp_nanos();
-            ts >= metrics_start_ns && ts <= metrics_end_ns
-        })
-        .collect();
-
-    // Combine and sort
-    let mut final_events = selected_metrics;
-    final_events.extend(other_events);
-    final_events.sort_by_key(|e| e.timestamp().unix_timestamp_nanos());
-
-    // Look back for metadata
-    let metadata = find_missing_metadata(&indexed_reader, &final_events, end_ns);
-
-    // Format for API
-    let formatted_events: Vec<serde_json::Value> = final_events
-        .iter()
-        .map(format_event_for_api)
-        .collect();
-
-    HttpResponse::Ok().json(serde_json::json!({
-        "count": formatted_events.len(),
-        "events": formatted_events,
-        "metadata": metadata,
-    }))
 }
 
 /// Get time range metadata
@@ -193,7 +143,7 @@ pub async fn api_playback_info(
             "last_timestamp": last_secs,
             "first_timestamp_iso": first_dt.map(|dt| dt.to_string()),
             "last_timestamp_iso": last_dt.map(|dt| dt.to_string()),
-            "segment_count": reader.get_segments().len(),
+            "segment_count": reader.segment_count(),
             "estimated_event_count": reader.estimate_event_count(),
         }))
     } else {
@@ -328,9 +278,6 @@ pub async fn api_playback_events(
     indexed_reader: web::Data<Arc<IndexedReader>>,
     query: web::Query<PlaybackQuery>,
 ) -> HttpResponse {
-    // Refresh index to pick up any new segments written since server start
-    let _ = indexed_reader.refresh();
-
     // Mode 1: Count-based query (timestamp + count)
     if let Some(timestamp) = query.timestamp {
         let target_count = query.count.unwrap_or(60);
@@ -342,64 +289,58 @@ pub async fn api_playback_events(
     fetch_events_by_range(&log_reader, &indexed_reader, &query).await
 }
 
+pub async fn api_playback_jump(
+    _log_reader: web::Data<LogReader>,
+    indexed_reader: web::Data<Arc<IndexedReader>>,
+    query: web::Query<PlaybackJumpQuery>,
+) -> HttpResponse {
+    let history_count = query.history_count.unwrap_or(60);
+    let forward_seconds = query.forward_seconds.unwrap_or(60).max(1);
+    let timestamp = query.timestamp;
+
+    let history_result = match collect_events_by_count(&indexed_reader, timestamp, history_count, false) {
+        Ok(result) => result,
+        Err(e) => {
+            eprintln!("ERROR in api_playback_jump history: Failed to read events: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("Failed to read history events: {}", e),
+            }));
+        }
+    };
+
+    let forward_query = PlaybackQuery {
+        timestamp: None,
+        count: None,
+        before: None,
+        start_timestamp: Some(timestamp),
+        end_timestamp: Some(timestamp + forward_seconds),
+        limit: Some(2000),
+    };
+
+    let forward_result = match collect_events_by_range(&indexed_reader, &forward_query) {
+        Ok(result) => result,
+        Err(e) => {
+            eprintln!("ERROR in api_playback_jump forward: Failed to read events: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("Failed to read forward events: {}", e),
+            }));
+        }
+    };
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "history": playback_result_json(&history_result),
+        "forward": playback_result_json(&forward_result),
+    }))
+}
+
 /// Mode 2: Fetch all events in a time range (start to end)
 async fn fetch_events_by_range(
     _log_reader: &LogReader,
     indexed_reader: &Arc<IndexedReader>,
     query: &PlaybackQuery,
 ) -> HttpResponse {
-    let start_ns = query.start_timestamp.map(|s| (s as i128) * 1_000_000_000);
-    let end_ns = query.end_timestamp.map(|s| (s as i128) * 1_000_000_000);
-
-    // Always use IndexedReader - it efficiently reads only relevant segments
-    let events_result = indexed_reader.read_time_range(start_ns, end_ns);
-
-    match events_result {
-        Ok(mut events) => {
-            let mut used_fallback = false;
-
-            // If no SystemMetrics found in the requested range, try to fall back to earlier data
-            if events.is_empty() && end_ns.is_some() {
-                // Try to find the most recent data before the requested time
-                // Go back up to 7 days (604800 seconds)
-                let end_time = end_ns.unwrap();
-                let fallback_start = end_time - (7 * 24 * 3600 * 1_000_000_000i128);
-
-                // Read from fallback_start to requested end time (use IndexedReader for historical)
-                if let Ok(fallback_events) = indexed_reader.read_time_range(Some(fallback_start), Some(end_time)) {
-                    // Take the most recent events before the requested time
-                    events = fallback_events;
-                    used_fallback = !events.is_empty();
-                }
-            }
-
-            // Look back to find missing static/semi-static fields (metadata)
-            let metadata = if let Some(end_time) = end_ns {
-                find_missing_metadata(&indexed_reader, &events, end_time)
-            } else {
-                serde_json::json!({})
-            };
-
-            // Apply limit if specified
-            if let Some(limit) = query.limit {
-                if events.len() > limit {
-                    events = events.into_iter().rev().take(limit).rev().collect();
-                }
-            }
-
-            // Format events for API response
-            let formatted_events: Vec<serde_json::Value> = events
-                .iter()
-                .map(format_event_for_api)
-                .collect();
-
-            HttpResponse::Ok().json(serde_json::json!({
-                "count": formatted_events.len(),
-                "events": formatted_events,
-                "fallback": used_fallback,
-                "metadata": metadata,
-            }))
-        }
+    match collect_events_by_range(indexed_reader, query) {
+        Ok(result) => HttpResponse::Ok().json(playback_result_json(&result)),
         Err(e) => {
             eprintln!("ERROR in fetch_events_by_range: Failed to read events: {}", e);
             HttpResponse::InternalServerError().json(serde_json::json!({
@@ -407,6 +348,129 @@ async fn fetch_events_by_range(
             }))
         }
     }
+}
+
+fn collect_events_by_count(
+    indexed_reader: &Arc<IndexedReader>,
+    timestamp: i64,
+    target_count: usize,
+    before: bool,
+) -> anyhow::Result<PlaybackResult> {
+    let end_ns = if before {
+        (timestamp as i128) * 1_000_000_000
+    } else {
+        ((timestamp + 1) as i128) * 1_000_000_000
+    };
+
+    let lookback_secs = std::cmp::max(
+        MIN_HISTORY_LOOKBACK_SECS,
+        (target_count as i64) * HISTORY_LOOKBACK_MULTIPLIER_SECS,
+    );
+
+    let available_start_ns = indexed_reader
+        .get_time_range()
+        .map(|(first_ns, _)| first_ns)
+        .unwrap_or(end_ns);
+    let search_start_ns = std::cmp::max(
+        available_start_ns,
+        end_ns - (lookback_secs as i128 * 1_000_000_000),
+    );
+
+    let all_events = indexed_reader.read_time_range(Some(search_start_ns), Some(end_ns))?;
+
+    let (mut system_metrics, other_events_all): (Vec<Event>, Vec<Event>) =
+        all_events.into_iter().partition(|e| matches!(e, Event::SystemMetrics(_)));
+
+    let selected_metrics: Vec<Event> = if system_metrics.len() > target_count {
+        system_metrics.split_off(system_metrics.len() - target_count)
+    } else {
+        system_metrics
+    };
+
+    let (metrics_start_ns, metrics_end_ns) = if let (Some(first), Some(last)) =
+        (selected_metrics.first(), selected_metrics.last())
+    {
+        (
+            first.timestamp().unix_timestamp_nanos(),
+            last.timestamp().unix_timestamp_nanos(),
+        )
+    } else {
+        (search_start_ns, end_ns)
+    };
+
+    let other_events: Vec<Event> = other_events_all
+        .into_iter()
+        .filter(|e| {
+            let ts = e.timestamp().unix_timestamp_nanos();
+            ts >= metrics_start_ns && ts <= metrics_end_ns
+        })
+        .collect();
+
+    let mut final_events = selected_metrics;
+    final_events.extend(other_events);
+    final_events.sort_by_key(|e| e.timestamp().unix_timestamp_nanos());
+
+    let metadata = find_missing_metadata(indexed_reader, &final_events, end_ns);
+
+    Ok(PlaybackResult {
+        events: final_events,
+        metadata,
+        fallback: false,
+    })
+}
+
+fn collect_events_by_range(
+    indexed_reader: &Arc<IndexedReader>,
+    query: &PlaybackQuery,
+) -> anyhow::Result<PlaybackResult> {
+    let start_ns = query.start_timestamp.map(|s| (s as i128) * 1_000_000_000);
+    let end_ns = query.end_timestamp.map(|s| (s as i128) * 1_000_000_000);
+
+    let mut events = indexed_reader.read_time_range(start_ns, end_ns)?;
+    let mut used_fallback = false;
+
+    if events.is_empty() && end_ns.is_some() {
+        let end_time = end_ns.unwrap();
+        let fallback_start = end_time - (7 * 24 * 3600 * 1_000_000_000i128);
+
+        if let Ok(fallback_events) = indexed_reader.read_time_range(Some(fallback_start), Some(end_time)) {
+            events = fallback_events;
+            used_fallback = !events.is_empty();
+        }
+    }
+
+    let metadata = if let Some(end_time) = end_ns {
+        find_missing_metadata(indexed_reader, &events, end_time)
+    } else {
+        serde_json::json!({})
+    };
+
+    if let Some(limit) = query.limit {
+        if events.len() > limit {
+            events = events.into_iter().rev().take(limit).rev().collect();
+        }
+    }
+
+    Ok(PlaybackResult {
+        events,
+        metadata,
+        fallback: used_fallback,
+    })
+}
+
+fn playback_result_json(result: &PlaybackResult) -> serde_json::Value {
+    let formatted_events: Vec<serde_json::Value> = result
+        .events
+        .iter()
+        .map(format_event_for_api)
+        .collect();
+
+    serde_json::json!({
+        "count": formatted_events.len(),
+        "events": formatted_events,
+        "fallback": result.fallback,
+        "metadata": result.metadata,
+    })
 }
 
 /// Look back up to 24 hours to find the most recent values for missing static/semi-static fields
@@ -558,6 +622,96 @@ fn find_missing_metadata(reader: &IndexedReader, events: &[Event], end_time_ns: 
     }
 
     metadata
+}
+
+fn merge_system_metrics_with_metadata(
+    metrics: &crate::event::SystemMetrics,
+    metadata: Option<&Metadata>,
+) -> crate::event::SystemMetrics {
+    let Some(metadata) = metadata else {
+        return metrics.clone();
+    };
+
+    let mut merged = metrics.clone();
+    merged.kernel_version = merged.kernel_version.or_else(|| metadata.kernel_version.clone());
+    merged.cpu_model = merged.cpu_model.or_else(|| metadata.cpu_model.clone());
+    merged.cpu_mhz = merged.cpu_mhz.or(metadata.cpu_mhz);
+    merged.mem_total_bytes = merged.mem_total_bytes.or(metadata.mem_total_bytes);
+    merged.swap_total_bytes = merged.swap_total_bytes.or(metadata.swap_total_bytes);
+    merged.disk_total_bytes = merged.disk_total_bytes.or(metadata.disk_total_bytes);
+    merged.filesystems = merged.filesystems.or_else(|| metadata.filesystems.clone());
+    merged.net_interface = merged.net_interface.or_else(|| metadata.net_interface.clone());
+    merged.net_ip_address = merged.net_ip_address.or_else(|| metadata.net_ip_address.clone());
+    merged.net_gateway = merged.net_gateway.or_else(|| metadata.net_gateway.clone());
+    merged.net_dns = merged.net_dns.or_else(|| metadata.net_dns.clone());
+    merged.fans = merged.fans.or_else(|| metadata.fans.clone());
+    merged.logged_in_users = merged.logged_in_users.or_else(|| metadata.logged_in_users.clone());
+    merged
+}
+
+fn format_metadata_as_initial_state(metadata: &Metadata) -> serde_json::Value {
+    serde_json::json!({
+        "type": "SystemMetrics",
+        "timestamp": metadata.last_updated.unix_timestamp_nanos() / 1_000_000,
+        "kernel": metadata.kernel_version,
+        "cpu_model": metadata.cpu_model,
+        "cpu_mhz": metadata.cpu_mhz,
+        "system_uptime_seconds": 0,
+        "cpu": 0.0,
+        "per_core_cpu": [],
+        "mem": 0.0,
+        "mem_used": 0,
+        "mem_total": metadata.mem_total_bytes,
+        "swap": 0.0,
+        "swap_used": 0,
+        "swap_total": metadata.swap_total_bytes,
+        "load": 0.0,
+        "load5": 0.0,
+        "load15": 0.0,
+        "disk": 0.0,
+        "disk_used": 0,
+        "disk_total": metadata.disk_total_bytes,
+        "disk_read": 0,
+        "disk_write": 0,
+        "per_disk": [],
+        "filesystems": metadata.filesystems.as_ref().map(|fs_list| fs_list.iter().map(|fs| serde_json::json!({
+            "filesystem": fs.filesystem,
+            "mount_point": fs.mount_point,
+            "total_bytes": fs.total_bytes,
+            "used_bytes": fs.used_bytes,
+            "available_bytes": fs.available_bytes,
+        })).collect::<Vec<_>>()).unwrap_or_default(),
+        "users": metadata.logged_in_users.as_ref().map(|user_list| user_list.iter().map(|u| serde_json::json!({
+            "username": u.username,
+            "terminal": u.terminal,
+            "remote_host": u.remote_host,
+        })).collect::<Vec<_>>()).unwrap_or_default(),
+        "net_recv": 0,
+        "net_send": 0,
+        "net_recv_errors": 0,
+        "net_send_errors": 0,
+        "net_recv_drops": 0,
+        "net_send_drops": 0,
+        "net_interface": metadata.net_interface,
+        "net_ip": metadata.net_ip_address,
+        "net_gateway": metadata.net_gateway,
+        "net_dns": metadata.net_dns,
+        "tcp": 0,
+        "tcp_wait": 0,
+        "ctx_switches": 0,
+        "cpu_temp": metadata.temps.as_ref().and_then(|t| t.cpu_temp_celsius),
+        "per_core_temps": metadata.temps.as_ref().map(|t| t.per_core_temps.clone()).unwrap_or_default(),
+        "gpu_temp": metadata.temps.as_ref().and_then(|t| t.gpu_temp_celsius),
+        "mobo_temp": metadata.temps.as_ref().and_then(|t| t.motherboard_temp_celsius),
+        "fans": metadata.fans.as_ref().map(|fan_list| fan_list.iter().map(|f| serde_json::json!({
+            "label": f.label,
+            "rpm": f.rpm,
+        })).collect::<Vec<_>>()).unwrap_or_default(),
+        "gpu_freq": metadata.gpu.as_ref().and_then(|g| g.gpu_freq_mhz),
+        "gpu_mem_freq": metadata.gpu.as_ref().and_then(|g| g.mem_freq_mhz),
+        "gpu_temp2": metadata.gpu.as_ref().and_then(|g| g.gpu_temp_celsius),
+        "gpu_power": metadata.gpu.as_ref().and_then(|g| g.power_watts),
+    })
 }
 
 fn format_event_for_api(event: &Event) -> serde_json::Value {

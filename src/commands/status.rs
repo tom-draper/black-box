@@ -27,13 +27,7 @@ pub fn run_status(
 
     let health_url = format!("{}/health", url.trim_end_matches('/'));
 
-    // Build request with optional auth
-    let mut req = client.get(&health_url);
-    if let (Some(u), Some(p)) = (&username, &password) {
-        req = req.basic_auth(u, Some(p));
-    }
-
-    let response = req
+    let response = super::with_auth(client.get(&health_url), &username, &password)
         .send()
         .context("Failed to connect to black box server")?;
 

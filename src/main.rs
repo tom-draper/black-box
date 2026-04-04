@@ -1144,7 +1144,6 @@ fn run_recorder(cli: Cli) -> Result<()> {
                         AuthEventType::SudoCommand => {
                             (SecurityEventKind::SudoCommand, AnomalySeverity::Info)
                         }
-                        _ => (SecurityEventKind::FailedAuth, AnomalySeverity::Warning),
                     };
 
                     let event = SecurityEvent {
@@ -1179,7 +1178,6 @@ fn run_recorder(cli: Cli) -> Result<()> {
                         AuthEventType::SudoCommand => {
                             println!("{} [SEC] [SUDO] {}", now_timestamp(), entry.user);
                         }
-                        _ => {}
                     }
                 }
             }

@@ -24,10 +24,7 @@ pub async fn start_server(
         Ok(r) => Arc::new(r),
         Err(e) => {
             eprintln!("Warning: Failed to build index: {}. Time-travel features disabled.", e);
-            Arc::new(IndexedReader::new(&data_dir).unwrap_or_else(|_| {
-                // Create empty reader as fallback
-                IndexedReader::new(std::env::temp_dir()).unwrap()
-            }))
+            Arc::new(IndexedReader::new(std::env::temp_dir()).unwrap())
         }
     };
     let indexed_reader_data = web::Data::new(indexed_reader);
@@ -61,6 +58,7 @@ pub async fn start_server(
             .route("/api/events", web::get().to(routes::api_events))
             .route("/api/playback/info", web::get().to(playback::api_playback_info))
             .route("/api/playback/events", web::get().to(playback::api_playback_events))
+            .route("/api/playback/jump", web::get().to(playback::api_playback_jump))
             .route("/api/initial-state", web::get().to(playback::api_initial_state))
             .route("/api/timeline", web::get().to(playback::api_timeline))
             .route("/ws", web::get().to(websocket::ws_handler))
