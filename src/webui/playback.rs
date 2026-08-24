@@ -113,7 +113,7 @@ async fn fetch_events_by_count(
     target_count: usize,
     before: bool,
 ) -> HttpResponse {
-    match collect_events_by_count(indexed_reader, timestamp, target_count, before) {
+    match collect_events_by_count(indexed_reader, timestamp, target_count, before, true) {
         Ok(result) => HttpResponse::Ok().json(playback_result_json(&result)),
         Err(e) => {
             eprintln!("ERROR in fetch_events_by_count: Failed to read events: {}", e);
@@ -278,7 +278,7 @@ pub async fn api_playback_events(
     indexed_reader: web::Data<Arc<IndexedReader>>,
     query: web::Query<PlaybackQuery>,
 ) -> HttpResponse {
-    if let Err(e) = indexed_reader.refresh() {
+    if let Err(e) = indexed_reader.refresh_if_changed() {
         eprintln!("Failed to refresh playback index: {}", e);
         return HttpResponse::InternalServerError().json(serde_json::json!({
             "error": "Failed to refresh playback index",
@@ -301,7 +301,7 @@ pub async fn api_playback_jump(
     indexed_reader: web::Data<Arc<IndexedReader>>,
     query: web::Query<PlaybackJumpQuery>,
 ) -> HttpResponse {
-    if let Err(e) = indexed_reader.refresh() {
+    if let Err(e) = indexed_reader.refresh_if_changed() {
         eprintln!("Failed to refresh playback index: {}", e);
         return HttpResponse::InternalServerError().json(serde_json::json!({
             "error": "Failed to refresh playback index",
@@ -312,7 +312,13 @@ pub async fn api_playback_jump(
     let forward_seconds = query.forward_seconds.unwrap_or(60).max(1);
     let timestamp = query.timestamp;
 
-    let history_result = match collect_events_by_count(&indexed_reader, timestamp, history_count, false) {
+    let history_result = match collect_events_by_count(
+        &indexed_reader,
+        timestamp,
+        history_count,
+        false,
+        false,
+    ) {
         Ok(result) => result,
         Err(e) => {
             eprintln!("ERROR in api_playback_jump history: Failed to read events: {}", e);
@@ -331,7 +337,7 @@ pub async fn api_playback_jump(
         limit: Some(2000),
     };
 
-    let forward_result = match collect_events_by_range(&indexed_reader, &forward_query) {
+    let forward_result = match collect_events_by_range(&indexed_reader, &forward_query, true) {
         Ok(result) => result,
         Err(e) => {
             eprintln!("ERROR in api_playback_jump forward: Failed to read events: {}", e);
@@ -353,7 +359,7 @@ async fn fetch_events_by_range(
     indexed_reader: &Arc<IndexedReader>,
     query: &PlaybackQuery,
 ) -> HttpResponse {
-    match collect_events_by_range(indexed_reader, query) {
+    match collect_events_by_range(indexed_reader, query, true) {
         Ok(result) => HttpResponse::Ok().json(playback_result_json(&result)),
         Err(e) => {
             eprintln!("ERROR in fetch_events_by_range: Failed to read events: {}", e);
@@ -369,6 +375,7 @@ fn collect_events_by_count(
     timestamp: i64,
     target_count: usize,
     before: bool,
+    include_metadata: bool,
 ) -> anyhow::Result<PlaybackResult> {
     let end_ns = if before {
         (timestamp as i128) * 1_000_000_000
@@ -424,7 +431,11 @@ fn collect_events_by_count(
     final_events.extend(other_events);
     final_events.sort_by_key(|e| e.timestamp().unix_timestamp_nanos());
 
-    let metadata = find_missing_metadata(indexed_reader, &final_events, end_ns);
+    let metadata = if include_metadata {
+        find_missing_metadata(indexed_reader, &final_events, end_ns)
+    } else {
+        serde_json::json!({})
+    };
 
     Ok(PlaybackResult {
         events: final_events,
@@ -436,6 +447,7 @@ fn collect_events_by_count(
 fn collect_events_by_range(
     indexed_reader: &Arc<IndexedReader>,
     query: &PlaybackQuery,
+    include_metadata: bool,
 ) -> anyhow::Result<PlaybackResult> {
     let start_ns = query.start_timestamp.map(|s| (s as i128) * 1_000_000_000);
     let end_ns = query.end_timestamp.map(|s| (s as i128) * 1_000_000_000);
@@ -453,8 +465,12 @@ fn collect_events_by_range(
         }
     }
 
-    let metadata = if let Some(end_time) = end_ns {
-        find_missing_metadata(indexed_reader, &events, end_time)
+    let metadata = if include_metadata {
+        if let Some(end_time) = end_ns {
+            find_missing_metadata(indexed_reader, &events, end_time)
+        } else {
+            serde_json::json!({})
+        }
     } else {
         serde_json::json!({})
     };

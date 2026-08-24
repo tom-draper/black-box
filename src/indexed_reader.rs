@@ -9,7 +9,7 @@ use std::{
 
 use crate::event::Event;
 use crate::index::{find_relevant_segments, find_start_block, IndexBuilder};
-use crate::storage::{RecordHeader, SegmentIndex, MAGIC};
+use crate::storage::{find_segment_files, RecordHeader, SegmentIndex, MAGIC};
 
 /// Efficient reader using memory-mapped I/O and block indexes
 pub struct IndexedReader {
@@ -37,6 +37,27 @@ impl IndexedReader {
         let mut indexes = self.indexes.write().unwrap();
         *indexes = new_indexes;
         Ok(())
+    }
+
+    /// Refresh only when the newest segment changed on disk. The recorder flushes
+    /// periodically, so this avoids rescanning the active segment for every seek.
+    pub fn refresh_if_changed(&self) -> Result<bool> {
+        let Some((segment_id, path)) = find_segment_files(&self.dir).pop() else {
+            return Ok(false);
+        };
+        let file_size = std::fs::metadata(&path)?.len();
+        let indexes = self.indexes.read().unwrap();
+        let unchanged = indexes
+            .last()
+            .is_some_and(|index| index.segment_id == segment_id && index.file_size == file_size);
+        drop(indexes);
+
+        if unchanged {
+            return Ok(false);
+        }
+
+        self.refresh()?;
+        Ok(true)
     }
 
     /// Read events in a time range efficiently using indexes
@@ -170,7 +191,9 @@ impl IndexedReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     use tempfile::TempDir;
+    use crate::storage::MAGIC;
 
     #[test]
     fn test_indexed_reader_empty_dir() {
@@ -178,5 +201,22 @@ mod tests {
         let reader = IndexedReader::new(temp_dir.path()).unwrap();
         assert_eq!(reader.segment_count(), 0);
         assert!(reader.get_time_range().is_none());
+    }
+
+    #[test]
+    fn refreshes_only_after_the_active_segment_changes() {
+        let temp_dir = TempDir::new().unwrap();
+        let segment = temp_dir.path().join("segment_00000.dat");
+        std::fs::write(&segment, MAGIC.to_le_bytes()).unwrap();
+        let reader = IndexedReader::new(temp_dir.path()).unwrap();
+
+        assert!(!reader.refresh_if_changed().unwrap());
+
+        let mut file = std::fs::OpenOptions::new().append(true).open(&segment).unwrap();
+        file.write_all(&[0]).unwrap();
+        file.flush().unwrap();
+
+        assert!(reader.refresh_if_changed().unwrap());
+        assert!(!reader.refresh_if_changed().unwrap());
     }
 }

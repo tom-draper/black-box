@@ -57,7 +57,8 @@ impl IndexBuilder {
         }
 
         // Check if index is newer than segment (segment hasn't been modified)
-        let segment_mtime = fs::metadata(segment_path)?.modified()?;
+        let segment_metadata = fs::metadata(segment_path)?;
+        let segment_mtime = segment_metadata.modified()?;
         let index_mtime = fs::metadata(index_path)?.modified()?;
 
         if index_mtime < segment_mtime {
@@ -68,6 +69,9 @@ impl IndexBuilder {
         let index_data = fs::read(index_path)?;
         let index: SegmentIndex = bincode::deserialize(&index_data)
             .context("Failed to deserialize cached index")?;
+        if index.file_size != segment_metadata.len() {
+            anyhow::bail!("Cached index has a stale file size");
+        }
 
         Ok(index)
     }
