@@ -48,6 +48,7 @@ pub struct PlaybackQuery {
     end_timestamp: Option<i64>,    // Unix seconds - range end
     #[serde(rename = "limit")]
     limit: Option<usize>,          // Max total events to return
+    compact: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -55,6 +56,7 @@ pub struct PlaybackJumpQuery {
     timestamp: i64,
     history_count: Option<usize>,
     forward_seconds: Option<i64>,
+    compact: Option<bool>,
 }
 
 /// Get the most recent complete SystemMetrics (with static/semi-static fields) for page initialization
@@ -75,7 +77,7 @@ pub async fn api_initial_state(
                 if let Event::SystemMetrics(m) = event {
                     if m.filesystems.is_some() {
                         let merged = merge_system_metrics_with_metadata(m, shared_metadata.as_ref());
-                        return HttpResponse::Ok().json(format_event_for_api(&Event::SystemMetrics(merged)));
+                        return HttpResponse::Ok().json(format_event_for_api(&Event::SystemMetrics(merged), false));
                     }
                 }
             }
@@ -84,7 +86,7 @@ pub async fn api_initial_state(
             for event in events.iter().rev() {
                 if let Event::SystemMetrics(m) = event {
                     let merged = merge_system_metrics_with_metadata(m, shared_metadata.as_ref());
-                    return HttpResponse::Ok().json(format_event_for_api(&Event::SystemMetrics(merged)));
+                    return HttpResponse::Ok().json(format_event_for_api(&Event::SystemMetrics(merged), false));
                 }
             }
 
@@ -119,7 +121,7 @@ async fn fetch_events_by_count(
     })
     .await
     {
-        Ok(Ok(result)) => HttpResponse::Ok().json(playback_result_json(&result)),
+        Ok(Ok(result)) => HttpResponse::Ok().json(playback_result_json(&result, false)),
         Ok(Err(e)) => {
             eprintln!("ERROR in fetch_events_by_count: Failed to read events: {}", e);
             HttpResponse::InternalServerError().json(serde_json::json!({
@@ -344,6 +346,7 @@ pub async fn api_playback_jump(
                 start_timestamp: Some(timestamp),
                 end_timestamp: Some(timestamp + forward_seconds),
                 limit: Some(2000),
+                compact: Some(query.compact.unwrap_or(false)),
             };
             collect_events_by_range(&forward_reader, &forward_query, true)
         }),
@@ -376,8 +379,8 @@ pub async fn api_playback_jump(
     };
 
     HttpResponse::Ok().json(serde_json::json!({
-        "history": playback_result_json(&history_result),
-        "forward": playback_result_json(&forward_result),
+        "history": playback_result_json(&history_result, query.compact.unwrap_or(false)),
+        "forward": playback_result_json(&forward_result, query.compact.unwrap_or(false)),
     }))
 }
 
@@ -390,7 +393,7 @@ async fn fetch_events_by_range(
     let reader = indexed_reader.clone();
     let query = query.clone();
     match tokio::task::spawn_blocking(move || collect_events_by_range(&reader, &query, true)).await {
-        Ok(Ok(result)) => HttpResponse::Ok().json(playback_result_json(&result)),
+        Ok(Ok(result)) => HttpResponse::Ok().json(playback_result_json(&result, query.compact.unwrap_or(false))),
         Ok(Err(e)) => {
             eprintln!("ERROR in fetch_events_by_range: Failed to read events: {}", e);
             HttpResponse::InternalServerError().json(serde_json::json!({
@@ -521,11 +524,11 @@ fn collect_events_by_range(
     })
 }
 
-fn playback_result_json(result: &PlaybackResult) -> serde_json::Value {
+fn playback_result_json(result: &PlaybackResult, compact: bool) -> serde_json::Value {
     let formatted_events: Vec<serde_json::Value> = result
         .events
         .iter()
-        .map(format_event_for_api)
+        .map(|event| format_event_for_api(event, compact))
         .collect();
 
     serde_json::json!({
@@ -798,8 +801,8 @@ fn format_metadata_as_initial_state(metadata: &Metadata) -> serde_json::Value {
     })
 }
 
-fn format_event_for_api(event: &Event) -> serde_json::Value {
-    match event {
+fn format_event_for_api(event: &Event, compact: bool) -> serde_json::Value {
+    let mut value = match event {
         Event::SystemMetrics(m) => {
             // Percentages are now calculated every second in main.rs using cached totals
 
@@ -923,5 +926,41 @@ fn format_event_for_api(event: &Event) -> serde_json::Value {
             "path": fse.path,
             "size": fse.size,
         }),
+    };
+
+    if compact {
+        if let Some(fields) = value.as_object_mut() {
+            match event {
+                Event::SystemMetrics(metrics) => {
+                    fields.remove("per_disk");
+                    fields.remove("per_core_temps");
+                    if metrics.filesystems.is_none() {
+                        fields.remove("filesystems");
+                    }
+                    if metrics.logged_in_users.is_none() {
+                        fields.remove("users");
+                    }
+                    if metrics.fans.is_none() {
+                        fields.remove("fans");
+                    }
+                }
+                Event::ProcessLifecycle(_) => {
+                    fields.remove("cmdline");
+                    fields.remove("working_dir");
+                }
+                Event::ProcessSnapshot(_) => {
+                    if let Some(processes) = fields.get_mut("processes").and_then(|value| value.as_array_mut()) {
+                        for process in processes {
+                            if let Some(process) = process.as_object_mut() {
+                                process.remove("cmdline");
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
     }
+
+    value
 }

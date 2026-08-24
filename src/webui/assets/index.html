@@ -860,7 +860,7 @@ async function fetchPlaybackInfo() {
 // Fetch and populate playback buffer with events
 async function fetchPlaybackBuffer(startTimestamp, endTimestamp) {
     try {
-        const url = `/api/playback/events?start=${startTimestamp}&end=${endTimestamp}&limit=2000`;
+        const url = `/api/playback/events?start=${startTimestamp}&end=${endTimestamp}&limit=2000&compact=true`;
         const resp = await fetch(url);
         const data = await resp.json();
 
@@ -980,7 +980,7 @@ async function jumpToTimestamp(timestamp, incremental = false) {
     // Fetch history and forward buffer in a single request to reduce jump latency
     playbackController.setBufferRange(timestamp, timestamp + BUFFER_SIZE);
 
-    const jumpData = await fetch(`/api/playback/jump?timestamp=${timestamp}&history_count=60&forward_seconds=${BUFFER_SIZE}`)
+    const jumpData = await fetch(`/api/playback/jump?timestamp=${timestamp}&history_count=60&forward_seconds=${BUFFER_SIZE}&compact=true`)
         .then(r => r.json())
         .catch(e => {
             console.error('Failed to load playback jump:', e);
