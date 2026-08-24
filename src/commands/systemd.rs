@@ -204,6 +204,7 @@ username = "admin"
 password_hash = "$2b$12$KIXALxKzLbXHQXQZWxJQfOqK.vlWvPXPvvPZvqKq3vKZvXvXvXvXe"
 
 [server]
+bind_address = "127.0.0.1"
 port = 8080
 data_dir = "{}"
 

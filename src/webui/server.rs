@@ -12,6 +12,7 @@ use super::{auth, health, playback, routes, websocket};
 
 pub async fn start_server(
     data_dir: String,
+    bind_address: String,
     port: u16,
     broadcaster: Arc<EventBroadcaster>,
     config: Config,
@@ -41,7 +42,7 @@ pub async fn start_server(
         broadcaster_clone.run().await;
     });
 
-    println!("Server listening on http://localhost:{}", port);
+    println!("Server listening on http://{}:{}", bind_address, port);
 
     HttpServer::new(move || {
         App::new()
@@ -64,7 +65,7 @@ pub async fn start_server(
             .route("/ws", web::get().to(websocket::ws_handler))
             .route("/health", web::get().to(health::health_check))
     })
-    .bind(("0.0.0.0", port))?
+    .bind((bind_address.as_str(), port))?
     .run()
     .await
     .map_err(|e| anyhow::anyhow!("Server error: {}", e))

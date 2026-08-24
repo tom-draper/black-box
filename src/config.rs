@@ -29,10 +29,18 @@ pub struct AuthConfig {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ServerConfig {
+    /// Address the web UI listens on. Keep the default local so a fresh
+    /// installation is not exposed to the network with default credentials.
+    #[serde(default = "default_bind_address")]
+    pub bind_address: String,
     pub port: u16,
     pub data_dir: String,
     #[serde(default = "default_max_storage_mb")]
     pub max_storage_mb: u64,
+}
+
+fn default_bind_address() -> String {
+    "127.0.0.1".to_string()
 }
 
 fn default_max_storage_mb() -> u64 {
@@ -121,6 +129,7 @@ impl Config {
                 password_hash: default_hash,
             },
             server: ServerConfig {
+                bind_address: default_bind_address(),
                 port: 8080,
                 data_dir: "./data".to_string(),
                 max_storage_mb: 100,
@@ -146,6 +155,7 @@ impl Config {
                 password_hash: bcrypt::hash("test", 4).unwrap(),
             },
             server: ServerConfig {
+                bind_address: default_bind_address(),
                 port: 8080,
                 data_dir: "./test_data".to_string(),
                 max_storage_mb: 100,
@@ -184,5 +194,6 @@ mod tests {
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.auth.username, "admin");
         assert_eq!(config.server.port, 8080);
+        assert_eq!(config.server.bind_address, "127.0.0.1");
     }
 }

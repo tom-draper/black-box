@@ -308,6 +308,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
     let port = cli.port.unwrap_or(config.server.port);
 
     let data_dir = config.server.data_dir.clone();
+    let bind_address = config.server.bind_address.clone();
 
     // Initialize metadata in memory early so web server can access it
     let mem_stats = read_memory_stats()?;
@@ -377,6 +378,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
     // Start async services (web server and remote streaming)
     if !disable_ui || config.protection.remote_syslog.as_ref().map(|c| c.enabled).unwrap_or(false) {
         let data_dir_clone = data_dir.clone();
+        let bind_address_clone = bind_address.clone();
         let config_clone = config.clone();
         let broadcaster = Arc::new(broadcaster);
         let protection_config = config.protection.clone();
@@ -412,7 +414,14 @@ fn run_recorder(cli: Cli) -> Result<()> {
                 // Start web server if not disabled
                 if !disable_ui {
                     if let Err(e) =
-                        webui::start_server(data_dir_clone, port, broadcaster, config_clone, metadata_clone).await
+                        webui::start_server(
+                            data_dir_clone,
+                            bind_address_clone,
+                            port,
+                            broadcaster,
+                            config_clone,
+                            metadata_clone,
+                        ).await
                     {
                         eprintln!("Web UI failed to start: {}", e);
                     }
@@ -463,7 +472,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
     println!("Collection interval: {}s", COLLECTION_INTERVAL_SECS);
     println!("Tracking: CPU, Memory, Swap, Disk, Network, TCP, Load, Temperature, Processes");
     if !disable_ui {
-        println!("Web UI: http://localhost:{}", port);
+        println!("Web UI: http://{}:{}", bind_address, port);
         if config.auth.enabled {
             println!("Auth: Enabled (username: {})", config.auth.username);
         } else {
@@ -1542,4 +1551,3 @@ async fn start_remote_streaming(broadcaster: Arc<EventBroadcaster>, config: Remo
         }
     }
 }
-

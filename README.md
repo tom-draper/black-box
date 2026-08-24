@@ -106,6 +106,7 @@ username = "admin"
 password_hash = "$2b$12$..."
 
 [server]
+bind_address = "127.0.0.1"
 port = 8080
 data_dir = "./data"
 max_storage_mb = 100
@@ -116,7 +117,11 @@ The main settings most people care about are:
 - `data_dir`: where recordings live
 - `max_storage_mb`: how much disk to use before old data is overwritten
 - `port`: web UI port
+- `bind_address`: interface for the UI; it defaults to `127.0.0.1` so the UI is local-only
 - `auth.enabled`: whether the UI/API requires login
+
+To make the UI reachable from another machine, set `bind_address` explicitly
+(for example, `"0.0.0.0"`) and put it behind HTTPS or a trusted private network.
 
 For production, use a real data directory such as `/var/lib/black-box` instead of `./data`.
 

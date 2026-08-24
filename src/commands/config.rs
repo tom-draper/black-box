@@ -24,6 +24,7 @@ pub fn validate_config() -> Result<()> {
             println!("✓ Configuration is valid");
             println!();
             println!("Server:");
+            println!("  Bind address: {}", config.server.bind_address);
             println!("  Port: {}", config.server.port);
             println!("  Data directory: {}", config.server.data_dir);
             println!();
