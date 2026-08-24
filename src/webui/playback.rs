@@ -278,6 +278,13 @@ pub async fn api_playback_events(
     indexed_reader: web::Data<Arc<IndexedReader>>,
     query: web::Query<PlaybackQuery>,
 ) -> HttpResponse {
+    if let Err(e) = indexed_reader.refresh() {
+        eprintln!("Failed to refresh playback index: {}", e);
+        return HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": "Failed to refresh playback index",
+        }));
+    }
+
     // Mode 1: Count-based query (timestamp + count)
     if let Some(timestamp) = query.timestamp {
         let target_count = query.count.unwrap_or(60);
@@ -294,6 +301,13 @@ pub async fn api_playback_jump(
     indexed_reader: web::Data<Arc<IndexedReader>>,
     query: web::Query<PlaybackJumpQuery>,
 ) -> HttpResponse {
+    if let Err(e) = indexed_reader.refresh() {
+        eprintln!("Failed to refresh playback index: {}", e);
+        return HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": "Failed to refresh playback index",
+        }));
+    }
+
     let history_count = query.history_count.unwrap_or(60);
     let forward_seconds = query.forward_seconds.unwrap_or(60).max(1);
     let timestamp = query.timestamp;
