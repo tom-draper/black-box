@@ -1,10 +1,11 @@
 use anyhow::{Context, Result};
 use memmap2::Mmap;
 use std::{
+    collections::HashMap,
     fs::File,
     io::Cursor,
     path::{Path, PathBuf},
-    sync::RwLock,
+    sync::{Mutex, RwLock},
 };
 
 use crate::event::Event;
@@ -15,6 +16,7 @@ use crate::storage::{find_segment_files, RecordHeader, SegmentIndex, MAGIC};
 pub struct IndexedReader {
     dir: PathBuf,
     indexes: RwLock<Vec<SegmentIndex>>,
+    metadata_cache: Mutex<HashMap<(i64, u16), serde_json::Value>>,
 }
 
 impl IndexedReader {
@@ -27,6 +29,7 @@ impl IndexedReader {
         Ok(Self {
             dir: dir_path,
             indexes: RwLock::new(indexes),
+            metadata_cache: Mutex::new(HashMap::new()),
         })
     }
 
@@ -36,6 +39,7 @@ impl IndexedReader {
         let new_indexes = builder.build_index()?;
         let mut indexes = self.indexes.write().unwrap();
         *indexes = new_indexes;
+        self.metadata_cache.lock().unwrap().clear();
         Ok(())
     }
 
@@ -58,6 +62,23 @@ impl IndexedReader {
 
         self.refresh()?;
         Ok(true)
+    }
+
+    pub fn cached_metadata(&self, end_ns: i128, missing_fields: u16) -> Option<serde_json::Value> {
+        self.metadata_cache
+            .lock()
+            .unwrap()
+            .get(&(metadata_bucket(end_ns), missing_fields))
+            .cloned()
+    }
+
+    pub fn cache_metadata(&self, end_ns: i128, missing_fields: u16, metadata: serde_json::Value) {
+        let mut cache = self.metadata_cache.lock().unwrap();
+        // Keep roughly one day of five-minute metadata snapshots.
+        if cache.len() >= 288 {
+            cache.clear();
+        }
+        cache.insert((metadata_bucket(end_ns), missing_fields), metadata);
     }
 
     /// Read events in a time range efficiently using indexes
@@ -192,6 +213,10 @@ impl IndexedReader {
     }
 }
 
+fn metadata_bucket(end_ns: i128) -> i64 {
+    (end_ns / (5 * 60 * 1_000_000_000i128)) as i64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,5 +247,16 @@ mod tests {
 
         assert!(reader.refresh_if_changed().unwrap());
         assert!(!reader.refresh_if_changed().unwrap());
+    }
+
+    #[test]
+    fn caches_metadata_by_five_minute_bucket() {
+        let temp_dir = TempDir::new().unwrap();
+        let reader = IndexedReader::new(temp_dir.path()).unwrap();
+        reader.cache_metadata(600_000_000_000, 1, serde_json::json!({"kernel": "test"}));
+
+        assert_eq!(reader.cached_metadata(899_000_000_000, 1), Some(serde_json::json!({"kernel": "test"})));
+        assert_eq!(reader.cached_metadata(899_000_000_000, 2), None);
+        assert_eq!(reader.cached_metadata(900_000_000_000, 1), None);
     }
 }

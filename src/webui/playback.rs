@@ -547,6 +547,23 @@ fn find_missing_metadata(reader: &IndexedReader, events: &[Event], end_time_ns: 
         return serde_json::json!({});
     }
 
+    let missing_fields = ((!has_kernel) as u16)
+        | (((!has_cpu_model) as u16) << 1)
+        | (((!has_cpu_mhz) as u16) << 2)
+        | (((!has_mem_total) as u16) << 3)
+        | (((!has_swap_total) as u16) << 4)
+        | (((!has_disk_total) as u16) << 5)
+        | (((!has_filesystems) as u16) << 6)
+        | (((!has_net_interface) as u16) << 7)
+        | (((!has_net_ip) as u16) << 8)
+        | (((!has_net_gateway) as u16) << 9)
+        | (((!has_net_dns) as u16) << 10)
+        | (((!has_fans) as u16) << 11)
+        | (((!has_processes) as u16) << 12);
+    if let Some(metadata) = reader.cached_metadata(end_time_ns, missing_fields) {
+        return metadata;
+    }
+
     // Look back up to 1 hour to find missing fields (reduced from 24h for performance)
     // Metadata fields (kernel, CPU model, etc.) are typically available within minutes
     let lookback_start = end_time_ns - (3600 * 1_000_000_000i128);
@@ -649,6 +666,10 @@ fn find_missing_metadata(reader: &IndexedReader, events: &[Event], end_time_ns: 
                 }
             }
         }
+    }
+
+    if !metadata.as_object().is_some_and(|fields| fields.is_empty()) {
+        reader.cache_metadata(end_time_ns, missing_fields, metadata.clone());
     }
 
     metadata
