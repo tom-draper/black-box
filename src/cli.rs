@@ -67,6 +67,16 @@ pub enum Commands {
         data_dir: Option<String>,
     },
 
+    /// Verify and archive sealed recording segments
+    Archive {
+        /// New destination directory for the archive
+        destination: String,
+
+        /// Data directory to archive (defaults to the configured data directory)
+        #[arg(short, long)]
+        data_dir: Option<String>,
+    },
+
     /// Watch remote black box instance for health and auto-export on failure
     Watch {
         /// Black box server URL

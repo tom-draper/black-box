@@ -27,6 +27,13 @@ struct SegmentManifest {
     public_key: String,
 }
 
+#[derive(Clone, Serialize)]
+pub struct ArchiveSegment {
+    pub segment_id: u64,
+    pub file_name: String,
+    pub file_size: u64,
+}
+
 impl SegmentSigner {
     pub fn from_config(config: &ProtectionConfig) -> Result<Option<Self>> {
         if !config.sign_events {
@@ -117,14 +124,22 @@ impl SegmentVerifier {
     /// Verifies all sealed segments. The newest segment may be active and is
     /// intentionally unsigned until rotation.
     pub fn verify_directory(&self, dir: impl AsRef<Path>) -> Result<usize> {
+        Ok(self.verified_segments(dir)?.len())
+    }
+
+    pub fn verified_segments(&self, dir: impl AsRef<Path>) -> Result<Vec<ArchiveSegment>> {
         let segments = find_segment_files(dir.as_ref());
-        let mut verified = 0;
+        let mut verified = Vec::new();
         for (index, (_, path)) in segments.iter().enumerate() {
             if index + 1 == segments.len() && !manifest_path(path).exists() {
                 continue;
             }
             self.verify(path)?;
-            verified += 1;
+            verified.push(ArchiveSegment {
+                segment_id: segment_id(path)?,
+                file_name: path.file_name().unwrap().to_string_lossy().into_owned(),
+                file_size: std::fs::metadata(path)?.len(),
+            });
         }
         Ok(verified)
     }

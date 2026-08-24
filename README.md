@@ -91,6 +91,9 @@ sudo ./black-box --hardened
 # Verify keyed integrity manifests for sealed recording segments
 ./black-box verify
 
+# Verify and copy sealed evidence to a new archive directory
+./black-box archive /mnt/evidence-archive/black-box-2026-08-24
+
 # Watch a remote instance and auto-export on failure
 ./black-box watch http://server:8080 --interval 60 --export-dir ./backups
 

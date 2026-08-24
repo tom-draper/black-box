@@ -1,6 +1,7 @@
 #![recursion_limit = "256"]
 
 mod broadcast;
+mod archive;
 mod cli;
 mod collector;
 mod commands;
@@ -218,6 +219,16 @@ fn main() -> Result<()> {
             let verified = verifier.verify_directory(&data_dir)?;
             println!("Verified {} sealed segment(s)", verified);
             return Ok(());
+        }
+        Some(Commands::Archive {
+            destination,
+            data_dir,
+        }) => {
+            let config = Config::load(&config_path)?;
+            let verifier = integrity::SegmentVerifier::from_config(&config.protection)?
+                .ok_or_else(|| anyhow::anyhow!("No verification key is configured"))?;
+            let data_dir = data_dir.unwrap_or(config.server.data_dir);
+            return archive::run_archive(&data_dir, &destination, &verifier);
         }
         Some(Commands::Monitor) => {
             // Run headless recorder (no web UI)
