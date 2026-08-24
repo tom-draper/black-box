@@ -100,7 +100,7 @@ pub fn install_service(
     let config_path = format!("{}/config.toml", working_dir);
     if !std::path::Path::new(&config_path).exists() {
         // Generate default config
-        let config_content = generate_default_config(&data_dir);
+        let config_content = generate_default_config(&data_dir)?;
         fs::write(&config_path, config_content)
             .context("Failed to write config file")?;
         println!("✓ Default config written to {}", config_path);
@@ -195,13 +195,16 @@ WantedBy=multi-user.target
     )
 }
 
-fn generate_default_config(data_dir: &str) -> String {
-    format!(
+fn generate_default_config(data_dir: &str) -> Result<String> {
+    let password_hash = bcrypt::hash("admin", bcrypt::DEFAULT_COST)
+        .context("Failed to generate default password hash")?;
+
+    Ok(format!(
         r#"[auth]
 enabled = true
 username = "admin"
 # Default password: "admin" - CHANGE THIS!
-password_hash = "$2b$12$KIXALxKzLbXHQXQZWxJQfOqK.vlWvPXPvvPZvqKq3vKZvXvXvXvXe"
+password_hash = "{password_hash}"
 
 [server]
 bind_address = "127.0.0.1"
@@ -218,12 +221,12 @@ port = 514
 protocol = "tcp"
 "#,
         data_dir
-    )
+    ))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::generate_service_content;
+    use super::{generate_default_config, generate_service_content};
 
     #[test]
     fn generated_service_uses_the_headless_monitor_command() {
@@ -238,5 +241,14 @@ mod tests {
         assert!(service.contains("ExecStart=/usr/local/bin/black-box --protected monitor"));
         assert!(!service.contains(" run --protected"));
         assert!(!service.contains("--headless"));
+    }
+
+    #[test]
+    fn generated_default_config_authenticates_the_documented_password() {
+        let config = generate_default_config("/var/lib/black-box/data").unwrap();
+        let parsed: crate::config::Config = toml::from_str(&config).unwrap();
+
+        assert!(bcrypt::verify("admin", &parsed.auth.password_hash).unwrap());
+        assert_eq!(parsed.server.data_dir, "/var/lib/black-box/data");
     }
 }
