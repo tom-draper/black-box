@@ -8,6 +8,7 @@ mod config;
 mod event;
 mod file_watcher;
 mod index;
+mod integrity;
 mod indexed_reader;
 mod protection;
 mod reader;
@@ -30,6 +31,7 @@ use broadcast::EventBroadcaster;
 use cli::{Cli, Commands};
 use config::{Config, ProtectionMode, RemoteSyslogConfig};
 use protection::ProtectionManager;
+use integrity::SegmentSigner;
 
 use collector::{
     check_group_changes, check_kernel_module_changes, check_listening_port_changes,
@@ -208,6 +210,15 @@ fn main() -> Result<()> {
                 output, format, compress, event_type, start, end, data_dir,
             );
         }
+        Some(Commands::Verify { data_dir }) => {
+            let config = Config::load(&config_path)?;
+            let signer = SegmentSigner::from_config(&config.protection)?
+                .ok_or_else(|| anyhow::anyhow!("Event signing is not enabled in this configuration"))?;
+            let data_dir = data_dir.unwrap_or(config.server.data_dir);
+            let verified = signer.verify_directory(&data_dir)?;
+            println!("Verified {} sealed segment(s)", verified);
+            return Ok(());
+        }
         Some(Commands::Monitor) => {
             // Run headless recorder (no web UI)
             // Will be handled below with headless = true
@@ -303,6 +314,10 @@ fn run_recorder(cli: Cli) -> Result<()> {
 
     // Create protection manager
     let protection_manager = ProtectionManager::new(protection_mode, config.protection.clone());
+    let signer = SegmentSigner::from_config(&config.protection)?;
+    if signer.is_some() && !protection_manager.evidence_mode() {
+        anyhow::bail!("Event signing requires append-only evidence storage");
+    }
 
     // Parse port (command line overrides config)
     let port = cli.port.unwrap_or(config.server.port);
@@ -449,6 +464,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
         max_segments,
         Some(broadcast_tx),
         recorder_protection,
+        signer,
     )?;
 
     // Start file watcher if configured

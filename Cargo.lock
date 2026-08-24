@@ -433,6 +433,7 @@ dependencies = [
  "libc",
  "memmap2",
  "reqwest",
+ "ring",
  "serde",
  "serde_json",
  "tempfile",

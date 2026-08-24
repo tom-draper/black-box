@@ -60,6 +60,13 @@ pub enum Commands {
         data_dir: Option<String>,
     },
 
+    /// Verify integrity manifests for sealed recording segments
+    Verify {
+        /// Data directory to verify (defaults to the configured data directory)
+        #[arg(short, long)]
+        data_dir: Option<String>,
+    },
+
     /// Watch remote black box instance for health and auto-export on failure
     Watch {
         /// Black box server URL

@@ -9,6 +9,7 @@ use time::OffsetDateTime;
 
 use crate::broadcast::SyncSender;
 use crate::event::Event;
+use crate::integrity::{manifest_path, SegmentSigner};
 use crate::protection::ProtectionManager;
 use crate::storage::{find_segment_files, RecordHeader, FLUSH_INTERVAL_SECONDS, MAGIC, SEGMENT_SIZE};
 
@@ -22,6 +23,7 @@ pub struct Recorder {
     broadcast_tx: Option<SyncSender>,
     last_flush: OffsetDateTime,
     protection: Option<ProtectionManager>,
+    signer: Option<SegmentSigner>,
 }
 
 impl Recorder {
@@ -30,6 +32,7 @@ impl Recorder {
         max_segments: usize,
         broadcast_tx: Option<SyncSender>,
         protection: Option<ProtectionManager>,
+        signer: Option<SegmentSigner>,
     ) -> Result<Self> {
         let dir = dir.as_ref();
         std::fs::create_dir_all(dir)?;
@@ -40,7 +43,13 @@ impl Recorder {
             // Do not reopen a segment from a previous run: seal all existing
             // evidence first, then write to a new append-only segment.
             for (_, path) in &segments {
+                if let Some(signer) = &signer {
+                    signer.seal_or_verify(path)?;
+                }
                 protection.protect_file(path)?;
+                if signer.is_some() {
+                    protection.protect_file(&manifest_path(path))?;
+                }
             }
             (
                 segments.last().map_or(0, |(id, _)| id + 1),
@@ -83,6 +92,7 @@ impl Recorder {
             broadcast_tx,
             last_flush: OffsetDateTime::now_utc(),
             protection,
+            signer,
         })
     }
 
@@ -135,6 +145,11 @@ impl Recorder {
         self.file.get_ref().sync_all()?;
 
         if let Some(protection) = &self.protection {
+            if let Some(signer) = &self.signer {
+                let path = segment_path(&self.dir, self.current_segment);
+                signer.seal(&path)?;
+                protection.protect_file(&manifest_path(&path))?;
+            }
             protection.protect_file(&segment_path(&self.dir, self.current_segment))?;
         }
 
@@ -187,7 +202,7 @@ mod tests {
     #[test]
     fn rotation_removes_the_oldest_segment_at_capacity() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let mut recorder = Recorder::open_with_config(temp_dir.path(), 1, None, None).unwrap();
+        let mut recorder = Recorder::open_with_config(temp_dir.path(), 1, None, None, None).unwrap();
 
         recorder.rotate_segment().unwrap();
 

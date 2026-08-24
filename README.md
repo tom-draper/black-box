@@ -88,6 +88,9 @@ sudo ./black-box --hardened
 # Check status
 ./black-box status
 
+# Verify keyed integrity manifests for sealed recording segments
+./black-box verify
+
 # Watch a remote instance and auto-export on failure
 ./black-box watch http://server:8080 --interval 60 --export-dir ./backups
 
@@ -162,6 +165,19 @@ Uses append-only file attributes. It requires root, `chattr`, and a supporting f
 Uses the same append-only evidence storage as `--protected`; use it with the hardened systemd unit for stricter service-level controls.
 
 These modes need root and a filesystem that supports the required attributes, such as ext4.
+
+### Integrity manifests
+
+Set `sign_events = true` and provide a base64-encoded random key of at least 32 bytes to create a keyed integrity manifest whenever a segment is sealed:
+
+```toml
+[protection]
+append_only = true
+sign_events = true
+signing_key = "base64-encoded-32-byte-or-longer-secret"
+```
+
+Generate a key with `openssl rand -base64 32`, keep it outside the recorded data directory, and run `black-box verify` regularly. A key stored on the same compromised host does not protect against a privileged attacker who can replace both the recording and its key.
 
 ## Permissions
 
