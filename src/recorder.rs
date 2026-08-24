@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use time::OffsetDateTime;
 
 use crate::broadcast::SyncSender;
@@ -117,7 +117,14 @@ impl Recorder {
         let segment_count = (self.current_segment - self.oldest_segment + 1) as usize;
         if segment_count > self.max_segments {
             let old_path = segment_path(&self.dir, self.oldest_segment);
-            let _ = std::fs::remove_file(old_path); // Ignore errors if file doesn't exist
+            match std::fs::remove_file(&old_path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    return Err(e)
+                        .with_context(|| format!("Failed to remove old segment {}", old_path.display()));
+                }
+            }
             self.oldest_segment += 1;
         }
 
@@ -141,3 +148,18 @@ fn segment_path(dir: &Path, id: u64) -> PathBuf {
     dir.join(format!("segment_{:05}.dat", id))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rotation_removes_the_oldest_segment_at_capacity() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut recorder = Recorder::open_with_config(temp_dir.path(), 1, None).unwrap();
+
+        recorder.rotate_segment().unwrap();
+
+        assert!(!segment_path(temp_dir.path(), 0).exists());
+        assert!(segment_path(temp_dir.path(), 1).exists());
+    }
+}
