@@ -416,8 +416,9 @@ async fn fetch_events_by_range(
 ) -> HttpResponse {
     let reader = indexed_reader.clone();
     let query = query.clone();
+    let compact = query.compact.unwrap_or(false);
     match tokio::task::spawn_blocking(move || collect_events_by_range(&reader, &query, true)).await {
-        Ok(Ok(result)) => HttpResponse::Ok().json(playback_result_json(&result, query.compact.unwrap_or(false))),
+        Ok(Ok(result)) => HttpResponse::Ok().json(playback_result_json(&result, compact)),
         Ok(Err(e)) => {
             eprintln!("ERROR in fetch_events_by_range: Failed to read events: {}", e);
             HttpResponse::InternalServerError().json(serde_json::json!({
