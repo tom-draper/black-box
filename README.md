@@ -168,16 +168,17 @@ These modes need root and a filesystem that supports the required attributes, su
 
 ### Integrity manifests
 
-Set `sign_events = true` and provide a base64-encoded random key of at least 32 bytes to create a keyed integrity manifest whenever a segment is sealed:
+Generate an Ed25519 key pair with `black-box config generate-signing-key`. Configure the private key only on the recorder and keep the public verification key with your archive or verifier:
 
 ```toml
 [protection]
 append_only = true
 sign_events = true
 signing_key = "base64-encoded-32-byte-or-longer-secret"
+verification_key = "base64-encoded-ed25519-public-key"
 ```
 
-Generate a key with `openssl rand -base64 32`, keep it outside the recorded data directory, and run `black-box verify` regularly. A key stored on the same compromised host does not protect against a privileged attacker who can replace both the recording and its key.
+Each sealed segment carries an Ed25519 signature. Run `black-box verify` regularly, ideally using a configuration containing only `verification_key` outside the evidence host.
 
 ## Permissions
 

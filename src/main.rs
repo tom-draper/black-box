@@ -212,10 +212,10 @@ fn main() -> Result<()> {
         }
         Some(Commands::Verify { data_dir }) => {
             let config = Config::load(&config_path)?;
-            let signer = SegmentSigner::from_config(&config.protection)?
-                .ok_or_else(|| anyhow::anyhow!("Event signing is not enabled in this configuration"))?;
+            let verifier = integrity::SegmentVerifier::from_config(&config.protection)?
+                .ok_or_else(|| anyhow::anyhow!("No verification key is configured"))?;
             let data_dir = data_dir.unwrap_or(config.server.data_dir);
-            let verified = signer.verify_directory(&data_dir)?;
+            let verified = verifier.verify_directory(&data_dir)?;
             println!("Verified {} sealed segment(s)", verified);
             return Ok(());
         }
@@ -282,6 +282,12 @@ fn main() -> Result<()> {
             }
             ConfigCommands::Init { force } => {
                 return commands::config::init_config(&config_path, force);
+            }
+            ConfigCommands::GenerateSigningKey => {
+                let (private_key, public_key) = integrity::generate_keypair()?;
+                println!("signing_key = \"{}\"", private_key);
+                println!("verification_key = \"{}\"", public_key);
+                return Ok(());
             }
             ConfigCommands::SetupRemote { host, port, protocol } => {
                 return commands::config::setup_remote_syslog(&config_path, host, port, protocol);

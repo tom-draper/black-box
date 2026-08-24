@@ -187,6 +187,9 @@ pub enum ConfigCommands {
         force: bool,
     },
 
+    /// Generate an Ed25519 key pair for integrity manifests
+    GenerateSigningKey,
+
     /// Set up remote syslog streaming
     SetupRemote {
         /// Remote syslog server host

@@ -57,6 +57,8 @@ pub struct ProtectionConfig {
     pub sign_events: bool,
     #[serde(default)]
     pub signing_key: Option<String>,
+    #[serde(default)]
+    pub verification_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -90,6 +92,7 @@ impl Default for ProtectionConfig {
             remote_syslog: None,
             sign_events: false,
             signing_key: None,
+            verification_key: None,
         }
     }
 }
