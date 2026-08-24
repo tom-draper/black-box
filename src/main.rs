@@ -302,8 +302,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
     let config = Config::load(&cli.config)?;
 
     // Create protection manager
-    let mut protection_manager = ProtectionManager::new(protection_mode, config.protection.clone());
-    protection_manager.print_info();
+    let protection_manager = ProtectionManager::new(protection_mode, config.protection.clone());
 
     // Parse port (command line overrides config)
     let port = cli.port.unwrap_or(config.server.port);
@@ -442,21 +441,20 @@ fn run_recorder(cli: Cli) -> Result<()> {
     let max_segments = (config.server.max_storage_mb / 8).max(1) as usize;
 
     // Run recorder in main thread with broadcasting
-    let mut recorder = Recorder::open_with_config(&data_dir, max_segments, Some(broadcast_tx))?;
+    let recorder_protection = protection_manager
+        .evidence_mode()
+        .then_some(protection_manager.clone());
+    let mut recorder = Recorder::open_with_config(
+        &data_dir,
+        max_segments,
+        Some(broadcast_tx),
+        recorder_protection,
+    )?;
 
     // Start file watcher if configured
     if config.file_watch.enabled && !config.file_watch.watch_dirs.is_empty() {
         let watch_dirs = config.file_watch.watch_dirs.clone();
         file_watcher::spawn_file_watcher(watch_dirs, file_watcher_tx)?;
-    }
-
-    // Protect existing segment files
-    if let Ok(entries) = std::fs::read_dir(&data_dir) {
-        for entry in entries.flatten() {
-            if entry.path().extension().and_then(|s| s.to_str()) == Some("seg") {
-                let _ = protection_manager.protect_file(&entry.path());
-            }
-        }
     }
 
     println!("┌─────────────┐");

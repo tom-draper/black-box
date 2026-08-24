@@ -145,19 +145,21 @@ enabled = false
 
 ## Retention
 
-Storage is fixed-size. Black Box writes into a ring buffer and overwrites the oldest segments when the limit is reached.
+Default-mode storage is fixed-size. Black Box writes into a ring buffer and overwrites the oldest segments when the limit is reached.
 
 That means disk usage stays predictable, but retention depends on how busy the machine is and how much space you give it.
+
+Protected and hardened modes are evidence-first: segments are marked append-only and are never automatically deleted. Plan an archive and manual retention process for those modes.
 
 ## Protection Modes
 
 Black Box can make recordings harder to remove after the fact.
 
 `--protected`
-Uses append-only file attributes. Data can be added, but existing evidence cannot be edited or deleted normally.
+Uses append-only file attributes. It requires root, `chattr`, and a supporting filesystem; startup fails if protection cannot be enabled. Existing segments are sealed on restart, and protected recordings are not automatically deleted.
 
 `--hardened`
-Uses immutable protection while recording. This is much harder to tamper with, but it is also much less convenient operationally.
+Uses the same append-only evidence storage as `--protected`; use it with the hardened systemd unit for stricter service-level controls.
 
 These modes need root and a filesystem that supports the required attributes, such as ext4.
 

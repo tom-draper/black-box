@@ -1,6 +1,6 @@
 use std::{
     fs::{File, OpenOptions},
-    io::{BufWriter, Seek, SeekFrom, Write},
+    io::{BufWriter, Write},
     path::{Path, PathBuf},
 };
 
@@ -9,6 +9,7 @@ use time::OffsetDateTime;
 
 use crate::broadcast::SyncSender;
 use crate::event::Event;
+use crate::protection::ProtectionManager;
 use crate::storage::{find_segment_files, RecordHeader, FLUSH_INTERVAL_SECONDS, MAGIC, SEGMENT_SIZE};
 
 pub struct Recorder {
@@ -20,6 +21,7 @@ pub struct Recorder {
     offset: u64,
     broadcast_tx: Option<SyncSender>,
     last_flush: OffsetDateTime,
+    protection: Option<ProtectionManager>,
 }
 
 impl Recorder {
@@ -27,19 +29,33 @@ impl Recorder {
         dir: impl AsRef<Path>,
         max_segments: usize,
         broadcast_tx: Option<SyncSender>,
+        protection: Option<ProtectionManager>,
     ) -> Result<Self> {
         let dir = dir.as_ref();
         std::fs::create_dir_all(dir)?;
 
         // Find existing segments to resume from
-        let (current_segment, oldest_segment) = Self::find_segment_range(dir)?;
+        let segments = find_segment_files(dir);
+        let (current_segment, oldest_segment) = if let Some(protection) = &protection {
+            // Do not reopen a segment from a previous run: seal all existing
+            // evidence first, then write to a new append-only segment.
+            for (_, path) in &segments {
+                protection.protect_file(path)?;
+            }
+            (
+                segments.last().map_or(0, |(id, _)| id + 1),
+                segments.first().map_or(0, |(id, _)| *id),
+            )
+        } else {
+            Self::find_segment_range(dir)?
+        };
 
         let path = segment_path(dir, current_segment);
 
         let raw_file = OpenOptions::new()
             .create(true)
             .read(true)
-            .write(true)
+            .append(true)
             .open(&path)?;
 
         let mut offset = raw_file.metadata()?.len();
@@ -49,8 +65,12 @@ impl Recorder {
             file.write_all(&MAGIC.to_le_bytes())?;
             file.flush()?;
             offset = 4;
-        } else {
-            file.seek(SeekFrom::Start(offset))?;
+        }
+
+        if let Some(protection) = &protection {
+            file.flush()?;
+            file.get_ref().sync_all()?;
+            protection.protect_file(&path)?;
         }
 
         Ok(Self {
@@ -62,6 +82,7 @@ impl Recorder {
             offset,
             broadcast_tx,
             last_flush: OffsetDateTime::now_utc(),
+            protection,
         })
     }
 
@@ -110,12 +131,19 @@ impl Recorder {
     }
 
     fn rotate_segment(&mut self) -> Result<()> {
+        self.file.flush()?;
+        self.file.get_ref().sync_all()?;
+
+        if let Some(protection) = &self.protection {
+            protection.protect_file(&segment_path(&self.dir, self.current_segment))?;
+        }
+
         self.current_segment += 1;
         self.offset = 0;
 
         // Enforce ring buffer: delete oldest segment if we exceed max
         let segment_count = (self.current_segment - self.oldest_segment + 1) as usize;
-        if segment_count > self.max_segments {
+        if self.protection.is_none() && segment_count > self.max_segments {
             let old_path = segment_path(&self.dir, self.oldest_segment);
             match std::fs::remove_file(&old_path) {
                 Ok(()) => {}
@@ -132,11 +160,15 @@ impl Recorder {
         self.file = BufWriter::new(OpenOptions::new()
             .create(true)
             .read(true)
-            .write(true)
+            .append(true)
             .open(&path)?);
 
         self.file.write_all(&MAGIC.to_le_bytes())?;
-        self.file.flush()?;  // Ensure magic number is written to disk
+        self.file.flush()?;
+        self.file.get_ref().sync_all()?;
+        if let Some(protection) = &self.protection {
+            protection.protect_file(&path)?;
+        }
         self.last_flush = OffsetDateTime::now_utc();
         self.offset += 4;
 
@@ -155,7 +187,7 @@ mod tests {
     #[test]
     fn rotation_removes_the_oldest_segment_at_capacity() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let mut recorder = Recorder::open_with_config(temp_dir.path(), 1, None).unwrap();
+        let mut recorder = Recorder::open_with_config(temp_dir.path(), 1, None, None).unwrap();
 
         recorder.rotate_segment().unwrap();
 
