@@ -12,7 +12,10 @@
 
 use actix_web::{web, HttpResponse};
 use serde::Deserialize;
-use std::sync::Arc;
+use std::{
+    sync::{atomic::{AtomicU64, Ordering}, Arc},
+    time::Instant,
+};
 use time::OffsetDateTime;
 
 use crate::event::Metadata;
@@ -22,6 +25,7 @@ use crate::reader::LogReader;
 
 const MIN_HISTORY_LOOKBACK_SECS: i64 = 600;
 const HISTORY_LOOKBACK_MULTIPLIER_SECS: i64 = 10;
+static PLAYBACK_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
 struct PlaybackResult {
     events: Vec<Event>,
@@ -316,6 +320,9 @@ pub async fn api_playback_jump(
     indexed_reader: web::Data<Arc<IndexedReader>>,
     query: web::Query<PlaybackJumpQuery>,
 ) -> HttpResponse {
+    let request_id = PLAYBACK_REQUEST_ID.fetch_add(1, Ordering::Relaxed);
+    let request_started = Instant::now();
+    let refresh_started = Instant::now();
     let refresh_reader = indexed_reader.clone();
     if let Err(e) = tokio::task::spawn_blocking(move || refresh_reader.refresh_if_changed())
         .await
@@ -327,18 +334,23 @@ pub async fn api_playback_jump(
             "error": "Failed to refresh playback index",
         }));
     }
+    let refresh_elapsed = refresh_started.elapsed().as_millis();
 
     let history_count = query.history_count.unwrap_or(60);
     let forward_seconds = query.forward_seconds.unwrap_or(60).max(1);
     let timestamp = query.timestamp;
+    let compact = query.compact.unwrap_or(false);
 
     let history_reader = indexed_reader.clone();
     let forward_reader = indexed_reader.clone();
     let (history_task, forward_task) = tokio::join!(
         tokio::task::spawn_blocking(move || {
-            collect_events_by_count(&history_reader, timestamp, history_count, false, false)
+            let started = Instant::now();
+            let result = collect_events_by_count(&history_reader, timestamp, history_count, false, false);
+            (result, started.elapsed().as_millis())
         }),
         tokio::task::spawn_blocking(move || {
+            let started = Instant::now();
             let forward_query = PlaybackQuery {
                 timestamp: None,
                 count: None,
@@ -346,15 +358,16 @@ pub async fn api_playback_jump(
                 start_timestamp: Some(timestamp),
                 end_timestamp: Some(timestamp + forward_seconds),
                 limit: Some(2000),
-                compact: Some(query.compact.unwrap_or(false)),
+                compact: Some(compact),
             };
-            collect_events_by_range(&forward_reader, &forward_query, true)
+            let result = collect_events_by_range(&forward_reader, &forward_query, true);
+            (result, started.elapsed().as_millis())
         }),
     );
 
-    let history_result = match history_task {
-        Ok(Ok(result)) => result,
-        Ok(Err(e)) => {
+    let (history_result, history_elapsed) = match history_task {
+        Ok((Ok(result), elapsed)) => (result, elapsed),
+        Ok((Err(e), _)) => {
             eprintln!("ERROR in api_playback_jump history: Failed to read events: {}", e);
             return HttpResponse::InternalServerError().json(serde_json::json!({
                 "error": format!("Failed to read history events: {}", e),
@@ -365,9 +378,9 @@ pub async fn api_playback_jump(
         })),
     };
 
-    let forward_result = match forward_task {
-        Ok(Ok(result)) => result,
-        Ok(Err(e)) => {
+    let (forward_result, forward_elapsed) = match forward_task {
+        Ok((Ok(result), elapsed)) => (result, elapsed),
+        Ok((Err(e), _)) => {
             eprintln!("ERROR in api_playback_jump forward: Failed to read events: {}", e);
             return HttpResponse::InternalServerError().json(serde_json::json!({
                 "error": format!("Failed to read forward events: {}", e),
@@ -378,10 +391,21 @@ pub async fn api_playback_jump(
         })),
     };
 
-    HttpResponse::Ok().json(serde_json::json!({
-        "history": playback_result_json(&history_result, query.compact.unwrap_or(false)),
-        "forward": playback_result_json(&forward_result, query.compact.unwrap_or(false)),
-    }))
+    let format_started = Instant::now();
+    let response = HttpResponse::Ok().json(serde_json::json!({
+        "history": playback_result_json(&history_result, compact),
+        "forward": playback_result_json(&forward_result, compact),
+    }));
+    eprintln!(
+        "playback_jump request_id={} refresh_ms={} history_ms={} forward_ms={} format_ms={} total_ms={}",
+        request_id,
+        refresh_elapsed,
+        history_elapsed,
+        forward_elapsed,
+        format_started.elapsed().as_millis(),
+        request_started.elapsed().as_millis(),
+    );
+    response
 }
 
 /// Mode 2: Fetch all events in a time range (start to end)
