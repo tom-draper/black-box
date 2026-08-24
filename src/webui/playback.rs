@@ -29,7 +29,7 @@ struct PlaybackResult {
     fallback: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct PlaybackQuery {
     // Mode 1: Get last N SystemMetrics before a timestamp
     // Usage: ?timestamp=1234567890&count=60
@@ -113,14 +113,22 @@ async fn fetch_events_by_count(
     target_count: usize,
     before: bool,
 ) -> HttpResponse {
-    match collect_events_by_count(indexed_reader, timestamp, target_count, before, true) {
-        Ok(result) => HttpResponse::Ok().json(playback_result_json(&result)),
-        Err(e) => {
+    let reader = indexed_reader.clone();
+    match tokio::task::spawn_blocking(move || {
+        collect_events_by_count(&reader, timestamp, target_count, before, true)
+    })
+    .await
+    {
+        Ok(Ok(result)) => HttpResponse::Ok().json(playback_result_json(&result)),
+        Ok(Err(e)) => {
             eprintln!("ERROR in fetch_events_by_count: Failed to read events: {}", e);
             HttpResponse::InternalServerError().json(serde_json::json!({
                 "error": format!("Failed to read events: {}", e),
             }))
         }
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": format!("Playback worker failed: {}", e),
+        })),
     }
 }
 
@@ -278,7 +286,12 @@ pub async fn api_playback_events(
     indexed_reader: web::Data<Arc<IndexedReader>>,
     query: web::Query<PlaybackQuery>,
 ) -> HttpResponse {
-    if let Err(e) = indexed_reader.refresh_if_changed() {
+    let refresh_reader = indexed_reader.clone();
+    if let Err(e) = tokio::task::spawn_blocking(move || refresh_reader.refresh_if_changed())
+        .await
+        .map_err(|e| anyhow::anyhow!("Playback refresh worker failed: {}", e))
+        .and_then(|result| result)
+    {
         eprintln!("Failed to refresh playback index: {}", e);
         return HttpResponse::InternalServerError().json(serde_json::json!({
             "error": "Failed to refresh playback index",
@@ -301,7 +314,12 @@ pub async fn api_playback_jump(
     indexed_reader: web::Data<Arc<IndexedReader>>,
     query: web::Query<PlaybackJumpQuery>,
 ) -> HttpResponse {
-    if let Err(e) = indexed_reader.refresh_if_changed() {
+    let refresh_reader = indexed_reader.clone();
+    if let Err(e) = tokio::task::spawn_blocking(move || refresh_reader.refresh_if_changed())
+        .await
+        .map_err(|e| anyhow::anyhow!("Playback refresh worker failed: {}", e))
+        .and_then(|result| result)
+    {
         eprintln!("Failed to refresh playback index: {}", e);
         return HttpResponse::InternalServerError().json(serde_json::json!({
             "error": "Failed to refresh playback index",
@@ -312,39 +330,49 @@ pub async fn api_playback_jump(
     let forward_seconds = query.forward_seconds.unwrap_or(60).max(1);
     let timestamp = query.timestamp;
 
-    let history_result = match collect_events_by_count(
-        &indexed_reader,
-        timestamp,
-        history_count,
-        false,
-        false,
-    ) {
-        Ok(result) => result,
-        Err(e) => {
+    let history_reader = indexed_reader.clone();
+    let forward_reader = indexed_reader.clone();
+    let (history_task, forward_task) = tokio::join!(
+        tokio::task::spawn_blocking(move || {
+            collect_events_by_count(&history_reader, timestamp, history_count, false, false)
+        }),
+        tokio::task::spawn_blocking(move || {
+            let forward_query = PlaybackQuery {
+                timestamp: None,
+                count: None,
+                before: None,
+                start_timestamp: Some(timestamp),
+                end_timestamp: Some(timestamp + forward_seconds),
+                limit: Some(2000),
+            };
+            collect_events_by_range(&forward_reader, &forward_query, true)
+        }),
+    );
+
+    let history_result = match history_task {
+        Ok(Ok(result)) => result,
+        Ok(Err(e)) => {
             eprintln!("ERROR in api_playback_jump history: Failed to read events: {}", e);
             return HttpResponse::InternalServerError().json(serde_json::json!({
                 "error": format!("Failed to read history events: {}", e),
             }));
         }
+        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": format!("Playback history worker failed: {}", e),
+        })),
     };
 
-    let forward_query = PlaybackQuery {
-        timestamp: None,
-        count: None,
-        before: None,
-        start_timestamp: Some(timestamp),
-        end_timestamp: Some(timestamp + forward_seconds),
-        limit: Some(2000),
-    };
-
-    let forward_result = match collect_events_by_range(&indexed_reader, &forward_query, true) {
-        Ok(result) => result,
-        Err(e) => {
+    let forward_result = match forward_task {
+        Ok(Ok(result)) => result,
+        Ok(Err(e)) => {
             eprintln!("ERROR in api_playback_jump forward: Failed to read events: {}", e);
             return HttpResponse::InternalServerError().json(serde_json::json!({
                 "error": format!("Failed to read forward events: {}", e),
             }));
         }
+        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": format!("Playback forward worker failed: {}", e),
+        })),
     };
 
     HttpResponse::Ok().json(serde_json::json!({
@@ -359,14 +387,19 @@ async fn fetch_events_by_range(
     indexed_reader: &Arc<IndexedReader>,
     query: &PlaybackQuery,
 ) -> HttpResponse {
-    match collect_events_by_range(indexed_reader, query, true) {
-        Ok(result) => HttpResponse::Ok().json(playback_result_json(&result)),
-        Err(e) => {
+    let reader = indexed_reader.clone();
+    let query = query.clone();
+    match tokio::task::spawn_blocking(move || collect_events_by_range(&reader, &query, true)).await {
+        Ok(Ok(result)) => HttpResponse::Ok().json(playback_result_json(&result)),
+        Ok(Err(e)) => {
             eprintln!("ERROR in fetch_events_by_range: Failed to read events: {}", e);
             HttpResponse::InternalServerError().json(serde_json::json!({
                 "error": format!("Failed to read events: {}", e),
             }))
         }
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": format!("Playback worker failed: {}", e),
+        })),
     }
 }
 
