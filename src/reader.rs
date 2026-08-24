@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::{
     fs::File,
-    io::Read,
+    io::{Read, Seek},
     path::Path,
 };
 
@@ -80,15 +80,24 @@ impl LogReader {
                 Err(_) => break, // End of file
             };
 
-            // Read payload
+            // A process can be interrupted between writing a header and its payload.
+            // Preserve earlier records in that segment instead of discarding it all.
+            let remaining_bytes = file.metadata()?.len().saturating_sub(file.stream_position()?);
+            if u64::from(header.payload_len) > remaining_bytes {
+                eprintln!("Warning: Ignoring incomplete final record in {:?}", path);
+                break;
+            }
+
             let mut payload = vec![0u8; header.payload_len as usize];
             file.read_exact(&mut payload)?;
 
-            // Deserialize event
-            let event: Event = bincode::deserialize(&payload)
-                .context("Failed to deserialize event")?;
-
-            events.push(event);
+            match bincode::deserialize(&payload) {
+                Ok(event) => events.push(event),
+                Err(e) => {
+                    eprintln!("Warning: Ignoring invalid final record in {:?}: {}", path, e);
+                    break;
+                }
+            }
         }
 
         Ok(events)
@@ -123,4 +132,48 @@ fn read_record_header(file: &mut File) -> Result<RecordHeader> {
         .context("Failed to deserialize header")?;
 
     Ok(header)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        event::{Anomaly, AnomalyKind, AnomalySeverity},
+        storage::MAGIC,
+    };
+    use std::io::Write;
+    use time::OffsetDateTime;
+
+    #[test]
+    fn keeps_complete_records_before_a_truncated_final_payload() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let segment_path = temp_dir.path().join("segment_00000.dat");
+        let event = Event::Anomaly(Anomaly {
+            ts: OffsetDateTime::UNIX_EPOCH,
+            severity: AnomalySeverity::Info,
+            kind: AnomalyKind::CpuSpike,
+            message: "complete record".to_string(),
+        });
+        let payload = bincode::serialize(&event).unwrap();
+        let header = RecordHeader {
+            timestamp_unix_ns: 0,
+            payload_len: payload.len() as u32,
+        };
+        let incomplete_header = RecordHeader {
+            timestamp_unix_ns: 1,
+            payload_len: 10,
+        };
+
+        let mut file = File::create(segment_path).unwrap();
+        file.write_all(&MAGIC.to_le_bytes()).unwrap();
+        file.write_all(&bincode::serialize(&header).unwrap()).unwrap();
+        file.write_all(&payload).unwrap();
+        file.write_all(&bincode::serialize(&incomplete_header).unwrap())
+            .unwrap();
+        file.write_all(&[0; 2]).unwrap();
+
+        let events = LogReader::new(temp_dir.path()).read_all_events().unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events.first(), Some(Event::Anomaly(_))));
+    }
 }
