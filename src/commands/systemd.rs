@@ -157,7 +157,7 @@ Documentation=https://github.com/yourusername/black-box
 
 [Service]
 Type=simple
-ExecStart={binary_path} run --protected
+ExecStart={binary_path} --protected monitor
 WorkingDirectory={working_dir}
 Restart=always
 RestartSec=5s
@@ -219,4 +219,24 @@ protocol = "tcp"
 "#,
         data_dir
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::generate_service_content;
+
+    #[test]
+    fn generated_service_uses_the_headless_monitor_command() {
+        let service = generate_service_content(
+            "/usr/local/bin/black-box",
+            "/var/lib/black-box",
+            "/var/lib/black-box/data",
+            false,
+            "/var/backups/black-box",
+        );
+
+        assert!(service.contains("ExecStart=/usr/local/bin/black-box --protected monitor"));
+        assert!(!service.contains(" run --protected"));
+        assert!(!service.contains("--headless"));
+    }
 }

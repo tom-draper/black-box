@@ -7,7 +7,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/opt/black-box
-ExecStart=/opt/black-box/black-box --headless
+ExecStart=/opt/black-box/black-box monitor
 Restart=no
 
 # Security hardening

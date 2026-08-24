@@ -10,7 +10,7 @@ RequiresMountsFor=/opt/black-box
 Type=simple
 User=root
 WorkingDirectory=/opt/black-box
-ExecStart=/opt/black-box/black-box --hardened --headless
+ExecStart=/opt/black-box/black-box --hardened monitor
 Restart=always
 RestartSec=2s
 
