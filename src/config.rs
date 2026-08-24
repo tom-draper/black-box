@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::{fs, path::Path};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProtectionMode {
@@ -94,31 +94,32 @@ impl Default for ProtectionConfig {
     }
 }
 
-const CONFIG_PATH: &str = "./config.toml";
-
 impl Config {
     // Load config from file, or create default if not exists
-    pub fn load() -> Result<Self> {
-        if !std::path::Path::new(CONFIG_PATH).exists() {
-            let config = Self::create_default()?;
-            println!("Config file not found. Creating default config.toml...");
+    pub fn load(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        if !path.exists() {
+            let config = Self::create_default(path)?;
+            println!("Config file not found. Creating {}...", path.display());
             println!("\nSECURITY WARNING");
             println!("Created config.toml with default credentials:");
             println!("  Username: admin");
             println!("  Password: admin");
             println!("\nPLEASE CHANGE THE DEFAULT PASSWORD IMMEDIATELY!");
             println!("Run: cargo run --bin hashpw <your-password>");
-            println!("Then update the password_hash in config.toml\n");
+            println!("Then update the password_hash in {}\n", path.display());
             return Ok(config);
         }
 
-        let content = fs::read_to_string(CONFIG_PATH).context("Failed to read config.toml")?;
-        let config: Config = toml::from_str(&content).context("Failed to parse config.toml")?;
+        let content = fs::read_to_string(path)
+            .with_context(|| format!("Failed to read {}", path.display()))?;
+        let config: Config = toml::from_str(&content)
+            .with_context(|| format!("Failed to parse {}", path.display()))?;
         Ok(config)
     }
 
     // Create default config with admin/admin credentials and write it to disk
-    fn create_default() -> Result<Self> {
+    fn create_default(path: &Path) -> Result<Self> {
         let default_hash = bcrypt::hash("admin", bcrypt::DEFAULT_COST)
             .context("Failed to generate default password hash")?;
 
@@ -140,7 +141,8 @@ impl Config {
 
         let toml_content = toml::to_string_pretty(&config)
             .context("Failed to serialize default config")?;
-        fs::write(CONFIG_PATH, toml_content).context("Failed to write config.toml")?;
+        fs::write(path, toml_content)
+            .with_context(|| format!("Failed to write {}", path.display()))?;
 
         Ok(config)
     }
@@ -195,5 +197,18 @@ mod tests {
         assert_eq!(config.auth.username, "admin");
         assert_eq!(config.server.port, 8080);
         assert_eq!(config.server.bind_address, "127.0.0.1");
+    }
+
+    #[test]
+    fn test_load_uses_the_requested_path() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_path = temp_dir.path().join("custom.toml");
+        let expected = Config::test_config();
+
+        fs::write(&config_path, toml::to_string(&expected).unwrap()).unwrap();
+
+        let actual = Config::load(&config_path).unwrap();
+        assert_eq!(actual.auth.username, "test");
+        assert_eq!(actual.server.data_dir, "./test_data");
     }
 }

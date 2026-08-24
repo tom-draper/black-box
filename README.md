@@ -124,6 +124,7 @@ To make the UI reachable from another machine, set `bind_address` explicitly
 (for example, `"0.0.0.0"`) and put it behind HTTPS or a trusted private network.
 
 For production, use a real data directory such as `/var/lib/black-box` instead of `./data`.
+Use `--config /path/to/config.toml` to run or manage a different configuration file.
 
 ### Passwords
 

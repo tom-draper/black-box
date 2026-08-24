@@ -191,6 +191,7 @@ fn main() -> Result<()> {
     use cli::{Cli, Commands, ConfigCommands, SystemdCommands};
 
     let cli = Cli::parse_args();
+    let config_path = cli.config.clone();
 
     // Handle subcommands
     match cli.command {
@@ -263,16 +264,16 @@ fn main() -> Result<()> {
         },
         Some(Commands::Config { command }) => match command {
             ConfigCommands::Show => {
-                return commands::config::show_config();
+                return commands::config::show_config(&config_path);
             }
             ConfigCommands::Validate => {
-                return commands::config::validate_config();
+                return commands::config::validate_config(&config_path);
             }
             ConfigCommands::Init { force } => {
-                return commands::config::init_config(force);
+                return commands::config::init_config(&config_path, force);
             }
             ConfigCommands::SetupRemote { host, port, protocol } => {
-                return commands::config::setup_remote_syslog(host, port, protocol);
+                return commands::config::setup_remote_syslog(&config_path, host, port, protocol);
             }
         },
         None => {
@@ -298,7 +299,7 @@ fn run_recorder(cli: Cli) -> Result<()> {
     let disable_ui = matches!(cli.command, Some(Commands::Monitor));
 
     // Load configuration
-    let config = Config::load()?;
+    let config = Config::load(&cli.config)?;
 
     // Create protection manager
     let mut protection_manager = ProtectionManager::new(protection_mode, config.protection.clone());

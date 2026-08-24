@@ -3,8 +3,8 @@ use std::fs;
 
 use crate::config::{Config, RemoteSyslogConfig};
 
-pub fn show_config() -> Result<()> {
-    let config = Config::load()?;
+pub fn show_config(config_path: &str) -> Result<()> {
+    let config = Config::load(config_path)?;
     let toml_content = toml::to_string_pretty(&config)
         .context("Failed to serialize config")?;
 
@@ -16,10 +16,10 @@ pub fn show_config() -> Result<()> {
     Ok(())
 }
 
-pub fn validate_config() -> Result<()> {
-    println!("Validating config.toml...");
+pub fn validate_config(config_path: &str) -> Result<()> {
+    println!("Validating {}...", config_path);
 
-    match Config::load() {
+    match Config::load(config_path) {
         Ok(config) => {
             println!("✓ Configuration is valid");
             println!();
@@ -58,9 +58,7 @@ pub fn validate_config() -> Result<()> {
     }
 }
 
-pub fn init_config(force: bool) -> Result<()> {
-    let config_path = "./config.toml";
-
+pub fn init_config(config_path: &str, force: bool) -> Result<()> {
     if std::path::Path::new(config_path).exists() && !force {
         anyhow::bail!(
             "Config file already exists at {}. Use --force to overwrite.",
@@ -71,7 +69,7 @@ pub fn init_config(force: bool) -> Result<()> {
     println!("Generating default configuration...");
 
     // Create default config
-    let config = Config::load()?;
+    let config = Config::load(config_path)?;
 
     let toml_content = toml::to_string_pretty(&config)
         .context("Failed to serialize config")?;
@@ -92,14 +90,17 @@ pub fn init_config(force: bool) -> Result<()> {
     println!("To generate a password hash:");
     println!("  Run: echo -n 'your-password' | bcrypt");
     println!("  Or use an online bcrypt generator");
-    println!("  Then update the password_hash in config.toml");
+    println!("  Then update the password_hash in {}", config_path);
 
     Ok(())
 }
 
-pub fn setup_remote_syslog(host: String, port: u16, protocol: String) -> Result<()> {
-    let config_path = "./config.toml";
-
+pub fn setup_remote_syslog(
+    config_path: &str,
+    host: String,
+    port: u16,
+    protocol: String,
+) -> Result<()> {
     // Load existing config
     let mut config = if std::path::Path::new(config_path).exists() {
         let content = fs::read_to_string(config_path)
@@ -107,7 +108,7 @@ pub fn setup_remote_syslog(host: String, port: u16, protocol: String) -> Result<
         toml::from_str(&content).context("Failed to parse config.toml")?
     } else {
         println!("Config file not found, creating new one...");
-        Config::load()?
+        Config::load(config_path)?
     };
 
     // Validate protocol
