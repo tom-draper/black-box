@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::event::Event;
-use crate::index::{find_relevant_segments, find_start_block, IndexBuilder};
+use crate::index::{find_relevant_segments, find_start_block, find_start_metrics_offset, IndexBuilder};
 use crate::storage::{find_segment_files, RecordHeader, SegmentIndex, MAGIC};
 
 /// Efficient reader using memory-mapped I/O and block indexes
@@ -109,11 +109,15 @@ impl IndexedReader {
         };
 
         // Start reading from the beginning of the start block
-        let start_offset = if start_block_idx < segment.blocks.len() {
+        let block_offset = if start_block_idx < segment.blocks.len() {
             segment.blocks[start_block_idx].file_offset as usize
         } else {
             4 // Just after magic number
         };
+        let start_offset = start_ns
+            .and_then(|start| find_start_metrics_offset(segment, start))
+            .map(|offset| offset as usize)
+            .unwrap_or(block_offset);
 
         let mut events = Vec::new();
         let mut cursor = Cursor::new(&mmap[start_offset..]);

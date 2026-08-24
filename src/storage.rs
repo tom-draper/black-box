@@ -40,6 +40,13 @@ pub struct BlockIndex {
     pub event_count: u32,
 }
 
+/// Offset of a SystemMetrics record, normally emitted once per second.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetricsIndex {
+    pub file_offset: u64,
+    pub timestamp_ns: i128,
+}
+
 /// Segment metadata with sparse block index
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SegmentIndex {
@@ -49,5 +56,6 @@ pub struct SegmentIndex {
     pub last_timestamp_ns: i128,
     pub file_size: u64,
     pub blocks: Vec<BlockIndex>,
+    #[serde(default)]
+    pub metrics: Vec<MetricsIndex>,
 }
-

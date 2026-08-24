@@ -1,11 +1,12 @@
 use anyhow::{Context, Result};
 use std::{
     fs::{self, File},
-    io::{Read, Seek, SeekFrom},
+    io::Read,
     path::{Path, PathBuf},
 };
 
-use crate::storage::{find_segment_files, BlockIndex, RecordHeader, SegmentIndex, BLOCK_SIZE, MAGIC};
+use crate::event::Event;
+use crate::storage::{find_segment_files, BlockIndex, MetricsIndex, RecordHeader, SegmentIndex, BLOCK_SIZE, MAGIC};
 
 /// Builds an in-memory index of all segments
 pub struct IndexBuilder {
@@ -98,6 +99,7 @@ impl IndexBuilder {
         }
 
         let mut blocks = Vec::new();
+        let mut metrics = Vec::new();
         let mut first_timestamp_ns = None;
         let mut last_timestamp_ns = 0i128;
         let mut current_offset = 4u64; // After magic number
@@ -123,8 +125,18 @@ impl IndexBuilder {
             }
             last_timestamp_ns = header.timestamp_unix_ns;
 
-            // Skip payload
-            file.seek(SeekFrom::Current(header.payload_len as i64))?;
+            let mut payload = vec![0; header.payload_len as usize];
+            match file.read_exact(&mut payload) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                Err(e) => return Err(e.into()),
+            }
+            if matches!(bincode::deserialize::<Event>(&payload), Ok(Event::SystemMetrics(_))) {
+                metrics.push(MetricsIndex {
+                    file_offset: record_offset,
+                    timestamp_ns: header.timestamp_unix_ns,
+                });
+            }
 
             block_event_count += 1;
             if block_first_timestamp.is_none() {
@@ -168,6 +180,7 @@ impl IndexBuilder {
             last_timestamp_ns,
             file_size,
             blocks,
+            metrics,
         })
     }
 }
@@ -200,5 +213,39 @@ pub fn find_start_block(segment: &SegmentIndex, start_ns: i128) -> usize {
     match segment.blocks.binary_search_by_key(&start_ns, |b| b.timestamp_ns) {
         Ok(idx) => idx,
         Err(idx) => idx.saturating_sub(1), // Start from previous block
+    }
+}
+
+/// Find the metrics checkpoint at or immediately before the requested time.
+pub fn find_start_metrics_offset(segment: &SegmentIndex, start_ns: i128) -> Option<u64> {
+    match segment.metrics.binary_search_by_key(&start_ns, |metric| metric.timestamp_ns) {
+        Ok(index) => Some(segment.metrics[index].file_offset),
+        Err(0) => None,
+        Err(index) => segment.metrics.get(index - 1).map(|metric| metric.file_offset),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selects_the_metrics_checkpoint_before_the_requested_time() {
+        let segment = SegmentIndex {
+            segment_id: 0,
+            file_path: PathBuf::from("segment_00000.dat"),
+            first_timestamp_ns: 10,
+            last_timestamp_ns: 30,
+            file_size: 100,
+            blocks: vec![],
+            metrics: vec![
+                MetricsIndex { file_offset: 10, timestamp_ns: 10 },
+                MetricsIndex { file_offset: 20, timestamp_ns: 20 },
+                MetricsIndex { file_offset: 30, timestamp_ns: 30 },
+            ],
+        };
+
+        assert_eq!(find_start_metrics_offset(&segment, 25), Some(20));
+        assert_eq!(find_start_metrics_offset(&segment, 5), None);
     }
 }
